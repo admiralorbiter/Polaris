@@ -1,25 +1,6 @@
-# Flask Login Starter
+# Polaris
 
-A modern, secure Flask starter application with built-in authentication, SQLAlchemy integration, and a clean, responsive UI.
-
-## Features
-
-- User authentication system with Flask-Login
-- SQLAlchemy database integration
-- Secure password hashing
-- Responsive Bootstrap 5 UI
-- Form validation with WTForms
-- Flash message support
-- Testing setup with pytest
-- Development and Production configurations
-- Environment variable support
-- Custom error handling
-- Modern CSS with CSS variables
-
-## Prerequisites
-
-- Python 3.x
-- pip (Python package manager)
+Make Volunteers your north Star
 
 ## Installation
 
@@ -84,49 +65,3 @@ For coverage report:
 ```bash
 pytest --cov=app
 ```
-
-## Project Structure
-flask-login-starter/
-├── app.py # Application entry point
-├── config.py # Configuration settings
-├── models.py # Database models
-├── forms.py # Form definitions
-├── routes.py # Route handlers
-├── requirements.txt # Project dependencies
-├── static/
-│ └── css/ # CSS stylesheets
-├── templates/
-│ ├── base.html # Base template
-│ ├── login.html # Login page
-│ └── index.html # Home page
-└── tests/ # Test directory
-```
-
-## Configuration
-
-The application supports three environments:
-- Development (default)
-- Testing
-- Production
-
-Configuration is handled in `config.py` and can be extended based on requirements.
-
-## Security Features
-
-- Password hashing using Werkzeug
-- CSRF protection with Flask-WTF
-- Secure session handling
-- Environment-based configurations
-- SQL injection prevention through SQLAlchemy
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.

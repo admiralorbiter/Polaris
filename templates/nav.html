@@ -7,13 +7,14 @@
       <div class="collapse navbar-collapse" id="navbarNav">
         <ul class="navbar-nav ms-auto">
           {% if current_user.is_authenticated %}
-            {% if current_user.is_admin %}
+            {% if current_user.is_super_admin %}
               <li class="nav-item dropdown">
                 <a class="nav-link dropdown-toggle" href="#" id="adminDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                   Admin
                 </a>
                 <ul class="dropdown-menu">
                   <li><a class="dropdown-item" href="{{ url_for('admin_dashboard') }}">Dashboard</a></li>
+                  <li><a class="dropdown-item" href="{{ url_for('admin_organizations') }}">Organizations</a></li>
                   <li><a class="dropdown-item" href="{{ url_for('admin_users') }}">Manage Users</a></li>
                   <li><a class="dropdown-item" href="{{ url_for('admin_logs') }}">View Logs</a></li>
                 </ul>

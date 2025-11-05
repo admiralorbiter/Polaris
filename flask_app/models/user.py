@@ -16,8 +16,15 @@ class User(BaseModel, UserMixin):
     first_name = db.Column(db.String(64))
     last_name = db.Column(db.String(64))
     is_active = db.Column(db.Boolean, default=True, nullable=False)
-    is_admin = db.Column(db.Boolean, default=False, nullable=False)
+    is_super_admin = db.Column(db.Boolean, default=False, nullable=False)  # System-wide admin
     last_login = db.Column(db.DateTime)
+    
+    # Relationships
+    user_organizations = db.relationship(
+        'UserOrganization',
+        back_populates='user',
+        cascade='all, delete-orphan'
+    )
     
     def __repr__(self):
         return f'<User {self.username}>'

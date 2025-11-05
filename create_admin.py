@@ -30,32 +30,25 @@ def create_admin():
             print('Error: Password cannot be empty.')
             sys.exit(1)
 
-        new_admin = User(
-            username=username,
-            email=email,
-            password_hash=generate_password_hash(password),
-            is_active=True,
-            is_admin=True
-        )
-
         # Use the safe_create method from BaseModel
         admin_user, error = User.safe_create(
             username=username,
             email=email,
             password_hash=generate_password_hash(password),
             is_active=True,
-            is_admin=True
+            is_super_admin=True
         )
         
         if error:
             print(f'Error creating admin account: {error}')
             sys.exit(1)
         else:
-            print('✅ Admin account created successfully!')
+            print('✅ Super admin account created successfully!')
             print(f'   Username: {admin_user.username}')
             print(f'   Email: {admin_user.email}')
-            print(f'   Admin: {admin_user.is_admin}')
+            print(f'   Super Admin: {admin_user.is_super_admin}')
             print(f'   Active: {admin_user.is_active}')
+            print('\nNote: Super admins have full access to all organizations and system features.')
 
 if __name__ == '__main__':
     create_admin()

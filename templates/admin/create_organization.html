@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block title %}Create New Organization{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="admin-container">
+    <div class="admin-header">
+        <h1>Create New Organization</h1>
+        <a href="{{ url_for('admin_organizations') }}" class="btn btn-secondary">
+            <i class="fas fa-arrow-left"></i> Back to Organizations
+        </a>
+    </div>
+
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Organization Information</h5>
+                </div>
+                <div class="card-body">
+                    <form method="POST">
+                        {{ form.hidden_tag() }}
+                        
+                        <div class="form-group">
+                            {{ form.name.label(class="form-label") }}
+                            {{ form.name(class="form-control" + (" is-invalid" if form.name.errors else "")) }}
+                            {% if form.name.errors %}
+                                <div class="invalid-feedback">
+                                    {% for error in form.name.errors %}
+                                        {{ error }}
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        </div>
+
+                        <div class="form-group">
+                            {{ form.slug.label(class="form-label") }}
+                            {{ form.slug(class="form-control" + (" is-invalid" if form.slug.errors else "")) }}
+                            {% if form.slug.errors %}
+                                <div class="invalid-feedback">
+                                    {% for error in form.slug.errors %}
+                                        {{ error }}
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                            <small class="form-text text-muted">
+                                URL-friendly identifier (lowercase letters, numbers, and hyphens only)
+                            </small>
+                        </div>
+
+                        <div class="form-group">
+                            {{ form.description.label(class="form-label") }}
+                            {{ form.description(class="form-control" + (" is-invalid" if form.description.errors else "")) }}
+                            {% if form.description.errors %}
+                                <div class="invalid-feedback">
+                                    {% for error in form.description.errors %}
+                                        {{ error }}
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        </div>
+
+                        <div class="form-group">
+                            <div class="form-check">
+                                {{ form.is_active(class="form-check-input") }}
+                                {{ form.is_active.label(class="form-check-label") }}
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-building"></i> Create Organization
+                            </button>
+                            <a href="{{ url_for('admin_organizations') }}" class="btn btn-secondary">Cancel</a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+<script>
+    // Auto-generate slug from name
+    document.addEventListener('DOMContentLoaded', function() {
+        const nameField = document.getElementById('name');
+        const slugField = document.getElementById('slug');
+        
+        if (nameField && slugField) {
+            nameField.addEventListener('input', function() {
+                if (!slugField.dataset.manualEdit) {
+                    const name = nameField.value;
+                    const slug = name.toLowerCase()
+                        .replace(/[_\s]+/g, '-')
+                        .replace(/[^a-z0-9\-]/g, '')
+                        .replace(/-+/g, '-')
+                        .replace(/^-|-$/g, '');
+                    slugField.value = slug;
+                }
+            });
+            
+            slugField.addEventListener('input', function() {
+                slugField.dataset.manualEdit = 'true';
+            });
+        }
+    });
+</script>
+{% endblock %}
+

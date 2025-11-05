@@ -3,8 +3,9 @@
 from flask_wtf import FlaskForm
 from flask_wtf.file import FileField, FileAllowed
 from wtforms import StringField, PasswordField, SubmitField, BooleanField, TextAreaField, SelectField
-from wtforms.validators import DataRequired, Length, Email, ValidationError, EqualTo
+from wtforms.validators import DataRequired, Length, Email, ValidationError, EqualTo, Optional
 from flask_app.models import User
+from flask_login import current_user
 import re
 
 class CreateUserForm(FlaskForm):
@@ -53,8 +54,31 @@ class CreateUserForm(FlaskForm):
         render_kw={"placeholder": "Confirm password"}
     )
     is_active = BooleanField('Active User', default=True)
-    is_admin = BooleanField('Admin User', default=False)
+    is_super_admin = BooleanField('Super Admin', default=False)
+    organization_search = SelectField(
+        'Organization',
+        validators=[Optional()],
+        choices=[],  # Empty choices - will be populated by Select2 via AJAX
+        coerce=int,
+        validate_choice=False  # Skip choice validation since we use AJAX
+    )
+    role_id = SelectField(
+        'Role',
+        validators=[Optional()],
+        choices=[],
+        coerce=int
+    )
     submit = SubmitField('Create User')
+    
+    def __init__(self, *args, **kwargs):
+        super(CreateUserForm, self).__init__(*args, **kwargs)
+        # Populate role choices (organization uses autocomplete)
+        from flask_app.models import Role
+        
+        if current_user.is_authenticated:
+            # Populate role choices
+            roles = Role.query.filter_by(is_system_role=True).all()
+            self.role_id.choices = [(0, '-- Select Role --')] + [(role.id, role.display_name) for role in roles]
     
     def validate_username(self, field):
         """Custom validation for username"""
@@ -92,6 +116,12 @@ class CreateUserForm(FlaskForm):
                 raise ValidationError('Password must contain at least one lowercase letter.')
             if not re.search(r'\d', field.data):
                 raise ValidationError('Password must contain at least one digit.')
+    
+    def validate_role_id(self, field):
+        """Validate role selection"""
+        # Role validation will be handled in the route handler
+        # since organization_id is now passed via request.form
+        pass
 
 class UpdateUserForm(FlaskForm):
     """Form for updating user information"""
@@ -123,12 +153,34 @@ class UpdateUserForm(FlaskForm):
         render_kw={"placeholder": "Enter last name"}
     )
     is_active = BooleanField('Active User')
-    is_admin = BooleanField('Admin User')
+    is_super_admin = BooleanField('Super Admin')
+    organization_search = SelectField(
+        'Organization',
+        validators=[Optional()],
+        choices=[],  # Empty choices - will be populated by Select2 via AJAX
+        coerce=int,
+        validate_choice=False  # Skip choice validation since we use AJAX
+    )
+    role_id = SelectField(
+        'Role',
+        validators=[Optional()],
+        choices=[],
+        coerce=int
+    )
     submit = SubmitField('Update User')
     
     def __init__(self, user=None, *args, **kwargs):
         super(UpdateUserForm, self).__init__(*args, **kwargs)
         self.user = user
+        
+        # Populate organization choices based on current user
+        from flask_app.models import Organization, Role
+        from flask_app.utils.permissions import get_user_organizations
+        
+        if current_user.is_authenticated:
+            # Populate role choices (organization uses autocomplete via Select2)
+            roles = Role.query.filter_by(is_system_role=True).all()
+            self.role_id.choices = [(0, '-- Select Role --')] + [(role.id, role.display_name) for role in roles]
     
     def validate_username(self, field):
         """Custom validation for username"""

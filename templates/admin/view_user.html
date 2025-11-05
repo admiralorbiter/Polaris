@@ -53,11 +53,11 @@
                                 {% endif %}
                             </div>
                             <div class="info-item">
-                                <label>Role:</label>
-                                {% if user.is_admin %}
-                                    <span class="badge badge-warning">Admin</span>
+                                <label>Account Type:</label>
+                                {% if user.is_super_admin %}
+                                    <span class="badge badge-warning">Super Admin</span>
                                 {% else %}
-                                    <span class="badge badge-info">User</span>
+                                    <span class="badge badge-info">Regular User</span>
                                 {% endif %}
                             </div>
                             <div class="info-item">
@@ -87,6 +87,42 @@
                             </div>
                         </div>
                     </div>
+                    
+                    {% if not user.is_super_admin and user.user_organizations %}
+                    <div class="row mt-4">
+                        <div class="col-12">
+                            <h6 class="mb-3">Organization Memberships</h6>
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Organization</th>
+                                            <th>Role</th>
+                                            <th>Status</th>
+                                            <th>Joined</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for user_org in user.user_organizations %}
+                                        <tr>
+                                            <td>{{ user_org.organization.name }}</td>
+                                            <td><span class="badge badge-info">{{ user_org.role.display_name }}</span></td>
+                                            <td>
+                                                {% if user_org.is_active %}
+                                                    <span class="badge badge-success">Active</span>
+                                                {% else %}
+                                                    <span class="badge badge-secondary">Inactive</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>{{ user_org.created_at.strftime('%Y-%m-%d') }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
                 </div>
             </div>
         </div>

@@ -1,5 +1,48 @@
 /* Admin Dashboard Styles */
 
+/* Organization Selection UI Enhancements */
+.select2-container--bootstrap-5 .select2-results__option {
+    padding: 0.75rem;
+}
+
+.select2-container--bootstrap-5 .select2-results__option--highlighted {
+    background-color: #f8f9fa;
+}
+
+.select2-container--bootstrap-5 .select2-results__option[aria-selected="true"] {
+    background-color: #e7f3ff;
+    color: #0d6efd;
+}
+
+.select2-container--bootstrap-5 .select2-selection--single {
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+}
+
+.select2-container--bootstrap-5 .select2-selection__rendered {
+    line-height: 38px;
+}
+
+#org-selected-badge, #org-selected-badge-edit {
+    animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-5px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+#org-loading-spinner, #org-loading-spinner-edit {
+    pointer-events: none;
+}
+
 .admin-container {
     max-width: 1200px;
     margin: 0 auto;

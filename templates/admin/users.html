@@ -25,7 +25,8 @@
                     <th>Email</th>
                     <th>Full Name</th>
                     <th>Status</th>
-                    <th>Role</th>
+                    <th>Account Type</th>
+                    <th>Organization/Role</th>
                     <th>Last Login</th>
                     <th>Created</th>
                     <th>Actions</th>
@@ -50,10 +51,26 @@
                         {% endif %}
                     </td>
                     <td>
-                        {% if user.is_admin %}
-                            <span class="badge badge-warning">Admin</span>
+                        {% if user.is_super_admin %}
+                            <span class="badge badge-warning">Super Admin</span>
                         {% else %}
-                            <span class="badge badge-info">User</span>
+                            <span class="badge badge-info">Regular User</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if user.is_super_admin %}
+                            <span class="text-muted">System-wide access</span>
+                        {% elif user.user_organizations %}
+                            {% for user_org in user.user_organizations %}
+                                {% if user_org.is_active %}
+                                    <div>
+                                        <strong>{{ user_org.organization.name }}</strong>
+                                        <span class="badge badge-secondary ml-1">{{ user_org.role.display_name }}</span>
+                                    </div>
+                                {% endif %}
+                            {% endfor %}
+                        {% else %}
+                            <span class="text-muted">No organizations</span>
                         {% endif %}
                     </td>
                     <td>

@@ -4,6 +4,9 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+<link href="{{ url_for('static', filename='css/select2.min.css') }}" rel="stylesheet" />
+<link href="{{ url_for('static', filename='css/select2-bootstrap-5-theme.css') }}" rel="stylesheet" />
 {% endblock %}
 
 {% block content %}
@@ -94,15 +97,105 @@
                                     </div>
                                 </div>
                             </div>
+                            {% if current_user.is_super_admin %}
                             <div class="col-md-6">
                                 <div class="form-group">
                                     <div class="form-check">
-                                        {{ form.is_admin(class="form-check-input") }}
-                                        {{ form.is_admin.label(class="form-check-label") }}
+                                        {{ form.is_super_admin(class="form-check-input") }}
+                                        {{ form.is_super_admin.label(class="form-check-label") }}
                                     </div>
+                                    <small class="form-text text-muted">Super admins have full system access</small>
+                                </div>
+                            </div>
+                            {% endif %}
+                        </div>
+
+                        {% if not user.is_super_admin %}
+                        <div class="row">
+                            <div class="col-12">
+                                <h6 class="mt-3 mb-3">Organization Memberships</h6>
+                                {% if user.user_organizations %}
+                                <div class="table-responsive">
+                                    <table class="table table-sm">
+                                        <thead>
+                                            <tr>
+                                                <th>Organization</th>
+                                                <th>Role</th>
+                                                <th>Status</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for user_org in user.user_organizations %}
+                                            <tr>
+                                                <td>{{ user_org.organization.name }}</td>
+                                                <td><span class="badge badge-info">{{ user_org.role.display_name }}</span></td>
+                                                <td>
+                                                    {% if user_org.is_active %}
+                                                        <span class="badge badge-success">Active</span>
+                                                    {% else %}
+                                                        <span class="badge badge-secondary">Inactive</span>
+                                                    {% endif %}
+                                                </td>
+                                                <td>
+                                                    <a href="{{ url_for('admin_view_user', user_id=user.id) }}" class="btn btn-sm btn-secondary">View</a>
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {% else %}
+                                <p class="text-muted">No organization memberships</p>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <div class="row mt-3" id="add-org-section">
+                            <div class="col-12">
+                                <h6 class="mb-3">Add to Organization</h6>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="organization_search_edit" class="form-label">
+                                        {{ form.organization_search.label.text }}
+                                        <span class="badge bg-success ms-2 d-none" id="org-selected-badge-edit">
+                                            <i class="fas fa-check"></i> Selected
+                                        </span>
+                                    </label>
+                                    <div class="position-relative">
+                                        <select id="organization_search_edit" name="organization_search" class="form-control">
+                                            <option value="">Type to search organizations...</option>
+                                        </select>
+                                        <div class="spinner-border spinner-border-sm text-primary position-absolute d-none" id="org-loading-spinner-edit" role="status" style="right: 35px; top: 50%; transform: translateY(-50%); z-index: 10;">
+                                            <span class="visually-hidden">Loading...</span>
+                                        </div>
+                                    </div>
+                                    <input type="hidden" id="organization_id_edit" name="organization_id" value="">
+                                    {% if form.organization_search.errors %}
+                                        <div class="invalid-feedback d-block">
+                                            {% for error in form.organization_search.errors %}
+                                                {{ error }}
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    {{ form.role_id.label(class="form-label") }}
+                                    {{ form.role_id(class="form-control" + (" is-invalid" if form.role_id.errors else "")) }}
+                                    {% if form.role_id.errors %}
+                                        <div class="invalid-feedback">
+                                            {% for error in form.role_id.errors %}
+                                                {{ error }}
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
                                 </div>
                             </div>
                         </div>
+                        {% endif %}
 
                         <div class="form-group">
                             <button type="submit" class="btn btn-primary">
@@ -116,8 +209,344 @@
         </div>
     </div>
 </div>
+
+<!-- Toast Container for Notifications -->
+<div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1055;">
+    <div id="toast-success-edit" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+        <div class="toast-header bg-success text-white">
+            <i class="fas fa-check-circle me-2"></i>
+            <strong class="me-auto">Success</strong>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+        <div class="toast-body" id="toast-success-body-edit"></div>
+    </div>
+    <div id="toast-error-edit" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+        <div class="toast-header bg-danger text-white">
+            <i class="fas fa-exclamation-circle me-2"></i>
+            <strong class="me-auto">Error</strong>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+        <div class="toast-body" id="toast-error-body-edit"></div>
+    </div>
+</div>
+
+<!-- Create Organization Modal -->
+<div class="modal fade" id="createOrgModalEdit" tabindex="-1" aria-labelledby="createOrgModalEditLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="createOrgModalEditLabel">
+                    <i class="fas fa-plus-circle me-2"></i>Create New Organization
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="createOrgFormEdit">
+                    <div class="mb-3">
+                        <label for="newOrgNameEdit" class="form-label">Organization Name <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="newOrgNameEdit" required autocomplete="off">
+                        <small class="form-text text-muted">This will be used as the organization's display name.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label for="newOrgDescriptionEdit" class="form-label">Description <span class="text-muted">(Optional)</span></label>
+                        <textarea class="form-control" id="newOrgDescriptionEdit" rows="3" placeholder="Enter a brief description of the organization"></textarea>
+                    </div>
+                    <div class="alert alert-info mb-0">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <strong>Note:</strong> A URL-friendly slug will be automatically generated from the organization name.
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="fas fa-times me-1"></i>Cancel
+                </button>
+                <button type="button" class="btn btn-primary" id="createOrgBtnEdit">
+                    <span class="spinner-border spinner-border-sm d-none me-2" id="createOrgSpinnerEdit" role="status" aria-hidden="true"></span>
+                    <i class="fas fa-plus me-1" id="createOrgIconEdit"></i>Create Organization
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+<!-- Load jQuery first (required by Select2) -->
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<!-- Load Select2 from static files -->
+<script src="{{ url_for('static', filename='js/select2.min.js') }}"></script>
+<script>
+    $(document).ready(function() {
+        const organizationSearchField = $('#organization_search_edit');
+        const organizationIdField = $('#organization_id_edit');
+        
+        // Helper function to show toast notifications
+        function showToast(type, message) {
+            const toastId = type === 'success' ? 'toast-success-edit' : 'toast-error-edit';
+            const bodyId = type === 'success' ? 'toast-success-body-edit' : 'toast-error-body-edit';
+            const toastElement = document.getElementById(toastId);
+            const toastBody = document.getElementById(bodyId);
+            
+            toastBody.textContent = message;
+            const toast = new bootstrap.Toast(toastElement, { autohide: true, delay: 5000 });
+            toast.show();
+        }
+        
+        // Initialize Select2 for organization search with ability to create new
+        if (organizationSearchField.length) {
+            // Make sure Select2 isn't already initialized
+            if (organizationSearchField.hasClass('select2-hidden-accessible')) {
+                organizationSearchField.select2('destroy');
+            }
+            
+            var select2Config = {
+                theme: 'bootstrap-5',
+                placeholder: 'Type to search organizations...',
+                allowClear: true,
+                minimumInputLength: 1,
+                width: '100%',
+                tags: false,
+                templateResult: function(data) {
+                    if (!data.id) {
+                        return data.text;
+                    }
+                    
+                    if (data.id.toString().startsWith('new:')) {
+                        // Style for "create new" option
+                        var $result = $(
+                            '<span class="text-primary"><i class="fas fa-plus-circle me-2"></i><strong>' + 
+                            data.text.replace(' (Create new organization)', '') + 
+                            '</strong> <span class="badge bg-info ms-2">Create New</span></span>'
+                        );
+                        return $result;
+                    }
+                    
+                    // Style for existing organizations
+                    var orgName = data.text.split(' (')[0];
+                    var orgSlug = data.text.includes('(') ? data.text.match(/\(([^)]+)\)/)[1] : '';
+                    var $result = $(
+                        '<div class="d-flex align-items-center">' +
+                        '<i class="fas fa-building me-2 text-muted"></i>' +
+                        '<div class="flex-grow-1">' +
+                        '<div class="fw-semibold">' + orgName + '</div>' +
+                        (orgSlug ? '<small class="text-muted">' + orgSlug + '</small>' : '') +
+                        '</div>' +
+                        '</div>'
+                    );
+                    return $result;
+                },
+                templateSelection: function(data) {
+                    if (!data.id) {
+                        return data.text;
+                    }
+                    if (data.id.toString().startsWith('new:')) {
+                        return data.text.replace(' (Create new organization)', '');
+                    }
+                    // Show just the name for selected item
+                    return data.text.split(' (')[0];
+                },
+                ajax: {
+                    url: '/api/organizations/search',
+                    dataType: 'json',
+                    delay: 250,
+                    data: function (params) {
+                        // Show loading spinner
+                        $('#org-loading-spinner-edit').removeClass('d-none');
+                        return {
+                            q: params.term || '',
+                            page: params.page || 1
+                        };
+                    },
+                    processResults: function (data, params) {
+                        // Hide loading spinner
+                        $('#org-loading-spinner-edit').addClass('d-none');
+                        
+                        if (!data || !data.results) {
+                            return { results: [] };
+                        }
+                        var results = data.results.map(function(org) {
+                            return {
+                                id: org.id,
+                                text: org.text || (org.name + ' (' + org.slug + ')'),
+                                name: org.name,
+                                slug: org.slug
+                            };
+                        });
+                        
+                        var searchTerm = params.term || '';
+                        if (results.length === 0 && searchTerm.length > 0) {
+                            results.push({
+                                id: 'new:' + searchTerm,
+                                text: searchTerm + ' (Create new organization)',
+                                isNew: true
+                            });
+                        }
+                        
+                        return { results: results };
+                    },
+                    error: function(xhr, status, error) {
+                        $('#org-loading-spinner-edit').addClass('d-none');
+                        console.error('Select2 AJAX error:', status, error);
+                        showToast('error', 'Error searching organizations. Please try again.');
+                    },
+                    cache: true
+                },
+                language: {
+                    noResults: function(params) {
+                        return 'No organizations found. Click "Create New" to add "' + params.term + '"';
+                    },
+                    searching: function() {
+                        return 'Searching...';
+                    },
+                    inputTooShort: function() {
+                        return 'Type at least 1 character to search';
+                    }
+                }
+            };
+            
+            organizationSearchField.select2(select2Config);
+            
+            // Set up event handlers
+            organizationSearchField.on('select2:selecting', function (e) {
+                var data = e.params.args.data;
+                if (data && data.id && data.id.toString().startsWith('new:')) {
+                    e.preventDefault();
+                    var orgName = data.id.toString().replace('new:', '');
+                    
+                    // Show modal for creating new organization
+                    $('#newOrgNameEdit').val(orgName);
+                    $('#newOrgDescriptionEdit').val('');
+                    const createOrgModal = new bootstrap.Modal(document.getElementById('createOrgModalEdit'));
+                    createOrgModal.show();
+                    
+                    // Store reference to select field for after creation
+                    $('#createOrgModalEdit').data('selectField', organizationSearchField);
+                    $('#createOrgModalEdit').data('hiddenField', organizationIdField);
+                    
+                    // Clear the selection
+                    organizationSearchField.val(null).trigger('change');
+                    return false;
+                }
+            }).on('select2:select', function (e) {
+                const data = e.params.data;
+                if (data && data.id && !data.id.toString().startsWith('new:')) {
+                    organizationIdField.val(data.id);
+                    organizationSearchField.val(data.id).trigger('change');
+                    // Show selected badge
+                    $('#org-selected-badge-edit').removeClass('d-none');
+                    showToast('success', 'Organization "' + (data.name || data.text.split(' (')[0]) + '" selected');
+                }
+            }).on('select2:clear', function (e) {
+                organizationIdField.val('');
+                $('#org-selected-badge-edit').addClass('d-none');
+            });
+        }
+        
+        // Function to create new organization
+        function createNewOrganization(orgName, orgDescription, selectField, hiddenField) {
+            // Show loading state
+            $('#createOrgSpinnerEdit').removeClass('d-none');
+            $('#createOrgIconEdit').addClass('d-none');
+            $('#createOrgBtnEdit').prop('disabled', true);
+            
+            $.ajax({
+                url: '/api/organizations/create',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ 
+                    name: orgName,
+                    description: orgDescription || null
+                }),
+                success: function(response) {
+                    // Hide loading state
+                    $('#createOrgSpinnerEdit').removeClass('d-none');
+                    $('#createOrgIconEdit').removeClass('d-none');
+                    $('#createOrgBtnEdit').prop('disabled', false);
+                    
+                    if (response.success && response.organization) {
+                        // Close modal
+                        const modal = bootstrap.Modal.getInstance(document.getElementById('createOrgModalEdit'));
+                        modal.hide();
+                        
+                        // Set the newly created organization
+                        hiddenField.val(response.organization.id);
+                        
+                        // Create a new option and select it
+                        var newOption = new Option(
+                            response.organization.name + ' (' + response.organization.slug + ')',
+                            response.organization.id,
+                            true,
+                            true
+                        );
+                        selectField.append(newOption).trigger('change');
+                        
+                        // Show selected badge
+                        $('#org-selected-badge-edit').removeClass('d-none');
+                        
+                        // Show success message
+                        showToast('success', 'Organization "' + response.organization.name + '" created and selected successfully!');
+                        
+                        // Clear modal form
+                        $('#newOrgNameEdit').val('');
+                        $('#newOrgDescriptionEdit').val('');
+                    } else {
+                        showToast('error', 'Error creating organization: ' + (response.error || 'Unknown error'));
+                    }
+                },
+                error: function(xhr, status, error) {
+                    // Hide loading state
+                    $('#createOrgSpinnerEdit').addClass('d-none');
+                    $('#createOrgIconEdit').removeClass('d-none');
+                    $('#createOrgBtnEdit').prop('disabled', false);
+                    
+                    var errorMsg = 'An error occurred while creating organization.';
+                    if (xhr.responseJSON && xhr.responseJSON.error) {
+                        errorMsg = xhr.responseJSON.error;
+                    } else if (xhr.status === 0) {
+                        errorMsg = 'Network error. Please check your connection and try again.';
+                    } else if (xhr.status === 403) {
+                        errorMsg = 'You do not have permission to create organizations.';
+                    } else if (xhr.status === 400) {
+                        errorMsg = xhr.responseJSON && xhr.responseJSON.error ? xhr.responseJSON.error : 'Invalid organization data. Please check the name and try again.';
+                    }
+                    
+                    console.error('Error creating organization:', status, error, xhr.responseJSON);
+                    showToast('error', errorMsg);
+                }
+            });
+        }
+        
+        // Handle modal form submission
+        $('#createOrgBtnEdit').on('click', function() {
+            const orgName = $('#newOrgNameEdit').val().trim();
+            const orgDescription = $('#newOrgDescriptionEdit').val().trim();
+            
+            if (!orgName) {
+                showToast('error', 'Organization name is required.');
+                $('#newOrgNameEdit').focus();
+                return;
+            }
+            
+            const selectField = $('#createOrgModalEdit').data('selectField');
+            const hiddenField = $('#createOrgModalEdit').data('hiddenField');
+            
+            createNewOrganization(orgName, orgDescription, selectField, hiddenField);
+        });
+        
+        // Clear modal data when closed
+        $('#createOrgModalEdit').on('hidden.bs.modal', function() {
+            $('#newOrgNameEdit').val('');
+            $('#newOrgDescriptionEdit').val('');
+            $('#createOrgModalEdit').removeData('selectField');
+            $('#createOrgModalEdit').removeData('hiddenField');
+        });
+        
+        // Check if Select2 loaded, show error if not
+        if (typeof $.fn.select2 === 'undefined') {
+            console.error('Select2 failed to load');
+            showToast('error', 'Select2 library failed to load. Please refresh the page.');
+        }
+    });
+</script>
 {% endblock %}

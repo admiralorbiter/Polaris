@@ -13,6 +13,7 @@ from flask_app.routes import init_routes
 from flask_app.utils.logging_config import setup_logging
 from flask_app.utils.error_handler import init_error_alerting
 from flask_app.utils.monitoring import init_monitoring
+from flask_app.middleware.org_context import init_org_context_middleware
 from config import DevelopmentConfig, ProductionConfig, TestingConfig
 from config.monitoring import DevelopmentMonitoringConfig, ProductionMonitoringConfig, TestingMonitoringConfig
 
@@ -42,6 +43,9 @@ app.extensions['login_manager'] = login_manager
 setup_logging(app)
 init_error_alerting(app)
 init_monitoring(app)
+
+# Initialize organization context middleware
+init_org_context_middleware(app)
 
 # Create the database tables
 with app.app_context():
