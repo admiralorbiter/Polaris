@@ -1,0 +1,72 @@
+.login-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: calc(100vh - 100px); /* Adjust based on your navbar height */
+}
+
+.login-box {
+    background-color: white;
+    padding: 2rem;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    width: 100%;
+    max-width: 400px;
+}
+
+.login-title {
+    color: var(--dark-purple);
+    text-align: center;
+    margin-bottom: 1.5rem;
+    font-weight: bold;
+}
+
+.form-group {
+    margin-bottom: 1.5rem;
+}
+
+.form-label {
+    color: var(--dark-purple);
+    font-weight: 500;
+}
+
+.form-control {
+    border: 2px solid var(--eggplant);
+    border-radius: 4px;
+    padding: 0.75rem;
+}
+
+.form-control:focus {
+    border-color: var(--redwood);
+    box-shadow: 0 0 0 0.2rem rgba(183, 93, 105, 0.25);
+}
+
+.login-btn {
+    background-color: var(--dark-purple);
+    border: none;
+    color: var(--pale-dogwood);
+    padding: 0.75rem 1.5rem;
+    width: 100%;
+    font-weight: 500;
+    transition: background-color 0.3s ease;
+}
+
+.login-btn:hover {
+    background-color: var(--eggplant);
+    color: var(--pale-dogwood);
+}
+
+.alert {
+    margin-top: 1rem;
+    border: none;
+}
+
+.alert-danger {
+    background-color: rgba(183, 93, 105, 0.1);
+    color: var(--redwood);
+}
+
+.alert-success {
+    background-color: rgba(55, 37, 73, 0.1);
+    color: var(--dark-purple);
+} 
