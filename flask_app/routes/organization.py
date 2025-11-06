@@ -83,7 +83,10 @@ def register_organization_routes(app):
     def admin_view_organization(org_id):
         """View organization details"""
         try:
-            organization = Organization.query.get_or_404(org_id)
+            organization = db.session.get(Organization, org_id)
+            if not organization:
+                from flask import abort
+                abort(404)
             
             # Get organization statistics
             from flask_app.models import User
@@ -126,7 +129,10 @@ def register_organization_routes(app):
     @super_admin_required
     def admin_edit_organization(org_id):
         """Edit organization information"""
-        organization = Organization.query.get_or_404(org_id)
+        organization = db.session.get(Organization, org_id)
+        if not organization:
+            from flask import abort
+            abort(404)
         form = UpdateOrganizationForm(organization=organization)
         
         try:
@@ -175,7 +181,10 @@ def register_organization_routes(app):
     def admin_delete_organization(org_id):
         """Delete organization"""
         try:
-            organization = Organization.query.get_or_404(org_id)
+            organization = db.session.get(Organization, org_id)
+            if not organization:
+                from flask import abort
+                abort(404)
             
             org_name = organization.name
             

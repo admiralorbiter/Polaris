@@ -1,7 +1,11 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from flask_app.forms import LoginForm, CreateUserForm, UpdateUserForm, ChangePasswordForm, BulkUserActionForm
-from flask_app.models import User
+from sqlalchemy import inspect
+from flask_app.forms import (
+    LoginForm, CreateUserForm, UpdateUserForm, ChangePasswordForm, BulkUserActionForm,
+    CreateOrganizationForm, UpdateOrganizationForm
+)
+from flask_app.models import User, Organization, db
 
 
 class TestLoginForm:
@@ -116,7 +120,7 @@ class TestCreateUserForm:
         assert form.password.data is None
         assert form.confirm_password.data is None
         assert form.is_active.data is True
-        assert form.is_admin.data is False
+        assert form.is_super_admin.data is False
     
     def test_create_user_form_valid_data(self):
         """Test create user form with valid data"""
@@ -128,7 +132,7 @@ class TestCreateUserForm:
             'password': 'SecurePass123',
             'confirm_password': 'SecurePass123',
             'is_active': True,
-            'is_admin': False
+            'is_super_admin': False
         })
         assert form.username.data == 'newuser'
         assert form.email.data == 'newuser@example.com'
@@ -137,7 +141,7 @@ class TestCreateUserForm:
         assert form.password.data == 'SecurePass123'
         assert form.confirm_password.data == 'SecurePass123'
         assert form.is_active.data is True
-        assert form.is_admin.data is False
+        assert form.is_super_admin.data is False
     
     @patch('flask_app.models.User.find_by_username')
     def test_create_user_form_validation_success(self, mock_find_username):
@@ -155,7 +159,7 @@ class TestCreateUserForm:
                 'password': 'SecurePass123',
                 'confirm_password': 'SecurePass123',
                 'is_active': True,
-                'is_admin': False
+                'is_super_admin': False
             })
             assert form.validate() is True
     
@@ -338,14 +342,14 @@ class TestUpdateUserForm:
             'first_name': 'Updated',
             'last_name': 'User',
             'is_active': True,
-            'is_admin': False
+            'is_super_admin': False
         })
         assert form.username.data == 'updateduser'
         assert form.email.data == 'updated@example.com'
         assert form.first_name.data == 'Updated'
         assert form.last_name.data == 'User'
         assert form.is_active.data is True
-        assert form.is_admin.data is False
+        assert form.is_super_admin.data is False
     
     @patch('flask_app.models.User.find_by_username')
     def test_update_user_form_validation_success(self, mock_find_username):
@@ -364,7 +368,7 @@ class TestUpdateUserForm:
                 'first_name': 'Updated',
                 'last_name': 'User',
                 'is_active': True,
-                'is_admin': False
+                'is_super_admin': False
             })
             assert form.validate() is True
     
@@ -382,7 +386,7 @@ class TestUpdateUserForm:
                 'username': 'existinguser',
                 'email': 'updated@example.com',
                 'is_active': True,
-                'is_admin': False
+                'is_super_admin': False
             })
             assert form.validate() is True
     
@@ -400,7 +404,7 @@ class TestUpdateUserForm:
             'username': 'existinguser',
             'email': 'updated@example.com',
             'is_active': True,
-            'is_admin': False
+            'is_super_admin': False
         })
         assert form.validate() is False
         assert 'username' in form.errors
@@ -420,7 +424,7 @@ class TestUpdateUserForm:
                 'username': 'updateduser',
                 'email': 'existing@example.com',
                 'is_active': True,
-                'is_admin': False
+                'is_super_admin': False
             })
             assert form.validate() is True
     
@@ -438,7 +442,7 @@ class TestUpdateUserForm:
             'username': 'updateduser',
             'email': 'existing@example.com',
             'is_active': True,
-            'is_admin': False
+            'is_super_admin': False
         })
         assert form.validate() is False
         assert 'email' in form.errors
@@ -631,3 +635,249 @@ class TestBulkUserActionForm:
         })
         assert form.validate() is True
         assert form.user_ids_list == [1, 2, 3]
+
+
+class TestCreateOrganizationForm:
+    """Test CreateOrganizationForm functionality"""
+    
+    def test_create_organization_form_creation(self):
+        """Test creating a create organization form"""
+        form = CreateOrganizationForm()
+        assert form.name.data is None
+        assert form.slug.data is None
+        assert form.description.data is None
+        assert form.is_active.data is True
+    
+    def test_create_organization_form_valid_data(self, app):
+        """Test create organization form with valid data"""
+        with app.app_context():
+            form = CreateOrganizationForm(data={
+                'name': 'Test Organization',
+                'slug': 'test-organization',
+                'description': 'A test organization',
+                'is_active': True
+            })
+            assert form.name.data == 'Test Organization'
+            assert form.slug.data == 'test-organization'
+            assert form.description.data == 'A test organization'
+            assert form.is_active.data is True
+    
+    def test_create_organization_form_validation_success(self, app):
+        """Test successful form validation"""
+        with app.app_context():
+            form = CreateOrganizationForm(data={
+                'name': 'Valid Organization',
+                'slug': 'valid-organization',
+                'description': 'Description',
+                'is_active': True
+            })
+            assert form.validate() is True
+    
+    def test_create_organization_form_missing_name(self):
+        """Test form validation with missing name"""
+        form = CreateOrganizationForm(data={
+            'slug': 'test-organization'
+        })
+        assert form.validate() is False
+        assert 'name' in form.errors
+    
+    def test_create_organization_form_missing_slug(self):
+        """Test form validation with missing slug"""
+        form = CreateOrganizationForm(data={
+            'name': 'Test Organization'
+        })
+        assert form.validate() is False
+        assert 'slug' in form.errors
+    
+    def test_create_organization_form_name_too_short(self):
+        """Test form validation with name too short"""
+        form = CreateOrganizationForm(data={
+            'name': 'A',  # Less than 2 characters
+            'slug': 'test-org'
+        })
+        assert form.validate() is False
+        assert 'name' in form.errors
+    
+    def test_create_organization_form_name_too_long(self):
+        """Test form validation with name too long"""
+        form = CreateOrganizationForm(data={
+            'name': 'A' * 201,  # More than 200 characters
+            'slug': 'test-org'
+        })
+        assert form.validate() is False
+        assert 'name' in form.errors
+    
+    def test_create_organization_form_slug_too_short(self):
+        """Test form validation with slug too short"""
+        form = CreateOrganizationForm(data={
+            'name': 'Test Organization',
+            'slug': 'a'  # Less than 2 characters
+        })
+        assert form.validate() is False
+        assert 'slug' in form.errors
+    
+    def test_create_organization_form_slug_invalid_characters(self, app):
+        """Test form validation with invalid slug characters"""
+        with app.app_context():
+            form = CreateOrganizationForm(data={
+                'name': 'Test Organization',
+                'slug': 'Test_Organization!'  # Invalid characters
+            })
+            assert form.validate() is False
+            assert 'slug' in form.errors
+            assert 'lowercase letters, numbers, and hyphens' in form.errors['slug'][0]
+    
+    def test_create_organization_form_duplicate_name(self, test_organization, app):
+        """Test form validation with duplicate name"""
+        with app.app_context():
+            form = CreateOrganizationForm(data={
+                'name': 'Test Organization',  # Same as test_organization
+                'slug': 'different-slug'
+            })
+            assert form.validate() is False
+            assert 'name' in form.errors
+            assert 'already exists' in form.errors['name'][0]
+    
+    def test_create_organization_form_duplicate_slug(self, test_organization, app):
+        """Test form validation with duplicate slug"""
+        with app.app_context():
+            form = CreateOrganizationForm(data={
+                'name': 'Different Name',
+                'slug': 'test-organization'  # Same as test_organization
+            })
+            assert form.validate() is False
+            assert 'slug' in form.errors
+            assert 'already exists' in form.errors['slug'][0]
+    
+    def test_create_organization_form_description_optional(self):
+        """Test that description is optional"""
+        form = CreateOrganizationForm(data={
+            'name': 'Test Organization',
+            'slug': 'test-organization'
+        })
+        assert form.validate() is True
+        assert form.description.data is None
+    
+    def test_create_organization_form_description_too_long(self, app):
+        """Test form validation with description too long"""
+        with app.app_context():
+            form = CreateOrganizationForm(data={
+                'name': 'Test Organization',
+                'slug': 'test-organization',
+                'description': 'A' * 1001  # More than 1000 characters
+            })
+            assert form.validate() is False
+            assert 'description' in form.errors
+    
+    def test_create_organization_form_name_stripping(self, app):
+        """Test that name whitespace is stripped"""
+        with app.app_context():
+            form = CreateOrganizationForm(data={
+                'name': '  Test Organization  ',
+                'slug': 'test-organization'
+            })
+            form.validate()
+            assert form.name.data == 'Test Organization'
+
+
+class TestUpdateOrganizationForm:
+    """Test UpdateOrganizationForm functionality"""
+    
+    def test_update_organization_form_creation(self, test_organization):
+        """Test creating an update organization form"""
+        form = UpdateOrganizationForm(organization=test_organization)
+        assert form.organization == test_organization
+    
+    def test_update_organization_form_valid_data(self, test_organization):
+        """Test update organization form with valid data"""
+        form = UpdateOrganizationForm(organization=test_organization, data={
+            'name': 'Updated Organization',
+            'slug': 'updated-organization',
+            'description': 'Updated description',
+            'is_active': True
+        })
+        assert form.name.data == 'Updated Organization'
+        assert form.slug.data == 'updated-organization'
+        assert form.description.data == 'Updated description'
+        assert form.is_active.data is True
+    
+    def test_update_organization_form_validation_success(self, test_organization, app):
+        """Test successful form validation"""
+        with app.app_context():
+            form = UpdateOrganizationForm(organization=test_organization, data={
+                'name': 'Updated Name',
+                'slug': 'updated-slug',
+                'description': 'Updated',
+                'is_active': True
+            })
+            assert form.validate() is True
+    
+    def test_update_organization_form_same_name(self, test_organization, app):
+        """Test form validation with same organization name"""
+        # Store ID before object becomes detached
+        org_id = inspect(test_organization).identity[0]
+        with app.app_context():
+            # Re-query to avoid detached instance
+            org = db.session.get(Organization, org_id)
+            form = UpdateOrganizationForm(organization=org, data={
+                'name': 'Test Organization',  # Same as test_organization
+                'slug': 'test-organization',
+                'is_active': True
+            })
+            assert form.validate() is True  # Should allow same name for same org
+    
+    def test_update_organization_form_different_org_name(self, test_organization, app):
+        """Test form validation with different organization's name"""
+        # Store ID before object becomes detached
+        org_id = inspect(test_organization).identity[0]
+        with app.app_context():
+            # Re-query to avoid detached instance
+            org = db.session.get(Organization, org_id)
+            # Create another organization
+            other_org = Organization(name='Other Org', slug='other-org')
+            db.session.add(other_org)
+            db.session.commit()
+            
+            form = UpdateOrganizationForm(organization=org, data={
+                'name': 'Other Org',  # Same as other_org
+                'slug': 'test-organization',
+                'is_active': True
+            })
+            assert form.validate() is False
+            assert 'name' in form.errors
+            assert 'already exists' in form.errors['name'][0]
+    
+    def test_update_organization_form_same_slug(self, test_organization, app):
+        """Test form validation with same organization slug"""
+        # Store ID before object becomes detached
+        org_id = inspect(test_organization).identity[0]
+        with app.app_context():
+            # Re-query to avoid detached instance
+            org = db.session.get(Organization, org_id)
+            form = UpdateOrganizationForm(organization=org, data={
+                'name': 'Test Organization',
+                'slug': 'test-organization',  # Same as test_organization
+                'is_active': True
+            })
+            assert form.validate() is True  # Should allow same slug for same org
+    
+    def test_update_organization_form_different_org_slug(self, test_organization, app):
+        """Test form validation with different organization's slug"""
+        # Store ID before object becomes detached
+        org_id = inspect(test_organization).identity[0]
+        with app.app_context():
+            # Re-query to avoid detached instance
+            org = db.session.get(Organization, org_id)
+            # Create another organization
+            other_org = Organization(name='Other Org', slug='other-org')
+            db.session.add(other_org)
+            db.session.commit()
+            
+            form = UpdateOrganizationForm(organization=org, data={
+                'name': 'Test Organization',
+                'slug': 'other-org',  # Same as other_org
+                'is_active': True
+            })
+            assert form.validate() is False
+            assert 'slug' in form.errors
+            assert 'already exists' in form.errors['slug'][0]

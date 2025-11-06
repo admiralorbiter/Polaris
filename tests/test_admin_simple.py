@@ -4,13 +4,8 @@ from flask import Flask, url_for
 from flask_app.models.user import User
 from flask_app.models.base import db
 from datetime import datetime, timezone
-import app as main_app
 
-
-@pytest.fixture
-def app():
-    """Use the main app with admin blueprint registered"""
-    return main_app.app
+# Note: Using the app fixture from conftest.py which provides isolated test database
 
 
 @pytest.fixture
@@ -24,7 +19,7 @@ def admin_user(app):
             username=f'admin_{unique_id}',
             email=f'admin_{unique_id}@test.com',
             password_hash='hashed_password',
-            is_admin=True,
+            is_super_admin=True,
             is_active=True
         )
         db.session.add(user)

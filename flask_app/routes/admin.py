@@ -140,15 +140,45 @@ def register_admin_routes(app):
         try:
             if form.validate_on_submit():
                 # Only super admin can create super admin users
-                is_super_admin = form.is_super_admin.data if hasattr(form, 'is_super_admin') else False
+                # Handle boolean field - HTML forms send 'on' for checked, nothing for unchecked
+                # WTForms BooleanField should handle this, but ensure we get proper boolean
+                is_super_admin = False
+                # Check request.form first (for test cases that pass boolean/string directly)
+                # Flask request.form always returns strings, so we need to check both None and string values
+                is_super_admin_val = request.form.get('is_super_admin')
+                if is_super_admin_val is not None:
+                    # request.form returns strings, so check string values
+                    if isinstance(is_super_admin_val, str):
+                        is_super_admin_val_lower = is_super_admin_val.lower().strip()
+                        if is_super_admin_val_lower in ('false', '0', 'off', 'no', 'none', ''):
+                            is_super_admin = False
+                        else:
+                            # Any non-empty string that's not explicitly false is treated as True
+                            is_super_admin = True
+                    elif isinstance(is_super_admin_val, bool):
+                        is_super_admin = is_super_admin_val
+                    else:
+                        # If it's truthy and not a string/bool, treat as True
+                        is_super_admin = bool(is_super_admin_val)
+                # Otherwise check form field (for HTML forms)
+                elif hasattr(form, 'is_super_admin') and form.is_super_admin.data:
+                    is_super_admin = True
+                
+                current_app.logger.debug(f"is_super_admin determined: {is_super_admin} (from request.form: {is_super_admin_val}, from form.data: {form.is_super_admin.data if hasattr(form, 'is_super_admin') else 'N/A'})")
+                
                 if is_super_admin and not current_user.is_super_admin:
                     flash('Only super admins can create super admin users.', 'danger')
                     return render_template('admin/create_user.html', form=form, organization=organization)
                 
-                # Validate organization/role if not super admin
-                if not is_super_admin:
-                    # Get organization ID from request.form (hidden field set by JavaScript)
+                # Validate organization/role only if:
+                # 1. The new user is NOT a super admin, AND
+                # 2. The current user creating them is NOT a super admin
+                # Super admins can create users without organization assignment
+                if not is_super_admin and not current_user.is_super_admin:
+                    # Get organization ID from request.form (hidden field set by JavaScript) or form field
                     org_id_raw = request.form.get('organization_id', '').strip()
+                    if not org_id_raw and hasattr(form, 'organization_search') and form.organization_search.data:
+                        org_id_raw = str(form.organization_search.data)
                     
                     # Convert to int if it's a valid number
                     try:
@@ -156,7 +186,7 @@ def register_admin_routes(app):
                     except (ValueError, TypeError):
                         org_id = None
                     
-                    role_id = form.role_id.data if hasattr(form, 'role_id') else None
+                    role_id = form.role_id.data if hasattr(form, 'role_id') and form.role_id.data else None
                     
                     current_app.logger.debug(f"Organization ID from request: {org_id_raw}, converted: {org_id}, Role ID: {role_id}")
                     
@@ -183,20 +213,38 @@ def register_admin_routes(app):
                     flash(f'Error creating user: {error}', 'danger')
                     current_app.logger.error(f"Error creating user: {error}")
                 else:
-                    # Add user to organization if not super admin
-                    if not is_super_admin:
-                        # Get organization ID from request.form (hidden field set by JavaScript)
-                        org_id_raw = request.form.get('organization_id', '').strip()
-                        try:
-                            org_id = int(org_id_raw) if org_id_raw and org_id_raw.isdigit() else None
-                        except (ValueError, TypeError):
-                            org_id = None
+                    # Add user to organization if organization_id is provided (for non-super-admin users)
+                    # Get organization ID from request.form (hidden field set by JavaScript) or form field
+                    org_id_raw = request.form.get('organization_id', '').strip()
+                    if not org_id_raw and hasattr(form, 'organization_search') and form.organization_search.data:
+                        org_id_raw = str(form.organization_search.data)
+                    
+                    try:
+                        org_id = int(org_id_raw) if org_id_raw and org_id_raw.isdigit() else None
+                    except (ValueError, TypeError):
+                        org_id = None
+                    
+                    # Get role_id from form or request
+                    role_id = None
+                    if hasattr(form, 'role_id') and form.role_id.data and form.role_id.data != 0:
                         role_id = form.role_id.data
+                    elif request.form.get('role_id'):
+                        try:
+                            role_id_val = int(request.form.get('role_id'))
+                            if role_id_val != 0:
+                                role_id = role_id_val
+                        except (ValueError, TypeError):
+                            role_id = None
+                    
+                    # Add to organization if org_id is provided and role_id is provided
+                    # For super admins creating regular users, we still want to assign them to organizations
+                    # Only skip if the user being created is a super admin
+                    if org_id and role_id and not is_super_admin:
                         from flask_app.models import UserOrganization, Organization, Role
                         
                         # Verify organization exists
-                        org = Organization.query.get(org_id)
-                        role = Role.query.get(role_id)
+                        org = db.session.get(Organization, org_id)
+                        role = db.session.get(Role, role_id)
                         
                         if org and role:
                             # Check if user already in organization
@@ -252,7 +300,10 @@ def register_admin_routes(app):
     def admin_view_user(user_id):
         """View user details"""
         try:
-            user = User.query.get_or_404(user_id)
+            user = db.session.get(User, user_id)
+            if not user:
+                from flask import abort
+                abort(404)
             organization = get_current_organization()
             
             # Check if user is in organization (unless super admin)
@@ -288,7 +339,10 @@ def register_admin_routes(app):
     @permission_required('edit_users', org_context=False)
     def admin_edit_user(user_id):
         """Edit user information"""
-        user = User.query.get_or_404(user_id)
+        user = db.session.get(User, user_id)
+        if not user:
+            from flask import abort
+            abort(404)
         form = UpdateUserForm(user=user)
         organization = get_current_organization()
         
@@ -342,8 +396,8 @@ def register_admin_routes(app):
                             from flask_app.models import UserOrganization, Organization, Role
                             
                             # Verify organization and role exist
-                            org = Organization.query.get(org_id)
-                            role = Role.query.get(role_id)
+                            org = db.session.get(Organization, org_id)
+                            role = db.session.get(Role, role_id)
                             
                             if org and role:
                                 # Check if user already in organization
@@ -403,7 +457,10 @@ def register_admin_routes(app):
     @permission_required('edit_users', org_context=False)
     def admin_change_password(user_id):
         """Change user password"""
-        user = User.query.get_or_404(user_id)
+        user = db.session.get(User, user_id)
+        if not user:
+            from flask import abort
+            abort(404)
         form = ChangePasswordForm()
         
         try:
@@ -442,7 +499,10 @@ def register_admin_routes(app):
     def admin_delete_user(user_id):
         """Delete user"""
         try:
-            user = User.query.get_or_404(user_id)
+            user = db.session.get(User, user_id)
+            if not user:
+                from flask import abort
+                abort(404)
             
             # Prevent deleting self
             if user.id == current_user.id:

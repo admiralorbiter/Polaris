@@ -47,9 +47,12 @@ init_monitoring(app)
 # Initialize organization context middleware
 init_org_context_middleware(app)
 
-# Create the database tables
-with app.app_context():
-    db.create_all()
+# Create the database tables only if not in testing mode
+# During testing, conftest.py will handle database setup with isolated test databases
+# This prevents tests from accidentally creating/modifying the production database
+if not app.config.get('TESTING', False):
+    with app.app_context():
+        db.create_all()
 
 # User loader callback for Flask-Login
 @login_manager.user_loader

@@ -8,8 +8,8 @@ from flask_app.models.base import BaseModel, db
 from datetime import datetime, timezone
 
 
-class TestModel(BaseModel):
-    """Test model for testing BaseModel functionality"""
+class SampleModel(BaseModel):
+    """Sample model for testing BaseModel functionality"""
     __tablename__ = 'test_models'
     
     id = db.Column(db.Integer, primary_key=True)
@@ -40,7 +40,7 @@ def app():
 def test_model(app):
     """Create a test model instance"""
     with app.app_context():
-        model = TestModel(name='test', value=42)
+        model = SampleModel(name='test', value=42)
         db.session.add(model)
         db.session.commit()
         # Refresh the model to ensure it's properly attached to the session
@@ -54,7 +54,7 @@ class TestBaseModel:
     def test_model_creation(self, app):
         """Test basic model creation"""
         with app.app_context():
-            model = TestModel(name='test', value=42)
+            model = SampleModel(name='test', value=42)
             assert model.name == 'test'
             assert model.value == 42
             # Timestamps are set when the model is committed to the database
@@ -67,7 +67,7 @@ class TestBaseModel:
         """Test that created_at is automatically set"""
         with app.app_context():
             before_creation = datetime.now(timezone.utc)
-            model = TestModel(name='test')
+            model = SampleModel(name='test')
             db.session.add(model)
             db.session.commit()
             after_creation = datetime.now(timezone.utc)
@@ -83,7 +83,7 @@ class TestBaseModel:
         """Test that updated_at is automatically set"""
         with app.app_context():
             before_creation = datetime.now(timezone.utc)
-            model = TestModel(name='test')
+            model = SampleModel(name='test')
             db.session.add(model)
             db.session.commit()
             after_creation = datetime.now(timezone.utc)
@@ -125,7 +125,7 @@ class TestBaseModel:
     def test_safe_create_success(self, app):
         """Test successful safe_create"""
         with app.app_context():
-            instance, error = TestModel.safe_create(name='test', value=42)
+            instance, error = SampleModel.safe_create(name='test', value=42)
             
             assert instance is not None
             assert error is None
@@ -137,30 +137,30 @@ class TestBaseModel:
         """Test safe_create with database error"""
         with app.app_context():
             with patch('flask_app.models.base.db.session.commit', side_effect=SQLAlchemyError("Database error")):
-                instance, error = TestModel.safe_create(name='test', value=42)
+                instance, error = SampleModel.safe_create(name='test', value=42)
                 
                 assert instance is None
                 assert error == "Database error"
                 app.logger.error.assert_called_once()
-                assert "Database error creating TestModel" in app.logger.error.call_args[0][0]
+                assert "Database error creating SampleModel" in app.logger.error.call_args[0][0]
 
     def test_safe_create_unexpected_error(self, app):
         """Test safe_create with unexpected error"""
         with app.app_context():
             with patch('flask_app.models.base.db.session.commit', side_effect=ValueError("Unexpected error")):
-                instance, error = TestModel.safe_create(name='test', value=42)
+                instance, error = SampleModel.safe_create(name='test', value=42)
                 
                 assert instance is None
                 assert error == "Unexpected error"
                 app.logger.error.assert_called_once()
-                assert "Unexpected error creating TestModel" in app.logger.error.call_args[0][0]
+                assert "Unexpected error creating SampleModel" in app.logger.error.call_args[0][0]
 
     def test_safe_create_rollback_on_error(self, app):
         """Test that safe_create rolls back on error"""
         with app.app_context():
             with patch('flask_app.models.base.db.session.commit', side_effect=SQLAlchemyError("Database error")):
                 with patch('flask_app.models.base.db.session.rollback') as mock_rollback:
-                    TestModel.safe_create(name='test', value=42)
+                    SampleModel.safe_create(name='test', value=42)
                     mock_rollback.assert_called_once()
 
     def test_safe_update_success(self, app, test_model):
@@ -194,7 +194,7 @@ class TestBaseModel:
                 assert success is False
                 assert error == "Database error"
                 app.logger.error.assert_called_once()
-                assert "Database error updating TestModel" in app.logger.error.call_args[0][0]
+                assert "Database error updating SampleModel" in app.logger.error.call_args[0][0]
 
     def test_safe_update_unexpected_error(self, app, test_model):
         """Test safe_update with unexpected error"""
@@ -205,7 +205,7 @@ class TestBaseModel:
                 assert success is False
                 assert error == "Unexpected error"
                 app.logger.error.assert_called_once()
-                assert "Unexpected error updating TestModel" in app.logger.error.call_args[0][0]
+                assert "Unexpected error updating SampleModel" in app.logger.error.call_args[0][0]
 
     def test_safe_update_rollback_on_error(self, app, test_model):
         """Test that safe_update rolls back on error"""
@@ -252,7 +252,7 @@ class TestBaseModel:
             assert error is None
             
             # Verify model is deleted
-            deleted_model = db.session.get(TestModel, model_id)
+            deleted_model = db.session.get(SampleModel, model_id)
             assert deleted_model is None
 
     def test_safe_delete_database_error(self, app, test_model):
@@ -264,7 +264,7 @@ class TestBaseModel:
                 assert success is False
                 assert error == "Database error"
                 app.logger.error.assert_called_once()
-                assert "Database error deleting TestModel" in app.logger.error.call_args[0][0]
+                assert "Database error deleting SampleModel" in app.logger.error.call_args[0][0]
 
     def test_safe_delete_unexpected_error(self, app, test_model):
         """Test safe_delete with unexpected error"""
@@ -275,7 +275,7 @@ class TestBaseModel:
                 assert success is False
                 assert error == "Unexpected error"
                 app.logger.error.assert_called_once()
-                assert "Unexpected error deleting TestModel" in app.logger.error.call_args[0][0]
+                assert "Unexpected error deleting SampleModel" in app.logger.error.call_args[0][0]
 
     def test_safe_delete_rollback_on_error(self, app, test_model):
         """Test that safe_delete rolls back on error"""
@@ -294,7 +294,7 @@ class TestBaseModel:
                 
                 assert success is False
                 # Model should still exist
-                preserved_model = db.session.get(TestModel, model_id)
+                preserved_model = db.session.get(SampleModel, model_id)
                 assert preserved_model is not None
                 assert preserved_model.id == model_id
 
@@ -302,7 +302,7 @@ class TestBaseModel:
         """Test multiple safe operations in sequence"""
         with app.app_context():
             # Create
-            instance, error = TestModel.safe_create(name='test1', value=1)
+            instance, error = SampleModel.safe_create(name='test1', value=1)
             assert instance is not None
             assert error is None
             
@@ -321,9 +321,9 @@ class TestBaseModel:
     def test_safe_create_with_none_values(self, app):
         """Test safe_create with None values"""
         with app.app_context():
-            # TestModel requires name to be not None, so we'll test with valid name and None value
+            # SampleModel requires name to be not None, so we'll test with valid name and None value
             # Note: value has a default of 0, so None will be converted to 0
-            instance, error = TestModel.safe_create(name='test', value=None)
+            instance, error = SampleModel.safe_create(name='test', value=None)
             
             assert instance is not None
             assert error is None
@@ -351,6 +351,6 @@ class TestBaseModel:
             # Test that current_app.logger is used
             with patch('flask_app.models.base.current_app.logger') as mock_logger:
                 with patch('flask_app.models.base.db.session.commit', side_effect=SQLAlchemyError("Test error")):
-                    TestModel.safe_create(name='test')
+                    SampleModel.safe_create(name='test')
                     mock_logger.error.assert_called_once()
-                    assert "Database error creating TestModel" in mock_logger.error.call_args[0][0]
+                    assert "Database error creating SampleModel" in mock_logger.error.call_args[0][0]

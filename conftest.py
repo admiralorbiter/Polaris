@@ -4,44 +4,72 @@ import pytest
 import os
 import tempfile
 from unittest.mock import patch
-from app import app as flask_app
-from flask_app.models import db, User, AdminLog, SystemMetrics
-from config import TestingConfig
 from werkzeug.security import generate_password_hash
+
+# Set testing environment BEFORE importing app to prevent database corruption
+# This ensures app.py uses TestingConfig when imported
+os.environ['FLASK_ENV'] = 'testing'
+
+# Now import app and other modules after environment is set
+from app import app as flask_app
+from flask_app.models import (
+    db, User, AdminLog, SystemMetrics, Organization, Role, Permission,
+    RolePermission, UserOrganization, SystemFeatureFlag, OrganizationFeatureFlag
+)
+from config import TestingConfig
 
 @pytest.fixture(scope='function')
 def app():
     """Create and configure a test Flask application"""
-    # Create a new app instance for each test
-    from app import app as flask_app
     import tempfile
     import uuid
     
     # Create a unique temporary database file for each test
     db_fd, temp_db = tempfile.mkstemp(suffix=f'_{uuid.uuid4().hex[:8]}.db')
     
-    # Configure the app for testing
-    flask_app.config.update({
-        'TESTING': True,
-        'WTF_CSRF_ENABLED': False,
-        'SQLALCHEMY_DATABASE_URI': f'sqlite:///{temp_db}',
-        'SECRET_KEY': 'test-secret-key-for-testing-only',
-        'DEBUG': True,
-        'MONITORING_ENABLED': False,
-        'ERROR_ALERTING_ENABLED': False
-    })
+    try:
+        # Configure the app for testing with isolated database
+        # Set DEBUG=True and SQLALCHEMY_ECHO=True to match development behavior
+        # that tests expect, while still using isolated test database
+        flask_app.config.update({
+            'TESTING': True,
+            'WTF_CSRF_ENABLED': False,
+            'SQLALCHEMY_DATABASE_URI': f'sqlite:///{temp_db}',
+            'SQLALCHEMY_ECHO': True,  # Enable SQL echo for tests (like development)
+            'SECRET_KEY': 'test-secret-key-for-testing-only',
+            'DEBUG': True,
+            'MONITORING_ENABLED': False,
+            'ERROR_ALERTING_ENABLED': False,
+            'ENABLE_FILE_LOGGING': True,  # Enable file logging for tests
+            'ENABLE_CONSOLE_LOGGING': True,  # Enable console logging for tests
+            'LOG_LEVEL': 'DEBUG',  # Set DEBUG level for tests
+        })
+        
+        # Re-initialize logging with updated config to pick up LOG_LEVEL=DEBUG
+        from flask_app.utils.logging_config import setup_logging
+        setup_logging(flask_app)
 
-    with flask_app.app_context():
-        # Create all tables
-        db.create_all()
-        yield flask_app
-        # Drop all tables
-        db.session.remove()
-        db.drop_all()
-    
-    # Close the temporary database file
-    os.close(db_fd)
-    os.unlink(temp_db)
+        with flask_app.app_context():
+            # Drop any existing tables to ensure clean state
+            db.drop_all()
+            # Create all tables
+            db.create_all()
+            yield flask_app
+            # Clean up: remove all data and drop tables
+            db.session.remove()
+            db.session.close()
+            db.drop_all()
+    finally:
+        # Always close and remove the temporary database file, even on error
+        try:
+            os.close(db_fd)
+        except OSError:
+            pass
+        try:
+            if os.path.exists(temp_db):
+                os.unlink(temp_db)
+        except OSError:
+            pass
 
 @pytest.fixture(autouse=True)
 def app_context(app):
@@ -69,7 +97,7 @@ def test_user():
         first_name='Test',
         last_name='User',
         is_active=True,
-        is_admin=False
+        is_super_admin=False
     )
     return user
 
@@ -82,9 +110,154 @@ def admin_user():
         password_hash=generate_password_hash('adminpass123'),
         first_name='Admin',
         last_name='User',
-        is_admin=True
+        is_super_admin=True
     )
     return user
+
+@pytest.fixture
+def super_admin_user():
+    """Create a super admin user fixture"""
+    user = User(
+        username='superadmin',
+        email='superadmin@example.com',
+        password_hash=generate_password_hash('superpass123'),
+        first_name='Super',
+        last_name='Admin',
+        is_super_admin=True,
+        is_active=True
+    )
+    return user
+
+@pytest.fixture
+def test_organization(app):
+    """Create a test organization fixture
+    Note: app_context fixture is autouse, so app context is already available
+    """
+    org = Organization(
+        name='Test Organization',
+        slug='test-organization',
+        description='A test organization',
+        is_active=True
+    )
+    db.session.add(org)
+    db.session.commit()
+    # Object stays in session since we're in the same app_context as tests
+    return org
+
+@pytest.fixture
+def test_organization_inactive(app):
+    """Create an inactive test organization fixture
+    Note: app_context fixture is autouse, so app context is already available
+    """
+    org = Organization(
+        name='Inactive Organization',
+        slug='inactive-organization',
+        description='An inactive organization',
+        is_active=False
+    )
+    db.session.add(org)
+    db.session.commit()
+    # Object stays in session since we're in the same app_context as tests
+    return org
+
+@pytest.fixture
+def test_role(app):
+    """Create a test role fixture
+    Note: app_context fixture is autouse, so app context is already available
+    """
+    role = Role(
+        name='volunteer',
+        display_name='Volunteer',
+        description='A volunteer role',
+        is_system_role=True
+    )
+    db.session.add(role)
+    db.session.commit()
+    # Object stays in session since we're in the same app_context as tests
+    return role
+
+@pytest.fixture
+def test_permission(app):
+    """Create a test permission fixture
+    Note: app_context fixture is autouse, so app context is already available
+    """
+    permission = Permission(
+        name='view_volunteers',
+        display_name='View Volunteers',
+        description='Can view volunteers',
+        category='volunteers'
+    )
+    db.session.add(permission)
+    db.session.commit()
+    # Object stays in session since we're in the same app_context as tests
+    return permission
+
+@pytest.fixture
+def test_role_with_permission(app, test_role, test_permission):
+    """Create a role with a permission attached
+    Note: app_context fixture is autouse, so app context is already available
+    """
+    # Use IDs directly
+    role_permission = RolePermission(
+        role_id=test_role.id,
+        permission_id=test_permission.id
+    )
+    db.session.add(role_permission)
+    db.session.commit()
+    # Re-query to get role with relationships loaded
+    role = db.session.get(Role, test_role.id)
+    return role
+
+@pytest.fixture
+def test_user_organization(app, test_user, test_organization, test_role):
+    """Create a user-organization relationship fixture
+    Note: app_context fixture is autouse, so app context is already available
+    """
+    db.session.add(test_user)
+    db.session.commit()
+    
+    user_org = UserOrganization(
+        user_id=test_user.id,
+        organization_id=test_organization.id,
+        role_id=test_role.id,
+        is_active=True
+    )
+    db.session.add(user_org)
+    db.session.commit()
+    # Object stays in session since we're in the same app_context as tests
+    return user_org
+
+@pytest.fixture
+def test_system_feature_flag(app):
+    """Create a test system feature flag fixture
+    Note: app_context fixture is autouse, so app context is already available
+    """
+    flag = SystemFeatureFlag(
+        flag_name='test_feature',
+        flag_value='true',
+        flag_type='boolean',
+        description='A test feature flag'
+    )
+    db.session.add(flag)
+    db.session.commit()
+    # Object stays in session since we're in the same app_context as tests
+    return flag
+
+@pytest.fixture
+def test_organization_feature_flag(app, test_organization):
+    """Create a test organization feature flag fixture
+    Note: app_context fixture is autouse, so app context is already available
+    """
+    flag = OrganizationFeatureFlag(
+        organization_id=test_organization.id,
+        flag_name='org_test_feature',
+        flag_value='true',
+        flag_type='boolean'
+    )
+    db.session.add(flag)
+    db.session.commit()
+    # Object stays in session since we're in the same app_context as tests
+    return flag
 
 @pytest.fixture
 def inactive_user():
@@ -246,7 +419,7 @@ def mock_current_user():
     """Mock current_user for testing"""
     with patch('flask_login.current_user') as mock_user:
         mock_user.is_authenticated = True
-        mock_user.is_admin = False
+        mock_user.is_super_admin = False
         mock_user.id = 1
         mock_user.username = 'testuser'
         yield mock_user
@@ -256,7 +429,7 @@ def mock_current_admin():
     """Mock current_user as admin for testing"""
     with patch('flask_login.current_user') as mock_user:
         mock_user.is_authenticated = True
-        mock_user.is_admin = True
+        mock_user.is_super_admin = True
         mock_user.id = 1
         mock_user.username = 'admin'
         yield mock_user
@@ -290,7 +463,11 @@ def mock_render_template():
 
 # Pytest configuration
 def pytest_configure(config):
-    """Configure pytest with custom markers"""
+    """Configure pytest with custom markers and ensure testing environment"""
+    # Ensure FLASK_ENV is set to testing before any tests run
+    # This is a safety measure in case conftest imports happen in unexpected order
+    os.environ['FLASK_ENV'] = 'testing'
+    
     config.addinivalue_line(
         "markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')"
     )

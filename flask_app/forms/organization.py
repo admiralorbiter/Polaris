@@ -7,6 +7,27 @@ from flask_app.models import Organization
 import re
 
 
+def optional_length(max=-1, min=-1, message=None):
+    """Validator that checks length only if field has a value"""
+    def _optional_length(form, field):
+        if field.data:
+            # Check length directly
+            data_len = len(field.data)
+            if max != -1 and data_len > max:
+                from wtforms.validators import ValidationError
+                if message:
+                    raise ValidationError(message)
+                else:
+                    raise ValidationError(f"Field must be less than {max + 1} characters long.")
+            if min != -1 and data_len < min:
+                from wtforms.validators import ValidationError
+                if message:
+                    raise ValidationError(message)
+                else:
+                    raise ValidationError(f"Field must be at least {min} characters long.")
+    return _optional_length
+
+
 def generate_slug(name):
     """Generate a URL-friendly slug from a name"""
     slug = name.lower()
@@ -37,7 +58,7 @@ class CreateOrganizationForm(FlaskForm):
     )
     description = TextAreaField(
         'Description',
-        validators=[Optional(), Length(max=1000, message="Description must be less than 1000 characters.")],
+        validators=[optional_length(max=1000, message="Description must be less than 1000 characters.")],
         render_kw={"placeholder": "Enter organization description (optional)", "rows": 4}
     )
     is_active = BooleanField('Active Organization', default=True)
@@ -86,7 +107,7 @@ class UpdateOrganizationForm(FlaskForm):
     )
     description = TextAreaField(
         'Description',
-        validators=[Optional(), Length(max=1000, message="Description must be less than 1000 characters.")],
+        validators=[optional_length(max=1000, message="Description must be less than 1000 characters.")],
         render_kw={"placeholder": "Enter organization description (optional)", "rows": 4}
     )
     is_active = BooleanField('Active Organization')

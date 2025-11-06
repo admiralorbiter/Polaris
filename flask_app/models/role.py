@@ -40,6 +40,16 @@ class Role(BaseModel):
     
     def has_permission(self, permission_name):
         """Check if role has a specific permission"""
+        # Re-query with relationships loaded to avoid detached instance errors
+        from sqlalchemy.orm import joinedload
+        from sqlalchemy import inspect
+        # Check if we're in a session, if not re-query
+        if inspect(self).detached or not inspect(self).persistent:
+            role = Role.query.options(joinedload(Role.permissions).joinedload(RolePermission.permission)).get(self.id)
+            if role:
+                return any(rp.permission.name == permission_name for rp in role.permissions)
+            return False
+        # If in session, use relationships directly
         return any(rp.permission.name == permission_name for rp in self.permissions)
 
 

@@ -16,7 +16,11 @@ def get_user_organizations(user):
         return Organization.query.filter_by(is_active=True).all()
     
     # Get organizations through UserOrganization relationships
-    user_orgs = UserOrganization.query.filter_by(
+    # Use joinedload to eager load organization relationship to avoid detached instance errors
+    from sqlalchemy.orm import joinedload
+    user_orgs = UserOrganization.query.options(
+        joinedload(UserOrganization.organization)
+    ).filter_by(
         user_id=user.id,
         is_active=True
     ).all()
@@ -33,7 +37,11 @@ def get_user_role_in_organization(user, organization):
         # Super admins have super admin role everywhere
         return Role.query.filter_by(name='SUPER_ADMIN').first()
     
-    user_org = UserOrganization.query.filter_by(
+    # Use joinedload to eager load role relationship to avoid detached instance errors
+    from sqlalchemy.orm import joinedload
+    user_org = UserOrganization.query.options(
+        joinedload(UserOrganization.role)
+    ).filter_by(
         user_id=user.id,
         organization_id=organization.id,
         is_active=True

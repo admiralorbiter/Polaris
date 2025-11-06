@@ -23,17 +23,36 @@ class TestLoggingConfig:
         """Test that logging setup creates log directory"""
         # Mock the logs directory path
         logs_dir = tmp_path / "logs"
+        app.config['ENABLE_FILE_LOGGING'] = True  # Enable file logging so directory is created
+        app.config['LOG_DIR'] = str(logs_dir)
+        
+        import os
+        # Store reference to real makedirs before mocking
+        real_makedirs = os.makedirs
         
         with patch('flask_app.utils.logging_config.os.path.exists') as mock_exists:
             with patch('flask_app.utils.logging_config.os.makedirs') as mock_makedirs:
+                # Make the directory not exist initially
                 mock_exists.return_value = False
+                # Make makedirs actually create the directory so RotatingFileHandler can open files
+                # Use side_effect to call the real function, but only with positional args
+                def create_dir(path, *args, **kwargs):
+                    # Call real makedirs with exist_ok=True to avoid errors if directory exists
+                    # Don't pass through other kwargs that might cause conflicts
+                    return real_makedirs(path, exist_ok=True)
+                mock_makedirs.side_effect = create_dir
                 
                 setup_logging(app)
                 
+                # Verify that makedirs was called
                 mock_makedirs.assert_called()
+                # Verify the directory was actually created
+                assert logs_dir.exists()
     
     def test_setup_logging_file_handlers(self, app):
         """Test that logging setup creates file handlers"""
+        app.config['ENABLE_FILE_LOGGING'] = True  # Explicitly enable file logging
+        
         with patch('flask_app.utils.logging_config.RotatingFileHandler') as mock_handler:
             mock_handler_instance = MagicMock()
             mock_handler_instance.level = logging.INFO  # Set proper level
@@ -46,6 +65,9 @@ class TestLoggingConfig:
     
     def test_setup_logging_console_handler(self, app):
         """Test that logging setup creates console handler"""
+        app.config['ENABLE_CONSOLE_LOGGING'] = True  # Explicitly enable console logging
+        app.config['ENABLE_FILE_LOGGING'] = True  # Enable file logging too since it's patched
+        
         with patch('flask_app.utils.logging_config.RotatingFileHandler') as mock_file_handler:
             with patch('logging.StreamHandler') as mock_console_handler:
                 # Mock file handler
@@ -75,6 +97,12 @@ class TestLoggingConfig:
     
     def test_setup_logging_log_levels(self, app):
         """Test that logging setup sets appropriate log levels"""
+        # Set LOG_LEVEL based on DEBUG setting
+        if app.config.get('DEBUG'):
+            app.config['LOG_LEVEL'] = 'DEBUG'
+        else:
+            app.config['LOG_LEVEL'] = 'INFO'
+        
         setup_logging(app)
         
         # In development, should be DEBUG level
@@ -86,6 +114,8 @@ class TestLoggingConfig:
     def test_setup_logging_development_config(self, app):
         """Test logging setup in development mode"""
         app.config['DEBUG'] = True
+        app.config['ENABLE_FILE_LOGGING'] = True  # Explicitly enable file logging
+        app.config['ENABLE_CONSOLE_LOGGING'] = True  # Explicitly enable console logging
         
         with patch('flask_app.utils.logging_config.RotatingFileHandler') as mock_file_handler:
             with patch('logging.StreamHandler') as mock_console_handler:
@@ -108,6 +138,7 @@ class TestLoggingConfig:
     def test_setup_logging_production_config(self, app):
         """Test logging setup in production mode"""
         app.config['DEBUG'] = False
+        app.config['ENABLE_FILE_LOGGING'] = True  # Explicitly enable file logging
         
         with patch('flask_app.utils.logging_config.RotatingFileHandler') as mock_handler:
             mock_handler_instance = MagicMock()
@@ -121,6 +152,8 @@ class TestLoggingConfig:
     
     def test_setup_logging_error_handling(self, app):
         """Test logging setup error handling"""
+        app.config['ENABLE_FILE_LOGGING'] = True  # Enable file logging so handler is created
+        
         with patch('flask_app.utils.logging_config.RotatingFileHandler') as mock_handler:
             mock_handler.side_effect = Exception("Handler creation failed")
             

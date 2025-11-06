@@ -149,8 +149,12 @@ class TestErrorAlertingSystem:
         
         # Should not raise exception, just log error
         with patch('flask_app.utils.error_handler.current_app') as mock_app:
+            # Ensure logger methods are synchronous and don't return coroutines
+            mock_logger = MagicMock()
+            mock_logger.error = MagicMock(return_value=None)
+            mock_app.logger = mock_logger
             alerter.send_error_alert(error)
-            mock_app.logger.error.assert_called()
+            mock_logger.error.assert_called()
     
     def test_send_email_alert_missing_config(self, app):
         """Test email alert with missing configuration"""
@@ -165,8 +169,12 @@ class TestErrorAlertingSystem:
         })
         
         with patch('flask_app.utils.error_handler.current_app') as mock_app:
+            # Ensure logger methods are synchronous and don't return coroutines
+            mock_logger = MagicMock()
+            mock_logger.warning = MagicMock(return_value=None)
+            mock_app.logger = mock_logger
             alerter._send_email_alert({'test': 'data'}, 'test_key')
-            mock_app.logger.warning.assert_called()
+            mock_logger.warning.assert_called()
     
     def test_send_email_alert_success(self, app):
         """Test successful email alert sending"""
@@ -200,6 +208,10 @@ class TestErrorAlertingSystem:
             mock_smtp.return_value = mock_server
             
             with patch('flask_app.utils.error_handler.current_app') as mock_app:
+                # Ensure logger methods are synchronous and don't return coroutines
+                mock_logger = MagicMock()
+                mock_logger.info = MagicMock(return_value=None)
+                mock_app.logger = mock_logger
                 alerter._send_email_alert(alert_data, 'test_key')
                 
                 # Verify SMTP was called correctly
@@ -248,6 +260,10 @@ class TestErrorAlertingSystem:
             mock_post.return_value = mock_response
             
             with patch('flask_app.utils.error_handler.current_app') as mock_app:
+                # Ensure logger methods are synchronous and don't return coroutines
+                mock_logger = MagicMock()
+                mock_logger.info = MagicMock(return_value=None)
+                mock_app.logger = mock_logger
                 alerter._send_slack_alert(alert_data, 'test_key')
                 
                 # Verify request was made correctly
@@ -297,6 +313,10 @@ class TestErrorAlertingSystem:
             mock_post.return_value = mock_response
             
             with patch('flask_app.utils.error_handler.current_app') as mock_app:
+                # Ensure logger methods are synchronous and don't return coroutines
+                mock_logger = MagicMock()
+                mock_logger.info = MagicMock(return_value=None)
+                mock_app.logger = mock_logger
                 alerter._send_webhook_alert(alert_data, 'test_key')
                 
                 # Verify request was made correctly

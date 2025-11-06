@@ -44,7 +44,7 @@ class Organization(BaseModel):
     def find_by_id(org_id):
         """Find organization by ID with error handling"""
         try:
-            return Organization.query.get(org_id)
+            return db.session.get(Organization, org_id)
         except SQLAlchemyError as e:
             current_app.logger.error(f"Database error finding organization by id {org_id}: {str(e)}")
             return None

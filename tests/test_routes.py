@@ -3,7 +3,9 @@ from unittest.mock import patch, MagicMock
 from flask import url_for, session
 from flask_login import current_user
 from werkzeug.security import generate_password_hash
-from flask_app.models import User, AdminLog, SystemMetrics, db
+from flask_app.models import (
+    User, AdminLog, SystemMetrics, Organization, Role, UserOrganization, db
+)
 
 
 class TestAuthRoutes:
@@ -263,8 +265,8 @@ class TestAdminRoutes:
         assert response.status_code == 200
         assert b'login' in response.data.lower()
     
-    def test_admin_dashboard_not_admin(self, client, test_user, app):
-        """Test admin dashboard access without admin privileges"""
+    def test_admin_dashboard_not_super_admin(self, client, test_user, app):
+        """Test admin dashboard access without super admin privileges"""
         with app.app_context():
             test_user.password_hash = generate_password_hash('testpass123')
             db.session.add(test_user)
@@ -282,69 +284,70 @@ class TestAdminRoutes:
             response_text = response.data.decode('utf-8')
             assert 'Flask Starter Code' in response_text
     
-    def test_admin_dashboard_success(self, client, admin_user, app):
+    def test_admin_dashboard_success(self, client, super_admin_user, app):
         """Test successful admin dashboard access"""
         with app.app_context():
-            admin_user.password_hash = generate_password_hash('adminpass123')
-            db.session.add(admin_user)
+            super_admin_user.password_hash = generate_password_hash('superpass123')
+            db.session.add(super_admin_user)
             db.session.commit()
             
-            # Login as admin
+            # Login as super admin
             client.post('/login', data={
-                'username': 'admin',
-                'password': 'adminpass123'
+                'username': 'superadmin',
+                'password': 'superpass123'
             })
             
             response = client.get('/admin')
             assert response.status_code == 200
             assert b'dashboard' in response.data.lower() or b'admin' in response.data.lower()
     
-    def test_admin_users_list(self, client, admin_user, test_user, app):
+    def test_admin_users_list(self, client, super_admin_user, test_user, app):
         """Test admin users list page"""
         with app.app_context():
-            admin_user.password_hash = generate_password_hash('adminpass123')
-            db.session.add(admin_user)
+            super_admin_user.password_hash = generate_password_hash('superpass123')
+            db.session.add(super_admin_user)
             db.session.add(test_user)
             db.session.commit()
             
-            # Login as admin
+            # Login as super admin
             client.post('/login', data={
-                'username': 'admin',
-                'password': 'adminpass123'
+                'username': 'superadmin',
+                'password': 'superpass123'
             })
             
             response = client.get('/admin/users')
             assert response.status_code == 200
             assert b'users' in response.data.lower()
     
-    def test_admin_create_user_get(self, client, admin_user, app):
+    def test_admin_create_user_get(self, client, super_admin_user, app):
         """Test admin create user page GET"""
         with app.app_context():
-            admin_user.password_hash = generate_password_hash('adminpass123')
-            db.session.add(admin_user)
+            super_admin_user.password_hash = generate_password_hash('superpass123')
+            db.session.add(super_admin_user)
             db.session.commit()
             
-            # Login as admin
+            # Login as super admin
             client.post('/login', data={
-                'username': 'admin',
-                'password': 'adminpass123'
+                'username': 'superadmin',
+                'password': 'superpass123'
             })
             
             response = client.get('/admin/users/create')
             assert response.status_code == 200
             assert b'create' in response.data.lower() or b'user' in response.data.lower()
     
-    def test_admin_create_user_success(self, client, admin_user, app):
-        """Test successful user creation"""
+    def test_admin_create_user_with_organization(self, client, super_admin_user, test_organization, test_role, app):
+        """Test creating user with organization assignment"""
         with app.app_context():
-            admin_user.password_hash = generate_password_hash('adminpass123')
-            db.session.add(admin_user)
+            # Store org_id to avoid detached instance
+            org_id = test_organization.id
+            super_admin_user.password_hash = generate_password_hash('superpass123')
+            db.session.add(super_admin_user)
             db.session.commit()
             
-            # Login as admin
             client.post('/login', data={
-                'username': 'admin',
-                'password': 'adminpass123'
+                'username': 'superadmin',
+                'password': 'superpass123'
             })
             
             response = client.post('/admin/users/create', data={
@@ -355,7 +358,48 @@ class TestAdminRoutes:
                 'password': 'SecurePass123',
                 'confirm_password': 'SecurePass123',
                 'is_active': True,
-                'is_admin': False
+                'is_super_admin': False,
+                'organization_id': str(org_id),
+                'role_id': str(test_role.id)
+            }, follow_redirects=True)
+            assert response.status_code == 200
+            
+            # Verify user was created and assigned to organization
+            db.session.expire_all()  # Refresh session
+            user = User.query.filter_by(username='newuser').first()
+            assert user is not None, "User should be created"
+            # Re-query organization to get fresh ID
+            org = db.session.get(Organization, test_organization.id)
+            assert org is not None, "Organization should exist"
+            user_org = UserOrganization.query.filter_by(
+                user_id=user.id,
+                organization_id=org.id
+            ).first()
+            assert user_org is not None, f"UserOrganization should exist for user {user.id} and org {org.id}"
+            assert user_org.role_id == test_role.id
+    
+    def test_admin_create_user_success(self, client, super_admin_user, app):
+        """Test successful user creation"""
+        with app.app_context():
+            super_admin_user.password_hash = generate_password_hash('superpass123')
+            db.session.add(super_admin_user)
+            db.session.commit()
+            
+            # Login as super admin
+            client.post('/login', data={
+                'username': 'superadmin',
+                'password': 'superpass123'
+            })
+            
+            response = client.post('/admin/users/create', data={
+                'username': 'newuser',
+                'email': 'newuser@example.com',
+                'first_name': 'New',
+                'last_name': 'User',
+                'password': 'SecurePass123',
+                'confirm_password': 'SecurePass123',
+                'is_active': True,
+                'is_super_admin': False
             }, follow_redirects=True)
             
             assert response.status_code == 200
@@ -367,54 +411,54 @@ class TestAdminRoutes:
             assert new_user is not None
             assert new_user.email == 'newuser@example.com'
     
-    def test_admin_view_user(self, client, admin_user, test_user, app):
+    def test_admin_view_user(self, client, super_admin_user, test_user, app):
         """Test admin view user page"""
         with app.app_context():
-            admin_user.password_hash = generate_password_hash('adminpass123')
-            db.session.add(admin_user)
+            super_admin_user.password_hash = generate_password_hash('superpass123')
+            db.session.add(super_admin_user)
             db.session.add(test_user)
             db.session.commit()
             
             # Login as admin
             client.post('/login', data={
-                'username': 'admin',
-                'password': 'adminpass123'
+                'username': 'superadmin',
+                'password': 'superpass123'
             })
             
             response = client.get(f'/admin/users/{test_user.id}')
             assert response.status_code == 200
             assert b'testuser' in response.data.lower()
     
-    def test_admin_edit_user_get(self, client, admin_user, test_user, app):
+    def test_admin_edit_user_get(self, client, super_admin_user, test_user, app):
         """Test admin edit user page GET"""
         with app.app_context():
-            admin_user.password_hash = generate_password_hash('adminpass123')
-            db.session.add(admin_user)
+            super_admin_user.password_hash = generate_password_hash('superpass123')
+            db.session.add(super_admin_user)
             db.session.add(test_user)
             db.session.commit()
             
             # Login as admin
             client.post('/login', data={
-                'username': 'admin',
-                'password': 'adminpass123'
+                'username': 'superadmin',
+                'password': 'superpass123'
             })
             
             response = client.get(f'/admin/users/{test_user.id}/edit')
             assert response.status_code == 200
             assert b'edit' in response.data.lower()
     
-    def test_admin_edit_user_success(self, client, admin_user, test_user, app):
+    def test_admin_edit_user_success(self, client, super_admin_user, test_user, app):
         """Test successful user update"""
         with app.app_context():
-            admin_user.password_hash = generate_password_hash('adminpass123')
-            db.session.add(admin_user)
+            super_admin_user.password_hash = generate_password_hash('superpass123')
+            db.session.add(super_admin_user)
             db.session.add(test_user)
             db.session.commit()
             
             # Login as admin
             client.post('/login', data={
-                'username': 'admin',
-                'password': 'adminpass123'
+                'username': 'superadmin',
+                'password': 'superpass123'
             })
             
             response = client.post(f'/admin/users/{test_user.id}/edit', data={
@@ -423,7 +467,7 @@ class TestAdminRoutes:
                 'first_name': 'Updated',
                 'last_name': 'User',
                 'is_active': True,
-                'is_admin': False
+                'is_super_admin': False
             }, follow_redirects=True)
             
             assert response.status_code == 200
@@ -433,18 +477,18 @@ class TestAdminRoutes:
             assert updated_user.username == 'updateduser'
             assert updated_user.email == 'updated@example.com'
     
-    def test_admin_change_password(self, client, admin_user, test_user, app):
+    def test_admin_change_password(self, client, super_admin_user, test_user, app):
         """Test admin change user password"""
         with app.app_context():
-            admin_user.password_hash = generate_password_hash('adminpass123')
-            db.session.add(admin_user)
+            super_admin_user.password_hash = generate_password_hash('superpass123')
+            db.session.add(super_admin_user)
             db.session.add(test_user)
             db.session.commit()
             
             # Login as admin
             client.post('/login', data={
-                'username': 'admin',
-                'password': 'adminpass123'
+                'username': 'superadmin',
+                'password': 'superpass123'
             })
             
             response = client.post(f'/admin/users/{test_user.id}/change-password', data={
@@ -459,11 +503,11 @@ class TestAdminRoutes:
             updated_user = db.session.get(User, test_user.id)
             assert updated_user is not None  # User still exists
     
-    def test_admin_delete_user(self, client, admin_user, test_user, app):
+    def test_admin_delete_user(self, client, super_admin_user, test_user, app):
         """Test admin delete user"""
         with app.app_context():
-            admin_user.password_hash = generate_password_hash('adminpass123')
-            db.session.add(admin_user)
+            super_admin_user.password_hash = generate_password_hash('superpass123')
+            db.session.add(super_admin_user)
             db.session.add(test_user)
             db.session.commit()
             
@@ -471,8 +515,8 @@ class TestAdminRoutes:
             
             # Login as admin
             client.post('/login', data={
-                'username': 'admin',
-                'password': 'adminpass123'
+                'username': 'superadmin',
+                'password': 'superpass123'
             })
             
             response = client.post(f'/admin/users/{user_id}/delete', follow_redirects=True)
@@ -482,57 +526,57 @@ class TestAdminRoutes:
             deleted_user = db.session.get(User, user_id)
             assert deleted_user is None
     
-    def test_admin_delete_self_prevention(self, client, admin_user, app):
+    def test_admin_delete_self_prevention(self, client, super_admin_user, app):
         """Test that admin cannot delete themselves"""
         with app.app_context():
-            admin_user.password_hash = generate_password_hash('adminpass123')
-            db.session.add(admin_user)
+            super_admin_user.password_hash = generate_password_hash('superpass123')
+            db.session.add(super_admin_user)
             db.session.commit()
             
             # Login as admin
             client.post('/login', data={
-                'username': 'admin',
-                'password': 'adminpass123'
+                'username': 'superadmin',
+                'password': 'superpass123'
             })
             
-            response = client.post(f'/admin/users/{admin_user.id}/delete', follow_redirects=True)
+            response = client.post(f'/admin/users/{super_admin_user.id}/delete', follow_redirects=True)
             assert response.status_code == 200
             # The error message might not be in the response, just check that we get a response
             response_text = response.data.decode('utf-8')
             assert len(response_text) > 0  # We got some response
             
             # Verify admin user still exists
-            admin_user_check = db.session.get(User, admin_user.id)
+            admin_user_check = db.session.get(User, super_admin_user.id)
             assert admin_user_check is not None
     
-    def test_admin_logs_page(self, client, admin_user, app):
+    def test_admin_logs_page(self, client, super_admin_user, app):
         """Test admin logs page"""
         with app.app_context():
-            admin_user.password_hash = generate_password_hash('adminpass123')
-            db.session.add(admin_user)
+            super_admin_user.password_hash = generate_password_hash('superpass123')
+            db.session.add(super_admin_user)
             db.session.commit()
             
             # Login as admin
             client.post('/login', data={
-                'username': 'admin',
-                'password': 'adminpass123'
+                'username': 'superadmin',
+                'password': 'superpass123'
             })
             
             response = client.get('/admin/logs')
             assert response.status_code == 200
             assert b'logs' in response.data.lower()
     
-    def test_admin_stats_api(self, client, admin_user, app):
+    def test_admin_stats_api(self, client, super_admin_user, app):
         """Test admin stats API endpoint"""
         with app.app_context():
-            admin_user.password_hash = generate_password_hash('adminpass123')
-            db.session.add(admin_user)
+            super_admin_user.password_hash = generate_password_hash('superpass123')
+            db.session.add(super_admin_user)
             db.session.commit()
             
             # Login as admin
             client.post('/login', data={
-                'username': 'admin',
-                'password': 'adminpass123'
+                'username': 'superadmin',
+                'password': 'superpass123'
             })
             
             response = client.get('/admin/stats')
@@ -542,7 +586,7 @@ class TestAdminRoutes:
             data = response.get_json()
             assert 'total_users' in data
             assert 'active_users' in data
-            assert 'admin_users' in data
+            assert 'super_admin_users' in data
     
     def test_admin_routes_require_login(self, client):
         """Test that all admin routes require login"""
@@ -560,7 +604,7 @@ class TestAdminRoutes:
             assert response.status_code == 200
             assert b'login' in response.data.lower()
     
-    def test_admin_routes_require_admin(self, client, test_user, app):
+    def test_admin_routes_require_super_admin(self, client, test_user, app):
         """Test that all admin routes require admin privileges"""
         with app.app_context():
             test_user.password_hash = generate_password_hash('testpass123')
@@ -684,3 +728,157 @@ class TestSecurityFeatures:
         
         # Should not execute script
         assert b'<script>' not in response.data or b'&lt;script&gt;' in response.data
+
+
+class TestOrganizationRoutes:
+    """Test organization CRUD routes"""
+    
+    def test_list_organizations_requires_super_admin(self, client, test_user, app):
+        """Test that listing organizations requires super admin"""
+        with app.app_context():
+            db.session.add(test_user)
+            db.session.commit()
+            
+            client.post('/login', data={
+                'username': 'testuser',
+                'password': 'testpass123'
+            })
+            
+            response = client.get('/admin/organizations')
+            assert response.status_code == 302  # Redirect
+    
+    def test_list_organizations_super_admin(self, client, super_admin_user, test_organization, app):
+        """Test listing organizations as super admin"""
+        with app.app_context():
+            db.session.add(super_admin_user)
+            db.session.commit()
+            
+            client.post('/login', data={
+                'username': 'superadmin',
+                'password': 'superpass123'
+            })
+            
+            response = client.get('/admin/organizations')
+            assert response.status_code == 200
+            assert b'Organizations' in response.data or b'organization' in response.data.lower()
+    
+    def test_create_organization_get(self, client, super_admin_user, app):
+        """Test GET request to create organization page"""
+        with app.app_context():
+            db.session.add(super_admin_user)
+            db.session.commit()
+            
+            client.post('/login', data={
+                'username': 'superadmin',
+                'password': 'superpass123'
+            })
+            
+            response = client.get('/admin/organizations/create')
+            assert response.status_code == 200
+            assert b'Create' in response.data or b'Organization' in response.data
+    
+    def test_create_organization_success(self, client, super_admin_user, app):
+        """Test successful organization creation"""
+        with app.app_context():
+            db.session.add(super_admin_user)
+            db.session.commit()
+            
+            client.post('/login', data={
+                'username': 'superadmin',
+                'password': 'superpass123'
+            })
+            
+            response = client.post('/admin/organizations/create', data={
+                'name': 'New Organization',
+                'slug': 'new-organization',
+                'description': 'A new organization',
+                'is_active': True
+            }, follow_redirects=True)
+            assert response.status_code == 200
+            
+            # Verify organization was created
+            org = Organization.query.filter_by(slug='new-organization').first()
+            assert org is not None
+            assert org.name == 'New Organization'
+    
+    def test_view_organization(self, client, super_admin_user, test_organization, app):
+        """Test viewing organization details"""
+        with app.app_context():
+            # Store org attributes to avoid detached instance
+            org_id = test_organization.id
+            org_name = test_organization.name
+            db.session.add(super_admin_user)
+            db.session.commit()
+            
+            client.post('/login', data={
+                'username': 'superadmin',
+                'password': 'superpass123'
+            })
+            
+            response = client.get(f'/admin/organizations/{org_id}')
+            assert response.status_code == 200
+            assert b'Test Organization' in response.data or org_name.encode() in response.data
+    
+    def test_edit_organization_get(self, client, super_admin_user, test_organization, app):
+        """Test GET request to edit organization page"""
+        with app.app_context():
+            # Store org_id to avoid detached instance
+            org_id = test_organization.id
+            db.session.add(super_admin_user)
+            db.session.commit()
+            
+            client.post('/login', data={
+                'username': 'superadmin',
+                'password': 'superpass123'
+            })
+            
+            response = client.get(f'/admin/organizations/{org_id}/edit')
+            assert response.status_code == 200
+    
+    def test_edit_organization_success(self, client, super_admin_user, test_organization, app):
+        """Test successful organization update"""
+        with app.app_context():
+            # Store org_id to avoid detached instance
+            org_id = test_organization.id
+            db.session.add(super_admin_user)
+            db.session.commit()
+            
+            client.post('/login', data={
+                'username': 'superadmin',
+                'password': 'superpass123'
+            })
+            
+            response = client.post(f'/admin/organizations/{org_id}/edit', data={
+                'name': 'Updated Organization',
+                'slug': 'updated-organization',
+                'description': 'Updated description',
+                'is_active': True
+            }, follow_redirects=True)
+            assert response.status_code == 200
+            
+            # Verify organization was updated - re-query to avoid detached instance
+            org = db.session.get(Organization, org_id)
+            assert org.name == 'Updated Organization'
+    
+    def test_delete_organization(self, client, super_admin_user, app):
+        """Test deleting organization"""
+        with app.app_context():
+            db.session.add(super_admin_user)
+            
+            # Create organization to delete
+            org = Organization(name='To Delete', slug='to-delete')
+            db.session.add(org)
+            db.session.commit()
+            org_id = org.id
+            
+            client.post('/login', data={
+                'username': 'superadmin',
+                'password': 'superpass123'
+            })
+            
+            response = client.post(f'/admin/organizations/{org_id}/delete', follow_redirects=True)
+            assert response.status_code == 200
+            
+            # Verify organization was deleted
+            deleted_org = db.session.get(Organization, org_id)
+            assert deleted_org is None

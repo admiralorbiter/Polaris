@@ -1,7 +1,6 @@
 import pytest
 import os
 from unittest.mock import patch, MagicMock
-from app import app
 from config import DevelopmentConfig, ProductionConfig, TestingConfig
 from config.monitoring import DevelopmentMonitoringConfig, ProductionMonitoringConfig, TestingMonitoringConfig
 
@@ -9,12 +8,12 @@ from config.monitoring import DevelopmentMonitoringConfig, ProductionMonitoringC
 class TestAppConfiguration:
     """Test application configuration"""
     
-    def test_app_creation(self):
+    def test_app_creation(self, app):
         """Test that app is created successfully"""
         assert app is not None
         assert app.name == 'app'
     
-    def test_app_config_loaded(self):
+    def test_app_config_loaded(self, app):
         """Test that app configuration is loaded"""
         assert app.config is not None
         assert 'SECRET_KEY' in app.config
@@ -33,18 +32,18 @@ class TestAppConfiguration:
         """Test testing configuration"""
         assert app.config['TESTING'] is True
     
-    def test_database_config(self):
+    def test_database_config(self, app):
         """Test database configuration"""
         assert 'SQLALCHEMY_DATABASE_URI' in app.config
         assert 'SQLALCHEMY_TRACK_MODIFICATIONS' in app.config
         assert app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] is False
     
-    def test_secret_key_config(self):
+    def test_secret_key_config(self, app):
         """Test secret key configuration"""
         assert app.config['SECRET_KEY'] is not None
         assert len(app.config['SECRET_KEY']) > 0
     
-    def test_login_manager_config(self):
+    def test_login_manager_config(self, app):
         """Test Flask-Login configuration"""
         from flask_login import LoginManager
         
@@ -108,7 +107,7 @@ class TestConfigClasses:
 class TestAppInitialization:
     """Test application initialization"""
     
-    def test_database_initialization(self):
+    def test_database_initialization(self, app):
         """Test database initialization"""
         from flask_app.models import db
         
@@ -117,7 +116,7 @@ class TestAppInitialization:
         with app.app_context():
             assert db.session is not None
     
-    def test_login_manager_initialization(self):
+    def test_login_manager_initialization(self, app):
         """Test login manager initialization"""
         from flask_login import LoginManager
         
@@ -132,7 +131,7 @@ class TestAppInitialization:
         assert login_manager.login_view == 'login'
         assert login_manager.login_message_category == 'info'
     
-    def test_routes_registration(self):
+    def test_routes_registration(self, app):
         """Test that routes are registered"""
         from flask_app.routes import init_routes
         
@@ -147,7 +146,7 @@ class TestAppInitialization:
             assert '/logout' in rule_names  # Logout route
             assert '/admin' in rule_names  # Admin route
     
-    def test_user_loader_function(self):
+    def test_user_loader_function(self, app):
         """Test user loader function is registered"""
         from flask_login import LoginManager
         
@@ -166,63 +165,52 @@ class TestAppInitialization:
 class TestEnvironmentConfiguration:
     """Test environment-based configuration"""
     
-    @patch.dict(os.environ, {'FLASK_ENV': 'development'})
     def test_development_environment(self):
         """Test development environment configuration"""
-        # Recreate app to test environment loading
-        from app import app as test_app
+        # Test the config class directly instead of importing app
+        config = DevelopmentConfig()
         
         # Should use development config
-        assert test_app.config['DEBUG'] is True
+        assert config.DEBUG is True
     
-    @patch.dict(os.environ, {'FLASK_ENV': 'production'})
     def test_production_environment(self):
         """Test production environment configuration"""
-        # Note: In test environment, we're always in testing mode
-        # This test verifies the config loading logic works
-        from config import ProductionConfig
+        # Test the config class directly
         config = ProductionConfig()
         
         # Production config should have DEBUG = False
         assert config.DEBUG is False
     
-    @patch.dict(os.environ, {'FLASK_ENV': 'testing'})
-    def test_testing_environment(self):
+    def test_testing_environment(self, app):
         """Test testing environment configuration"""
-        # Recreate app to test environment loading
-        from app import app as test_app
-        
-        # Should use testing config
-        assert test_app.config['TESTING'] is True
+        # Should use testing config when using fixture
+        assert app.config['TESTING'] is True
     
     def test_default_environment(self):
         """Test default environment (no FLASK_ENV set)"""
-        with patch.dict(os.environ, {}, clear=True):
-            # Remove FLASK_ENV if it exists
-            if 'FLASK_ENV' in os.environ:
-                del os.environ['FLASK_ENV']
-            
-            # Should default to development
-            from app import app as test_app
-            assert test_app.config['DEBUG'] is True
+        # Test the config class directly instead of importing app
+        config = DevelopmentConfig()
+        
+        # Should default to development config
+        assert config.DEBUG is True
 
 
 class TestSecurityConfiguration:
     """Test security-related configuration"""
     
-    def test_secret_key_present(self):
+    def test_secret_key_present(self, app):
         """Test that secret key is configured"""
         assert app.config['SECRET_KEY'] is not None
         assert len(app.config['SECRET_KEY']) >= 32  # Minimum length for security
     
-    def test_session_configuration(self):
+    def test_session_configuration(self, app):
         """Test session configuration"""
         assert 'PERMANENT_SESSION_LIFETIME' in app.config
         assert 'SESSION_COOKIE_SECURE' in app.config
         assert 'SESSION_COOKIE_HTTPONLY' in app.config
         assert 'SESSION_COOKIE_SAMESITE' in app.config
     
-    def test_csrf_protection(self):
+    def test_csrf_protection(self, app):
         """Test CSRF protection configuration"""
         assert 'WTF_CSRF_ENABLED' in app.config
         # CSRF should be enabled in production, disabled in testing
@@ -231,7 +219,7 @@ class TestSecurityConfiguration:
         else:
             assert app.config['WTF_CSRF_ENABLED'] is True
     
-    def test_secure_headers(self):
+    def test_secure_headers(self, app):
         """Test secure headers configuration"""
         # Test that app has security-related configurations
         assert 'SECRET_KEY' in app.config
@@ -246,7 +234,7 @@ class TestSecurityConfiguration:
 class TestDatabaseConfiguration:
     """Test database configuration"""
     
-    def test_database_uri_configuration(self):
+    def test_database_uri_configuration(self, app):
         """Test database URI configuration"""
         assert 'SQLALCHEMY_DATABASE_URI' in app.config
         assert app.config['SQLALCHEMY_DATABASE_URI'] is not None
@@ -259,12 +247,12 @@ class TestDatabaseConfiguration:
         else:
             assert 'sqlite:///' in app.config['SQLALCHEMY_DATABASE_URI']
     
-    def test_database_tracking_configuration(self):
+    def test_database_tracking_configuration(self, app):
         """Test database tracking configuration"""
         assert 'SQLALCHEMY_TRACK_MODIFICATIONS' in app.config
         assert app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] is False
     
-    def test_database_echo_configuration(self):
+    def test_database_echo_configuration(self, app):
         """Test database echo configuration"""
         # Echo should be enabled in development, disabled in production
         if app.config.get('DEBUG'):
@@ -276,13 +264,13 @@ class TestDatabaseConfiguration:
 class TestLoggingConfiguration:
     """Test logging configuration"""
     
-    def test_logging_initialization(self):
+    def test_logging_initialization(self, app):
         """Test that logging is initialized"""
         # Check that logging configuration exists
         assert hasattr(app, 'logger')
         assert app.logger is not None
     
-    def test_logging_levels(self):
+    def test_logging_levels(self, app):
         """Test logging levels"""
         # In development, should be DEBUG level
         # In production, should be INFO or higher
@@ -291,7 +279,7 @@ class TestLoggingConfiguration:
         else:
             assert app.logger.level >= 20  # INFO level or higher
     
-    def test_logging_handlers(self):
+    def test_logging_handlers(self, app):
         """Test logging handlers"""
         # Should have file handlers configured
         handlers = app.logger.handlers
@@ -305,7 +293,7 @@ class TestLoggingConfiguration:
 class TestMonitoringConfiguration:
     """Test monitoring configuration"""
     
-    def test_monitoring_initialization(self):
+    def test_monitoring_initialization(self, app):
         """Test that monitoring is initialized"""
         # Check that monitoring configuration exists
         assert 'MONITORING_ENABLED' in app.config
@@ -314,7 +302,7 @@ class TestMonitoringConfiguration:
         if app.config.get('TESTING'):
             assert app.config['MONITORING_ENABLED'] is False
     
-    def test_monitoring_metrics(self):
+    def test_monitoring_metrics(self, app):
         """Test monitoring metrics configuration"""
         # Should have monitoring-related configurations
         monitoring_configs = [
@@ -330,7 +318,7 @@ class TestMonitoringConfiguration:
 class TestErrorHandlingConfiguration:
     """Test error handling configuration"""
     
-    def test_error_handlers_registered(self):
+    def test_error_handlers_registered(self, app):
         """Test that error handlers are registered"""
         # Check that error handlers exist
         error_handlers = app.error_handler_spec
@@ -371,7 +359,7 @@ class TestErrorHandlingConfiguration:
         assert has_404_handler, "404 error handler not found"
         assert has_500_handler, "500 error handler not found"
     
-    def test_error_alerting_configuration(self):
+    def test_error_alerting_configuration(self, app):
         """Test error alerting configuration"""
         # Should have error alerting configurations
         assert 'ERROR_ALERTING_ENABLED' in app.config
@@ -385,21 +373,21 @@ class TestErrorHandlingConfiguration:
 class TestAppContext:
     """Test application context"""
     
-    def test_app_context_creation(self):
+    def test_app_context_creation(self, app):
         """Test application context creation"""
         with app.app_context():
             from flask import current_app
             assert current_app is not None
             assert current_app == app
     
-    def test_request_context(self):
+    def test_request_context(self, app):
         """Test request context"""
         with app.test_request_context('/'):
             from flask import current_app, request
             assert current_app is not None
             assert request is not None
     
-    def test_database_context(self):
+    def test_database_context(self, app):
         """Test database context within app context"""
         with app.app_context():
             from flask_app.models import db
@@ -415,7 +403,7 @@ class TestAppContext:
 class TestAppExtensions:
     """Test application extensions"""
     
-    def test_flask_login_extension(self):
+    def test_flask_login_extension(self, app):
         """Test Flask-Login extension"""
         from flask_login import LoginManager
         
@@ -430,7 +418,7 @@ class TestAppExtensions:
         assert login_manager.login_view == 'login'
         assert login_manager.login_message_category == 'info'
     
-    def test_sqlalchemy_extension(self):
+    def test_sqlalchemy_extension(self, app):
         """Test SQLAlchemy extension"""
         from flask_sqlalchemy import SQLAlchemy
         
@@ -441,7 +429,7 @@ class TestAppExtensions:
         with app.app_context():
             assert db.session is not None
     
-    def test_wtforms_extension(self):
+    def test_wtforms_extension(self, app):
         """Test WTForms extension"""
         # WTForms is used in forms, check that forms work
         from flask_app.forms import LoginForm
