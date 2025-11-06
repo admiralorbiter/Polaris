@@ -32,11 +32,38 @@ Make Volunteers your north Star
 
 ## Database Setup
 
-1. The application will automatically create a SQLite database in development mode
-2. To create an admin user, run:
+1. Initialize the database with default roles and permissions:
    ```bash
-   python create_admin.py
+   python scripts/init_database.py
    ```
+
+2. Create an admin user:
+   ```bash
+   python scripts/create_admin.py
+   ```
+
+3. (Optional) Seed the database with sample data:
+   ```bash
+   # Seed with default admin credentials (admin/admin)
+   python scripts/seed_database.py
+   
+   # Seed with custom admin credentials
+   python scripts/seed_database.py --admin-username myadmin --admin-password mypassword
+   
+   # Clear existing data and reseed
+   python scripts/seed_database.py --clear
+   
+   # Dry run to see what would be created
+   python scripts/seed_database.py --dry-run
+   ```
+
+   The seed script creates:
+   - Super admin user (configurable)
+   - Sample organizations (Community Center, Local School, Non-Profit Org)
+   - Sample users with different roles (org admins, coordinators, volunteers, viewers)
+   - Sample volunteers with full data (contact info, skills, interests, availability, hours)
+   - Sample students and teachers
+   - Contact relationships and organization links
 
 ## Running the Application
 

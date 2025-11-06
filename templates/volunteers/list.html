@@ -15,19 +15,158 @@
         </a>
     </div>
 
+    <!-- Search Bar -->
+    <div class="mb-3">
+        <form method="GET" action="{{ url_for('volunteers_list') }}" class="d-flex gap-2">
+            <div class="input-group flex-grow-1" style="max-width: 500px;">
+                <span class="input-group-text">
+                    <i class="fas fa-search"></i>
+                </span>
+                <input type="text" 
+                       class="form-control" 
+                       name="search" 
+                       id="searchInput"
+                       placeholder="Search by name, email, phone, title, or industry..." 
+                       value="{{ search_term }}">
+                {% if search_term %}
+                <a href="{{ url_for('volunteers_list', sort=sort_column, order=sort_order) }}" 
+                   class="btn btn-outline-secondary" 
+                   title="Clear search">
+                    <i class="fas fa-times"></i>
+                </a>
+                {% endif %}
+            </div>
+            <button type="submit" class="btn btn-primary">
+                <i class="fas fa-search"></i> Search
+            </button>
+            {% if search_term %}
+            <div class="d-flex align-items-center ms-2">
+                <span class="text-muted">
+                    {{ volunteers.total }} result{{ 's' if volunteers.total != 1 else '' }} found
+                </span>
+            </div>
+            {% endif %}
+            <!-- Preserve sort parameters -->
+            {% if sort_column %}
+            <input type="hidden" name="sort" value="{{ sort_column }}">
+            {% endif %}
+            {% if sort_order %}
+            <input type="hidden" name="order" value="{{ sort_order }}">
+            {% endif %}
+        </form>
+    </div>
+
     <!-- Volunteers Table -->
     {% if volunteers.items %}
     <div class="table-responsive">
         <table class="table table-striped table-hover">
             <thead>
                 <tr>
-                    <th>Name</th>
-                    <th>Email</th>
-                    <th>Phone</th>
-                    <th>Status</th>
-                    <th>Total Hours</th>
-                    <th>Last Volunteer Date</th>
-                    <th>Created</th>
+                    <th>
+                        <a href="{{ url_for('volunteers_list', search=search_term, sort='name', order='asc' if sort_column != 'name' or sort_order == 'desc' else 'desc') }}" 
+                           class="text-decoration-none text-white sortable-header">
+                            Name
+                            {% if sort_column == 'name' %}
+                                {% if sort_order == 'asc' %}
+                                    <i class="fas fa-sort-up ms-1"></i>
+                                {% else %}
+                                    <i class="fas fa-sort-down ms-1"></i>
+                                {% endif %}
+                            {% else %}
+                                <i class="fas fa-sort ms-1" style="opacity: 0.5;"></i>
+                            {% endif %}
+                        </a>
+                    </th>
+                    <th>
+                        <a href="{{ url_for('volunteers_list', search=search_term, sort='email', order='asc' if sort_column != 'email' or sort_order == 'desc' else 'desc') }}" 
+                           class="text-decoration-none text-white sortable-header">
+                            Email
+                            {% if sort_column == 'email' %}
+                                {% if sort_order == 'asc' %}
+                                    <i class="fas fa-sort-up ms-1"></i>
+                                {% else %}
+                                    <i class="fas fa-sort-down ms-1"></i>
+                                {% endif %}
+                            {% else %}
+                                <i class="fas fa-sort ms-1" style="opacity: 0.5;"></i>
+                            {% endif %}
+                        </a>
+                    </th>
+                    <th>
+                        <a href="{{ url_for('volunteers_list', search=search_term, sort='phone', order='asc' if sort_column != 'phone' or sort_order == 'desc' else 'desc') }}" 
+                           class="text-decoration-none text-white sortable-header">
+                            Phone
+                            {% if sort_column == 'phone' %}
+                                {% if sort_order == 'asc' %}
+                                    <i class="fas fa-sort-up ms-1"></i>
+                                {% else %}
+                                    <i class="fas fa-sort-down ms-1"></i>
+                                {% endif %}
+                            {% else %}
+                                <i class="fas fa-sort ms-1" style="opacity: 0.5;"></i>
+                            {% endif %}
+                        </a>
+                    </th>
+                    <th>
+                        <a href="{{ url_for('volunteers_list', search=search_term, sort='status', order='asc' if sort_column != 'status' or sort_order == 'desc' else 'desc') }}" 
+                           class="text-decoration-none text-white sortable-header">
+                            Status
+                            {% if sort_column == 'status' %}
+                                {% if sort_order == 'asc' %}
+                                    <i class="fas fa-sort-up ms-1"></i>
+                                {% else %}
+                                    <i class="fas fa-sort-down ms-1"></i>
+                                {% endif %}
+                            {% else %}
+                                <i class="fas fa-sort ms-1" style="opacity: 0.5;"></i>
+                            {% endif %}
+                        </a>
+                    </th>
+                    <th>
+                        <a href="{{ url_for('volunteers_list', search=search_term, sort='hours', order='asc' if sort_column != 'hours' or sort_order == 'desc' else 'desc') }}" 
+                           class="text-decoration-none text-white sortable-header">
+                            Total Hours
+                            {% if sort_column == 'hours' %}
+                                {% if sort_order == 'asc' %}
+                                    <i class="fas fa-sort-up ms-1"></i>
+                                {% else %}
+                                    <i class="fas fa-sort-down ms-1"></i>
+                                {% endif %}
+                            {% else %}
+                                <i class="fas fa-sort ms-1" style="opacity: 0.5;"></i>
+                            {% endif %}
+                        </a>
+                    </th>
+                    <th>
+                        <a href="{{ url_for('volunteers_list', search=search_term, sort='last_date', order='asc' if sort_column != 'last_date' or sort_order == 'desc' else 'desc') }}" 
+                           class="text-decoration-none text-white sortable-header">
+                            Last Volunteer Date
+                            {% if sort_column == 'last_date' %}
+                                {% if sort_order == 'asc' %}
+                                    <i class="fas fa-sort-up ms-1"></i>
+                                {% else %}
+                                    <i class="fas fa-sort-down ms-1"></i>
+                                {% endif %}
+                            {% else %}
+                                <i class="fas fa-sort ms-1" style="opacity: 0.5;"></i>
+                            {% endif %}
+                        </a>
+                    </th>
+                    <th>
+                        <a href="{{ url_for('volunteers_list', search=search_term, sort='created', order='asc' if sort_column != 'created' or sort_order == 'desc' else 'desc') }}" 
+                           class="text-decoration-none text-white sortable-header">
+                            Created
+                            {% if sort_column == 'created' %}
+                                {% if sort_order == 'asc' %}
+                                    <i class="fas fa-sort-up ms-1"></i>
+                                {% else %}
+                                    <i class="fas fa-sort-down ms-1"></i>
+                                {% endif %}
+                            {% else %}
+                                <i class="fas fa-sort ms-1" style="opacity: 0.5;"></i>
+                            {% endif %}
+                        </a>
+                    </th>
                     <th>Actions</th>
                 </tr>
             </thead>
@@ -35,14 +174,14 @@
                 {% for volunteer in volunteers.items %}
                 <tr>
                     <td>
-                        <a href="#" class="user-link">
+                        <a href="{{ url_for('volunteers_view', volunteer_id=volunteer.id) }}" class="user-link">
                             {{ volunteer.get_full_name() }}
                         </a>
                     </td>
                     <td>
                         {% set primary_email = volunteer.get_primary_email() %}
                         {% if primary_email %}
-                            {{ primary_email.email }}
+                            {{ primary_email }}
                         {% else %}
                             <span class="text-muted">—</span>
                         {% endif %}
@@ -50,7 +189,7 @@
                     <td>
                         {% set primary_phone = volunteer.get_primary_phone() %}
                         {% if primary_phone %}
-                            {{ primary_phone.phone_number }}
+                            {{ primary_phone }}
                         {% else %}
                             <span class="text-muted">—</span>
                         {% endif %}
@@ -81,12 +220,12 @@
                     <td>{{ volunteer.created_at.strftime('%Y-%m-%d') }}</td>
                     <td>
                         <div class="btn-group" role="group">
-                            <a href="#"
+                            <a href="{{ url_for('volunteers_view', volunteer_id=volunteer.id) }}"
                                class="btn btn-sm btn-outline-primary" title="View">
                                 <i class="fas fa-eye"></i>
                                 <span class="btn-text">View</span>
                             </a>
-                            <a href="#"
+                            <a href="{{ url_for('volunteers_edit', volunteer_id=volunteer.id) }}"
                                class="btn btn-sm btn-outline-secondary" title="Edit">
                                 <i class="fas fa-edit"></i>
                                 <span class="btn-text">Edit</span>
@@ -101,11 +240,12 @@
 
     <!-- Pagination -->
     {% if volunteers.pages > 1 %}
-    <nav aria-label="Volunteer pagination">
-        <ul class="pagination justify-content-center">
+    <div class="d-flex justify-content-center mt-4">
+        <nav aria-label="Volunteer pagination">
+            <ul class="pagination mb-0">
             {% if volunteers.has_prev %}
                 <li class="page-item">
-                    <a class="page-link" href="{{ url_for('volunteers_list', page=volunteers.prev_num) }}">Previous</a>
+                    <a class="page-link" href="{{ url_for('volunteers_list', page=volunteers.prev_num, search=search_term, sort=sort_column, order=sort_order) }}">Previous</a>
                 </li>
             {% endif %}
 
@@ -113,7 +253,7 @@
                 {% if page_num %}
                     {% if page_num != volunteers.page %}
                         <li class="page-item">
-                            <a class="page-link" href="{{ url_for('volunteers_list', page=page_num) }}">{{ page_num }}</a>
+                            <a class="page-link" href="{{ url_for('volunteers_list', page=page_num, search=search_term, sort=sort_column, order=sort_order) }}">{{ page_num }}</a>
                         </li>
                     {% else %}
                         <li class="page-item active">
@@ -129,18 +269,52 @@
 
             {% if volunteers.has_next %}
                 <li class="page-item">
-                    <a class="page-link" href="{{ url_for('volunteers_list', page=volunteers.next_num) }}">Next</a>
+                    <a class="page-link" href="{{ url_for('volunteers_list', page=volunteers.next_num, search=search_term, sort=sort_column, order=sort_order) }}">Next</a>
                 </li>
             {% endif %}
-        </ul>
-    </nav>
+            </ul>
+        </nav>
+    </div>
     {% endif %}
     {% else %}
     <div class="alert alert-info">
         <i class="fas fa-info-circle me-2"></i>
-        No volunteers found. <a href="{{ url_for('volunteers_create') }}">Create your first volunteer</a> to get started.
+        {% if search_term %}
+            No volunteers found matching "{{ search_term }}". 
+            <a href="{{ url_for('volunteers_list', sort=sort_column, order=sort_order) }}">Clear search</a> or 
+            <a href="{{ url_for('volunteers_create') }}">create a new volunteer</a>.
+        {% else %}
+            No volunteers found. <a href="{{ url_for('volunteers_create') }}">Create your first volunteer</a> to get started.
+        {% endif %}
     </div>
     {% endif %}
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Auto-submit search on Enter key
+document.addEventListener('DOMContentLoaded', function() {
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+        searchInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                this.form.submit();
+            }
+        });
+    }
+});
+</script>
+<style>
+.sortable-header {
+    transition: opacity 0.2s;
+}
+
+.sortable-header:hover {
+    opacity: 0.8;
+    text-decoration: underline !important;
+}
+</style>
 {% endblock %}
 

@@ -1,0 +1,409 @@
+{% extends "base.html" %}
+
+{% block title %}Volunteer Details - {{ volunteer.get_full_name() }}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="admin-container">
+    <div class="admin-header">
+        <h1>Volunteer Details</h1>
+        <div class="header-actions">
+            <a href="{{ url_for('volunteers_edit', volunteer_id=volunteer.id) }}" class="btn btn-primary">
+                <i class="fas fa-edit"></i> Edit Volunteer
+            </a>
+            <a href="{{ url_for('volunteers_list') }}" class="btn btn-secondary">
+                <i class="fas fa-arrow-left"></i> Back to Volunteers
+            </a>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Basic Information -->
+        <div class="col-md-8">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Basic Information</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="info-item">
+                                <label>Full Name:</label>
+                                <span>{{ volunteer.get_full_name() }}</span>
+                            </div>
+                            {% if volunteer.preferred_name %}
+                            <div class="info-item">
+                                <label>Preferred Name:</label>
+                                <span>{{ volunteer.preferred_name }}</span>
+                            </div>
+                            {% endif %}
+                            <div class="info-item">
+                                <label>Volunteer Status:</label>
+                                {% if volunteer.volunteer_status.value == 'active' %}
+                                    <span class="badge bg-success">Active</span>
+                                {% elif volunteer.volunteer_status.value == 'hold' %}
+                                    <span class="badge bg-warning">Hold</span>
+                                {% else %}
+                                    <span class="badge bg-secondary">Inactive</span>
+                                {% endif %}
+                            </div>
+                            {% if volunteer.organization %}
+                            <div class="info-item">
+                                <label>Organization:</label>
+                                <span>{{ volunteer.organization.name }}</span>
+                            </div>
+                            {% endif %}
+                        </div>
+                        <div class="col-md-6">
+                            {% if volunteer.title %}
+                            <div class="info-item">
+                                <label>Title/Position:</label>
+                                <span>{{ volunteer.title }}</span>
+                            </div>
+                            {% endif %}
+                            {% if volunteer.industry %}
+                            <div class="info-item">
+                                <label>Industry:</label>
+                                <span>{{ volunteer.industry }}</span>
+                            </div>
+                            {% endif %}
+                            {% if volunteer.clearance_status %}
+                            <div class="info-item">
+                                <label>Clearance Status:</label>
+                                <span>{{ volunteer.clearance_status }}</span>
+                            </div>
+                            {% endif %}
+                            <div class="info-item">
+                                <label>Is Local:</label>
+                                <span>
+                                    {% if volunteer.is_local %}
+                                        <span class="badge bg-success">Yes</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">No</span>
+                                    {% endif %}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Contact Information -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Contact Information</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6>Email Addresses</h6>
+                            {% if volunteer.emails %}
+                                <ul class="list-unstyled">
+                                    {% for email in volunteer.emails %}
+                                    <li>
+                                        {{ email.email }}
+                                        {% if email.is_primary %}
+                                            <span class="badge bg-primary">Primary</span>
+                                        {% endif %}
+                                        {% if email.is_verified %}
+                                            <span class="badge bg-success">Verified</span>
+                                        {% endif %}
+                                        <span class="text-muted">({{ email.email_type.value }})</span>
+                                    </li>
+                                    {% endfor %}
+                                </ul>
+                            {% else %}
+                                <p class="text-muted">No email addresses on file.</p>
+                            {% endif %}
+                        </div>
+                        <div class="col-md-6">
+                            <h6>Phone Numbers</h6>
+                            {% if volunteer.phones %}
+                                <ul class="list-unstyled">
+                                    {% for phone in volunteer.phones %}
+                                    <li>
+                                        {{ phone.phone_number }}
+                                        {% if phone.is_primary %}
+                                            <span class="badge bg-primary">Primary</span>
+                                        {% endif %}
+                                        {% if phone.can_text %}
+                                            <span class="badge bg-info">Can Text</span>
+                                        {% endif %}
+                                        <span class="text-muted">({{ phone.phone_type.value }})</span>
+                                    </li>
+                                    {% endfor %}
+                                </ul>
+                            {% else %}
+                                <p class="text-muted">No phone numbers on file.</p>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% if volunteer.addresses %}
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <h6>Addresses</h6>
+                            <ul class="list-unstyled">
+                                {% for address in volunteer.addresses %}
+                                <li>
+                                    {{ address.get_full_address() }}
+                                    {% if address.is_primary %}
+                                        <span class="badge bg-primary">Primary</span>
+                                    {% endif %}
+                                    <span class="text-muted">({{ address.address_type.value }})</span>
+                                </li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Volunteer Details -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Volunteer Details</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            {% if volunteer.first_volunteer_date %}
+                            <div class="info-item">
+                                <label>First Volunteer Date:</label>
+                                <span>{{ volunteer.first_volunteer_date.strftime('%Y-%m-%d') }}</span>
+                            </div>
+                            {% endif %}
+                            {% if volunteer.last_volunteer_date %}
+                            <div class="info-item">
+                                <label>Last Volunteer Date:</label>
+                                <span>{{ volunteer.last_volunteer_date.strftime('%Y-%m-%d') }}</span>
+                            </div>
+                            {% endif %}
+                            <div class="info-item">
+                                <label>Total Volunteer Hours:</label>
+                                <span>{{ "%.2f"|format(volunteer.total_volunteer_hours) }}</span>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="info-item">
+                                <label>Contact Preferences:</label>
+                                <div>
+                                    {% if volunteer.do_not_call %}
+                                        <span class="badge bg-warning">Do Not Call</span>
+                                    {% endif %}
+                                    {% if volunteer.do_not_email %}
+                                        <span class="badge bg-warning">Do Not Email</span>
+                                    {% endif %}
+                                    {% if volunteer.do_not_contact %}
+                                        <span class="badge bg-danger">Do Not Contact</span>
+                                    {% endif %}
+                                    {% if not volunteer.do_not_call and not volunteer.do_not_email and not volunteer.do_not_contact %}
+                                        <span class="text-muted">No restrictions</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Skills and Interests -->
+            {% if volunteer.skills or volunteer.interests %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Skills & Interests</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        {% if volunteer.skills %}
+                        <div class="col-md-6">
+                            <h6>Skills</h6>
+                            <ul class="list-unstyled">
+                                {% for skill in volunteer.skills %}
+                                <li>
+                                    <strong>{{ skill.skill_name }}</strong>
+                                    {% if skill.skill_category %}
+                                        <span class="text-muted">({{ skill.skill_category }})</span>
+                                    {% endif %}
+                                    {% if skill.proficiency_level %}
+                                        <span class="badge bg-info">{{ skill.proficiency_level }}</span>
+                                    {% endif %}
+                                    {% if skill.verified %}
+                                        <span class="badge bg-success">Verified</span>
+                                    {% endif %}
+                                </li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                        {% endif %}
+                        {% if volunteer.interests %}
+                        <div class="col-md-6">
+                            <h6>Interests</h6>
+                            <ul class="list-unstyled">
+                                {% for interest in volunteer.interests %}
+                                <li>
+                                    <strong>{{ interest.interest_name }}</strong>
+                                    {% if interest.interest_category %}
+                                        <span class="text-muted">({{ interest.interest_category }})</span>
+                                    {% endif %}
+                                </li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Volunteer Hours History -->
+            {% if volunteer.volunteer_hours %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Volunteer Hours History</h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Hours</th>
+                                    <th>Organization</th>
+                                    <th>Description</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for hours in volunteer.volunteer_hours|sort(attribute='volunteer_date', reverse=True) %}
+                                <tr>
+                                    <td>{{ hours.volunteer_date.strftime('%Y-%m-%d') }}</td>
+                                    <td>{{ "%.2f"|format(hours.hours_worked) }}</td>
+                                    <td>{{ hours.organization.name if hours.organization else 'N/A' }}</td>
+                                    <td>{{ hours.activity_type or '—' }}</td>
+                                    <td>
+                                        {% if hours.is_verified %}
+                                            <span class="badge bg-success">Verified</span>
+                                        {% else %}
+                                            <span class="badge bg-warning">Pending</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Notes -->
+            {% if volunteer.notes or volunteer.internal_notes %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Notes</h5>
+                </div>
+                <div class="card-body">
+                    {% if volunteer.notes %}
+                    <div class="mb-3">
+                        <label class="fw-semibold">Public Notes:</label>
+                        <p>{{ volunteer.notes }}</p>
+                    </div>
+                    {% endif %}
+                    {% if volunteer.internal_notes %}
+                    <div>
+                        <label class="fw-semibold">Internal Notes:</label>
+                        <p class="text-muted">{{ volunteer.internal_notes }}</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Sidebar -->
+        <div class="col-md-4">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Quick Actions</h5>
+                </div>
+                <div class="card-body">
+                    <div class="d-grid gap-2">
+                        <a href="{{ url_for('volunteers_edit', volunteer_id=volunteer.id) }}" class="btn btn-outline-primary">
+                            <i class="fas fa-edit"></i> Edit Volunteer
+                        </a>
+                        <a href="{{ url_for('volunteers_list') }}" class="btn btn-outline-secondary">
+                            <i class="fas fa-arrow-left"></i> Back to List
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Demographics -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Demographics</h5>
+                </div>
+                <div class="card-body">
+                    {% if volunteer.birthdate %}
+                    <div class="info-item">
+                        <label>Birthdate:</label>
+                        <span>{{ volunteer.birthdate.strftime('%Y-%m-%d') }}</span>
+                    </div>
+                    {% endif %}
+                    {% if volunteer.gender %}
+                    <div class="info-item">
+                        <label>Gender:</label>
+                        <span>{{ volunteer.gender }}</span>
+                    </div>
+                    {% endif %}
+                    {% if volunteer.race %}
+                    <div class="info-item">
+                        <label>Race:</label>
+                        <span>{{ volunteer.race }}</span>
+                    </div>
+                    {% endif %}
+                    {% if volunteer.education_level %}
+                    <div class="info-item">
+                        <label>Education Level:</label>
+                        <span>{{ volunteer.education_level }}</span>
+                    </div>
+                    {% endif %}
+                    {% if volunteer.preferred_language %}
+                    <div class="info-item">
+                        <label>Preferred Language:</label>
+                        <span>{{ volunteer.preferred_language }}</span>
+                    </div>
+                    {% endif %}
+                    {% if not volunteer.birthdate and not volunteer.gender and not volunteer.race and not volunteer.education_level and not volunteer.preferred_language %}
+                        <p class="text-muted">No demographic information on file.</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Metadata -->
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Metadata</h5>
+                </div>
+                <div class="card-body">
+                    <div class="info-item">
+                        <label>Created:</label>
+                        <span>{{ volunteer.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</span>
+                    </div>
+                    {% if volunteer.updated_at %}
+                    <div class="info-item">
+                        <label>Last Updated:</label>
+                        <span>{{ volunteer.updated_at.strftime('%Y-%m-%d %H:%M:%S') }}</span>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+

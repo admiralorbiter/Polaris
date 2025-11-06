@@ -5,8 +5,10 @@ Volunteer management routes
 
 from flask import current_app, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
+from sqlalchemy import or_, desc, exists
+from sqlalchemy.orm import joinedload
 
-from flask_app.forms.volunteer import CreateVolunteerForm
+from flask_app.forms.volunteer import CreateVolunteerForm, UpdateVolunteerForm
 from flask_app.models import (
     ContactEmail,
     ContactPhone,
@@ -25,18 +27,120 @@ def register_volunteer_routes(app):
     @app.route("/volunteers")
     @login_required
     def volunteers_list():
-        """List all volunteers"""
+        """List all volunteers with search and sorting"""
         try:
             page = request.args.get("page", 1, type=int)
             per_page = 20
+            search_term = request.args.get("search", "").strip()
+            sort_column = request.args.get("sort", "name")
+            sort_order = request.args.get("order", "asc")
 
-            # Query all volunteers, ordered by name
-            volunteers = (
-                Volunteer.query.order_by(Volunteer.last_name, Volunteer.first_name)
-                .paginate(page=page, per_page=per_page, error_out=False)
+            # Base query with eager loading
+            query = Volunteer.query.options(
+                joinedload(Volunteer.emails),
+                joinedload(Volunteer.phones)
             )
 
-            return render_template("volunteers/list.html", volunteers=volunteers)
+            # Apply search filter if provided
+            if search_term:
+                # Create subqueries for email and phone search to avoid duplicates
+                email_search = exists().where(
+                    db.and_(
+                        ContactEmail.contact_id == Volunteer.id,
+                        ContactEmail.email.ilike(f"%{search_term}%")
+                    )
+                )
+                phone_search = exists().where(
+                    db.and_(
+                        ContactPhone.contact_id == Volunteer.id,
+                        ContactPhone.phone_number.ilike(f"%{search_term}%")
+                    )
+                )
+                
+                search_filter = or_(
+                    Volunteer.first_name.ilike(f"%{search_term}%"),
+                    Volunteer.last_name.ilike(f"%{search_term}%"),
+                    Volunteer.preferred_name.ilike(f"%{search_term}%"),
+                    email_search,
+                    phone_search,
+                    Volunteer.title.ilike(f"%{search_term}%"),
+                    Volunteer.industry.ilike(f"%{search_term}%"),
+                )
+                query = query.filter(search_filter)
+
+            # Apply sorting
+            sort_mapping = {
+                "name": (Volunteer.last_name, Volunteer.first_name),
+                "email": ContactEmail.email,
+                "phone": ContactPhone.phone_number,
+                "status": Volunteer.volunteer_status,
+                "hours": Volunteer.total_volunteer_hours,
+                "last_date": Volunteer.last_volunteer_date,
+                "created": Volunteer.created_at,
+                "last_name": Volunteer.last_name,
+                "first_name": Volunteer.first_name,
+            }
+
+            if sort_column in sort_mapping:
+                sort_field = sort_mapping[sort_column]
+                
+                # Handle multi-column sort for name
+                if sort_column == "name":
+                    if sort_order == "desc":
+                        query = query.order_by(desc(Volunteer.last_name), desc(Volunteer.first_name))
+                    else:
+                        query = query.order_by(Volunteer.last_name, Volunteer.first_name)
+                # Handle email/phone sorting (need to join if not already joined)
+                elif sort_column in ["email", "phone"]:
+                    if search_term:
+                        # Already joined for search, just order
+                        if sort_order == "desc":
+                            query = query.order_by(desc(sort_field))
+                        else:
+                            query = query.order_by(sort_field)
+                    else:
+                        # Need to join for sorting - use subquery to get primary email/phone
+                        if sort_column == "email":
+                            # Join and filter for primary emails only, then order
+                            query = query.outerjoin(
+                                ContactEmail, 
+                                db.and_(
+                                    ContactEmail.contact_id == Volunteer.id,
+                                    ContactEmail.is_primary == True
+                                )
+                            ).order_by(
+                                desc(sort_field) if sort_order == "desc" else sort_field
+                            )
+                        else:  # phone
+                            query = query.outerjoin(
+                                ContactPhone,
+                                db.and_(
+                                    ContactPhone.contact_id == Volunteer.id,
+                                    ContactPhone.is_primary == True
+                                )
+                            ).order_by(
+                                desc(sort_field) if sort_order == "desc" else sort_field
+                            )
+                else:
+                    # Simple column sort
+                    if sort_order == "desc":
+                        query = query.order_by(desc(sort_field))
+                    else:
+                        query = query.order_by(sort_field)
+            else:
+                # Default sort by name
+                query = query.order_by(Volunteer.last_name, Volunteer.first_name)
+
+            # Paginate
+            volunteers = query.paginate(page=page, per_page=per_page, error_out=False)
+
+            return render_template(
+                "volunteers/list.html",
+                volunteers=volunteers,
+                search_term=search_term,
+                sort_column=sort_column,
+                sort_order=sort_order,
+            )
 
         except Exception as e:
             current_app.logger.error(f"Error in volunteers list page: {str(e)}")
@@ -116,4 +220,131 @@ def register_volunteer_routes(app):
             current_app.logger.error(f"Error creating volunteer: {str(e)}")
             flash(f"An error occurred while creating volunteer: {str(e)}", "danger")
             return render_template("volunteers/create.html", form=form)
+
+    @app.route("/volunteers/<int:volunteer_id>")
+    @login_required
+    def volunteers_view(volunteer_id):
+        """View volunteer details"""
+        try:
+            volunteer = Volunteer.query.options(
+                joinedload(Volunteer.emails),
+                joinedload(Volunteer.phones),
+                joinedload(Volunteer.addresses),
+                joinedload(Volunteer.skills),
+                joinedload(Volunteer.interests),
+                joinedload(Volunteer.availability_slots),
+                joinedload(Volunteer.volunteer_hours),
+            ).get_or_404(volunteer_id)
+
+            return render_template("volunteers/view.html", volunteer=volunteer)
+
+        except Exception as e:
+            current_app.logger.error(f"Error viewing volunteer {volunteer_id}: {str(e)}")
+            flash("An error occurred while loading volunteer details.", "danger")
+            return redirect(url_for("volunteers_list"))
+
+    @app.route("/volunteers/<int:volunteer_id>/edit", methods=["GET", "POST"])
+    @login_required
+    def volunteers_edit(volunteer_id):
+        """Edit volunteer information"""
+        volunteer = Volunteer.query.options(
+            joinedload(Volunteer.emails),
+            joinedload(Volunteer.phones),
+        ).get_or_404(volunteer_id)
+
+        form = UpdateVolunteerForm(obj=volunteer)
+
+        # Pre-populate email and phone from primary contact info
+        primary_email = volunteer.get_primary_email()
+        primary_phone_obj = next((p for p in volunteer.phones if p.is_primary), None)
+        if primary_email:
+            form.email.data = primary_email
+        if primary_phone_obj:
+            form.phone_number.data = primary_phone_obj.phone_number
+            form.can_text.data = primary_phone_obj.can_text
+
+        try:
+            if form.validate_on_submit():
+                # Update base contact fields
+                volunteer.first_name = form.first_name.data.strip()
+                volunteer.last_name = form.last_name.data.strip()
+                volunteer.salutation = form.salutation.data.strip() if form.salutation.data else None
+                volunteer.middle_name = form.middle_name.data.strip() if form.middle_name.data else None
+                volunteer.suffix = form.suffix.data.strip() if form.suffix.data else None
+                volunteer.preferred_name = form.preferred_name.data.strip() if form.preferred_name.data else None
+                volunteer.gender = form.gender.data.strip() if form.gender.data else None
+                volunteer.race = form.race.data.strip() if form.race.data else None
+                volunteer.birthdate = form.birthdate.data if form.birthdate.data else None
+                volunteer.education_level = form.education_level.data.strip() if form.education_level.data else None
+                volunteer.is_local = form.is_local.data
+                volunteer.do_not_call = form.do_not_call.data
+                volunteer.do_not_email = form.do_not_email.data
+                volunteer.do_not_contact = form.do_not_contact.data
+                volunteer.preferred_language = form.preferred_language.data.strip() if form.preferred_language.data else None
+                volunteer.notes = form.notes.data.strip() if form.notes.data else None
+                volunteer.internal_notes = form.internal_notes.data.strip() if form.internal_notes.data else None
+
+                # Update volunteer-specific fields
+                volunteer.volunteer_status = VolunteerStatus(form.volunteer_status.data)
+                volunteer.title = form.title.data.strip() if form.title.data else None
+                volunteer.industry = form.industry.data.strip() if form.industry.data else None
+                volunteer.clearance_status = form.clearance_status.data.strip() if form.clearance_status.data else None
+
+                # Update primary email if changed
+                if form.email.data:
+                    primary_email_obj = next((e for e in volunteer.emails if e.is_primary), None)
+                    if primary_email_obj:
+                        if primary_email_obj.email != form.email.data.strip():
+                            primary_email_obj.email = form.email.data.strip()
+                    else:
+                        # Create new primary email
+                        email = ContactEmail(
+                            contact_id=volunteer.id,
+                            email=form.email.data.strip(),
+                            email_type=EmailType.PERSONAL,
+                            is_primary=True,
+                            is_verified=False,
+                        )
+                        db.session.add(email)
+                elif primary_email:
+                    # Remove primary email if form is empty
+                    primary_email_obj = next((e for e in volunteer.emails if e.is_primary), None)
+                    if primary_email_obj:
+                        db.session.delete(primary_email_obj)
+
+                # Update primary phone if changed
+                if form.phone_number.data:
+                    primary_phone_obj = next((p for p in volunteer.phones if p.is_primary), None)
+                    if primary_phone_obj:
+                        if primary_phone_obj.phone_number != form.phone_number.data.strip():
+                            primary_phone_obj.phone_number = form.phone_number.data.strip()
+                        primary_phone_obj.can_text = form.can_text.data
+                    else:
+                        # Create new primary phone
+                        phone = ContactPhone(
+                            contact_id=volunteer.id,
+                            phone_number=form.phone_number.data.strip(),
+                            phone_type=PhoneType.MOBILE,
+                            is_primary=True,
+                            can_text=form.can_text.data,
+                        )
+                        db.session.add(phone)
+                elif primary_phone:
+                    # Remove primary phone if form is empty
+                    primary_phone_obj = next((p for p in volunteer.phones if p.is_primary), None)
+                    if primary_phone_obj:
+                        db.session.delete(primary_phone_obj)
+
+                db.session.commit()
+
+                flash(f"Volunteer {volunteer.get_full_name()} updated successfully!", "success")
+                return redirect(url_for("volunteers_view", volunteer_id=volunteer_id))
+
+            return render_template("volunteers/edit.html", form=form, volunteer=volunteer)
+
+        except Exception as e:
+            db.session.rollback()
+            current_app.logger.error(f"Error updating volunteer {volunteer_id}: {str(e)}")
+            flash(f"An error occurred while updating volunteer: {str(e)}", "danger")
+            return render_template("volunteers/edit.html", form=form, volunteer=volunteer)
 
