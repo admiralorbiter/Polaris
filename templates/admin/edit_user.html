@@ -28,7 +28,7 @@
                 <div class="card-body">
                     <form method="POST">
                         {{ form.hidden_tag() }}
-                        
+
                         <div class="row">
                             <div class="col-md-6">
                                 <div class="form-group">
@@ -279,26 +279,26 @@
     $(document).ready(function() {
         const organizationSearchField = $('#organization_search_edit');
         const organizationIdField = $('#organization_id_edit');
-        
+
         // Helper function to show toast notifications
         function showToast(type, message) {
             const toastId = type === 'success' ? 'toast-success-edit' : 'toast-error-edit';
             const bodyId = type === 'success' ? 'toast-success-body-edit' : 'toast-error-body-edit';
             const toastElement = document.getElementById(toastId);
             const toastBody = document.getElementById(bodyId);
-            
+
             toastBody.textContent = message;
             const toast = new bootstrap.Toast(toastElement, { autohide: true, delay: 5000 });
             toast.show();
         }
-        
+
         // Initialize Select2 for organization search with ability to create new
         if (organizationSearchField.length) {
             // Make sure Select2 isn't already initialized
             if (organizationSearchField.hasClass('select2-hidden-accessible')) {
                 organizationSearchField.select2('destroy');
             }
-            
+
             var select2Config = {
                 theme: 'bootstrap-5',
                 placeholder: 'Type to search organizations...',
@@ -310,17 +310,17 @@
                     if (!data.id) {
                         return data.text;
                     }
-                    
+
                     if (data.id.toString().startsWith('new:')) {
                         // Style for "create new" option
                         var $result = $(
-                            '<span class="text-primary"><i class="fas fa-plus-circle me-2"></i><strong>' + 
-                            data.text.replace(' (Create new organization)', '') + 
+                            '<span class="text-primary"><i class="fas fa-plus-circle me-2"></i><strong>' +
+                            data.text.replace(' (Create new organization)', '') +
                             '</strong> <span class="badge bg-info ms-2">Create New</span></span>'
                         );
                         return $result;
                     }
-                    
+
                     // Style for existing organizations
                     var orgName = data.text.split(' (')[0];
                     var orgSlug = data.text.includes('(') ? data.text.match(/\(([^)]+)\)/)[1] : '';
@@ -360,7 +360,7 @@
                     processResults: function (data, params) {
                         // Hide loading spinner
                         $('#org-loading-spinner-edit').addClass('d-none');
-                        
+
                         if (!data || !data.results) {
                             return { results: [] };
                         }
@@ -372,7 +372,7 @@
                                 slug: org.slug
                             };
                         });
-                        
+
                         var searchTerm = params.term || '';
                         if (results.length === 0 && searchTerm.length > 0) {
                             results.push({
@@ -381,7 +381,7 @@
                                 isNew: true
                             });
                         }
-                        
+
                         return { results: results };
                     },
                     error: function(xhr, status, error) {
@@ -403,26 +403,26 @@
                     }
                 }
             };
-            
+
             organizationSearchField.select2(select2Config);
-            
+
             // Set up event handlers
             organizationSearchField.on('select2:selecting', function (e) {
                 var data = e.params.args.data;
                 if (data && data.id && data.id.toString().startsWith('new:')) {
                     e.preventDefault();
                     var orgName = data.id.toString().replace('new:', '');
-                    
+
                     // Show modal for creating new organization
                     $('#newOrgNameEdit').val(orgName);
                     $('#newOrgDescriptionEdit').val('');
                     const createOrgModal = new bootstrap.Modal(document.getElementById('createOrgModalEdit'));
                     createOrgModal.show();
-                    
+
                     // Store reference to select field for after creation
                     $('#createOrgModalEdit').data('selectField', organizationSearchField);
                     $('#createOrgModalEdit').data('hiddenField', organizationIdField);
-                    
+
                     // Clear the selection
                     organizationSearchField.val(null).trigger('change');
                     return false;
@@ -441,19 +441,19 @@
                 $('#org-selected-badge-edit').addClass('d-none');
             });
         }
-        
+
         // Function to create new organization
         function createNewOrganization(orgName, orgDescription, selectField, hiddenField) {
             // Show loading state
             $('#createOrgSpinnerEdit').removeClass('d-none');
             $('#createOrgIconEdit').addClass('d-none');
             $('#createOrgBtnEdit').prop('disabled', true);
-            
+
             $.ajax({
                 url: '/api/organizations/create',
                 method: 'POST',
                 contentType: 'application/json',
-                data: JSON.stringify({ 
+                data: JSON.stringify({
                     name: orgName,
                     description: orgDescription || null
                 }),
@@ -462,15 +462,15 @@
                     $('#createOrgSpinnerEdit').removeClass('d-none');
                     $('#createOrgIconEdit').removeClass('d-none');
                     $('#createOrgBtnEdit').prop('disabled', false);
-                    
+
                     if (response.success && response.organization) {
                         // Close modal
                         const modal = bootstrap.Modal.getInstance(document.getElementById('createOrgModalEdit'));
                         modal.hide();
-                        
+
                         // Set the newly created organization
                         hiddenField.val(response.organization.id);
-                        
+
                         // Create a new option and select it
                         var newOption = new Option(
                             response.organization.name + ' (' + response.organization.slug + ')',
@@ -479,13 +479,13 @@
                             true
                         );
                         selectField.append(newOption).trigger('change');
-                        
+
                         // Show selected badge
                         $('#org-selected-badge-edit').removeClass('d-none');
-                        
+
                         // Show success message
                         showToast('success', 'Organization "' + response.organization.name + '" created and selected successfully!');
-                        
+
                         // Clear modal form
                         $('#newOrgNameEdit').val('');
                         $('#newOrgDescriptionEdit').val('');
@@ -498,7 +498,7 @@
                     $('#createOrgSpinnerEdit').addClass('d-none');
                     $('#createOrgIconEdit').removeClass('d-none');
                     $('#createOrgBtnEdit').prop('disabled', false);
-                    
+
                     var errorMsg = 'An error occurred while creating organization.';
                     if (xhr.responseJSON && xhr.responseJSON.error) {
                         errorMsg = xhr.responseJSON.error;
@@ -509,30 +509,30 @@
                     } else if (xhr.status === 400) {
                         errorMsg = xhr.responseJSON && xhr.responseJSON.error ? xhr.responseJSON.error : 'Invalid organization data. Please check the name and try again.';
                     }
-                    
+
                     console.error('Error creating organization:', status, error, xhr.responseJSON);
                     showToast('error', errorMsg);
                 }
             });
         }
-        
+
         // Handle modal form submission
         $('#createOrgBtnEdit').on('click', function() {
             const orgName = $('#newOrgNameEdit').val().trim();
             const orgDescription = $('#newOrgDescriptionEdit').val().trim();
-            
+
             if (!orgName) {
                 showToast('error', 'Organization name is required.');
                 $('#newOrgNameEdit').focus();
                 return;
             }
-            
+
             const selectField = $('#createOrgModalEdit').data('selectField');
             const hiddenField = $('#createOrgModalEdit').data('hiddenField');
-            
+
             createNewOrganization(orgName, orgDescription, selectField, hiddenField);
         });
-        
+
         // Clear modal data when closed
         $('#createOrgModalEdit').on('hidden.bs.modal', function() {
             $('#newOrgNameEdit').val('');
@@ -540,7 +540,7 @@
             $('#createOrgModalEdit').removeData('selectField');
             $('#createOrgModalEdit').removeData('hiddenField');
         });
-        
+
         // Check if Select2 loaded, show error if not
         if (typeof $.fn.select2 === 'undefined') {
             console.error('Select2 failed to load');

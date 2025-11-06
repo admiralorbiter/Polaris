@@ -223,11 +223,11 @@ The test suite is designed for CI/CD integration:
 - name: Run Tests
   run: |
     python run_tests.py ci
-    
+
 - name: Run Tests with Coverage
   run: |
     python run_tests.py coverage
-    
+
 - name: Run Security Checks
   run: |
     python run_tests.py security

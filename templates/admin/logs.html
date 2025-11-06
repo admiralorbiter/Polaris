@@ -70,7 +70,7 @@
                             <a class="page-link" href="{{ url_for('admin_logs', page=logs.prev_num) }}">Previous</a>
                         </li>
                     {% endif %}
-                    
+
                     {% for page_num in logs.iter_pages() %}
                         {% if page_num %}
                             {% if page_num != logs.page %}
@@ -88,7 +88,7 @@
                             </li>
                         {% endif %}
                     {% endfor %}
-                    
+
                     {% if logs.has_next %}
                         <li class="page-item">
                             <a class="page-link" href="{{ url_for('admin_logs', page=logs.next_num) }}">Next</a>

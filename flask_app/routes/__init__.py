@@ -3,11 +3,12 @@
 Application routes package
 """
 
-from .main import register_main_routes
-from .auth import register_auth_routes
 from .admin import register_admin_routes
-from .organization import register_organization_routes
 from .api import register_api_routes
+from .auth import register_auth_routes
+from .main import register_main_routes
+from .organization import register_organization_routes
+
 
 def init_routes(app):
     """Initialize all application routes"""

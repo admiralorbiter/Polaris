@@ -82,17 +82,16 @@ main {
     h1 {
         font-size: var(--font-size-4xl);
     }
-    
+
     h2 {
         font-size: var(--font-size-3xl);
     }
-    
+
     h3 {
         font-size: var(--font-size-2xl);
     }
-    
+
     main {
         padding: var(--spacing-md);
     }
 }
-

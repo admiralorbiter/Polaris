@@ -1,117 +1,107 @@
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 from sqlalchemy import inspect
+
 from flask_app.forms import (
-    LoginForm, CreateUserForm, UpdateUserForm, ChangePasswordForm, BulkUserActionForm,
-    CreateOrganizationForm, UpdateOrganizationForm
+    BulkUserActionForm,
+    ChangePasswordForm,
+    CreateOrganizationForm,
+    CreateUserForm,
+    LoginForm,
+    UpdateOrganizationForm,
+    UpdateUserForm,
 )
-from flask_app.models import User, Organization, db
+from flask_app.models import Organization, User, db
 
 
 class TestLoginForm:
     """Test LoginForm functionality"""
-    
+
     def test_login_form_creation(self):
         """Test creating a login form"""
         form = LoginForm()
         assert form.username.data is None
         assert form.password.data is None
-    
+
     def test_login_form_valid_data(self):
         """Test login form with valid data"""
-        form = LoginForm(data={
-            'username': 'testuser',
-            'password': 'validpass123'
-        })
-        assert form.username.data == 'testuser'
-        assert form.password.data == 'validpass123'
-    
+        form = LoginForm(data={"username": "testuser", "password": "validpass123"})
+        assert form.username.data == "testuser"
+        assert form.password.data == "validpass123"
+
     def test_login_form_validation_success(self):
         """Test successful form validation"""
-        form = LoginForm(data={
-            'username': 'validuser',
-            'password': 'password123'
-        })
+        form = LoginForm(data={"username": "validuser", "password": "password123"})
         assert form.validate() is True
-    
+
     def test_login_form_missing_username(self):
         """Test form validation with missing username"""
-        form = LoginForm(data={
-            'password': 'password123'
-        })
+        form = LoginForm(data={"password": "password123"})
         assert form.validate() is False
-        assert 'username' in form.errors
-        assert 'Username is required.' in form.errors['username']
-    
+        assert "username" in form.errors
+        assert "Username is required." in form.errors["username"]
+
     def test_login_form_missing_password(self):
         """Test form validation with missing password"""
-        form = LoginForm(data={
-            'username': 'testuser'
-        })
+        form = LoginForm(data={"username": "testuser"})
         assert form.validate() is False
-        assert 'password' in form.errors
-        assert 'Password is required.' in form.errors['password']
-    
+        assert "password" in form.errors
+        assert "Password is required." in form.errors["password"]
+
     def test_login_form_username_too_short(self):
         """Test form validation with username too short"""
-        form = LoginForm(data={
-            'username': 'ab',  # Less than 3 characters
-            'password': 'password123'
-        })
+        form = LoginForm(
+            data={"username": "ab", "password": "password123"}  # Less than 3 characters
+        )
         assert form.validate() is False
-        assert 'username' in form.errors
-    
+        assert "username" in form.errors
+
     def test_login_form_username_too_long(self):
         """Test form validation with username too long"""
-        form = LoginForm(data={
-            'username': 'a' * 65,  # More than 64 characters
-            'password': 'password123'
-        })
+        form = LoginForm(
+            data={"username": "a" * 65, "password": "password123"}  # More than 64 characters
+        )
         assert form.validate() is False
-        assert 'username' in form.errors
-    
+        assert "username" in form.errors
+
     def test_login_form_username_invalid_characters(self):
         """Test form validation with invalid username characters"""
-        form = LoginForm(data={
-            'username': 'invalid@user!',  # Invalid characters
-            'password': 'password123'
-        })
+        form = LoginForm(
+            data={"username": "invalid@user!", "password": "password123"}  # Invalid characters
+        )
         assert form.validate() is False
-        assert 'username' in form.errors
-        assert 'Username can only contain letters, numbers, underscores, and hyphens.' in form.errors['username']
-    
+        assert "username" in form.errors
+        assert (
+            "Username can only contain letters, numbers, underscores, and hyphens."
+            in form.errors["username"]
+        )
+
     def test_login_form_password_too_short(self):
         """Test form validation with password too short"""
-        form = LoginForm(data={
-            'username': 'testuser',
-            'password': '12345'  # Less than 6 characters
-        })
+        form = LoginForm(
+            data={"username": "testuser", "password": "12345"}  # Less than 6 characters
+        )
         assert form.validate() is False
-        assert 'password' in form.errors
-        assert 'Password must be at least 6 characters long.' in form.errors['password']
-    
+        assert "password" in form.errors
+        assert "Password must be at least 6 characters long." in form.errors["password"]
+
     def test_login_form_username_whitespace_stripping(self):
         """Test that username whitespace is stripped"""
-        form = LoginForm(data={
-            'username': '  testuser  ',
-            'password': 'password123'
-        })
+        form = LoginForm(data={"username": "  testuser  ", "password": "password123"})
         form.validate()
-        assert form.username.data == 'testuser'
-    
+        assert form.username.data == "testuser"
+
     def test_login_form_empty_password(self):
         """Test form validation with empty password"""
-        form = LoginForm(data={
-            'username': 'testuser',
-            'password': ''
-        })
+        form = LoginForm(data={"username": "testuser", "password": ""})
         assert form.validate() is False
-        assert 'password' in form.errors
+        assert "password" in form.errors
 
 
 class TestCreateUserForm:
     """Test CreateUserForm functionality"""
-    
+
     def test_create_user_form_creation(self):
         """Test creating a create user form"""
         form = CreateUserForm()
@@ -121,525 +111,536 @@ class TestCreateUserForm:
         assert form.confirm_password.data is None
         assert form.is_active.data is True
         assert form.is_super_admin.data is False
-    
+
     def test_create_user_form_valid_data(self):
         """Test create user form with valid data"""
-        form = CreateUserForm(data={
-            'username': 'newuser',
-            'email': 'newuser@example.com',
-            'first_name': 'New',
-            'last_name': 'User',
-            'password': 'SecurePass123',
-            'confirm_password': 'SecurePass123',
-            'is_active': True,
-            'is_super_admin': False
-        })
-        assert form.username.data == 'newuser'
-        assert form.email.data == 'newuser@example.com'
-        assert form.first_name.data == 'New'
-        assert form.last_name.data == 'User'
-        assert form.password.data == 'SecurePass123'
-        assert form.confirm_password.data == 'SecurePass123'
+        form = CreateUserForm(
+            data={
+                "username": "newuser",
+                "email": "newuser@example.com",
+                "first_name": "New",
+                "last_name": "User",
+                "password": "SecurePass123",
+                "confirm_password": "SecurePass123",
+                "is_active": True,
+                "is_super_admin": False,
+            }
+        )
+        assert form.username.data == "newuser"
+        assert form.email.data == "newuser@example.com"
+        assert form.first_name.data == "New"
+        assert form.last_name.data == "User"
+        assert form.password.data == "SecurePass123"
+        assert form.confirm_password.data == "SecurePass123"
         assert form.is_active.data is True
         assert form.is_super_admin.data is False
-    
-    @patch('flask_app.models.User.find_by_username')
+
+    @patch("flask_app.models.User.find_by_username")
     def test_create_user_form_validation_success(self, mock_find_username):
         """Test successful form validation"""
         mock_find_username.return_value = None  # Username doesn't exist
-        
-        with patch('flask_app.models.User.find_by_email') as mock_find_email:
+
+        with patch("flask_app.models.User.find_by_email") as mock_find_email:
             mock_find_email.return_value = None  # Email doesn't exist
-            
-            form = CreateUserForm(data={
-                'username': 'newuser',
-                'email': 'newuser@example.com',
-                'first_name': 'New',
-                'last_name': 'User',
-                'password': 'SecurePass123',
-                'confirm_password': 'SecurePass123',
-                'is_active': True,
-                'is_super_admin': False
-            })
+
+            form = CreateUserForm(
+                data={
+                    "username": "newuser",
+                    "email": "newuser@example.com",
+                    "first_name": "New",
+                    "last_name": "User",
+                    "password": "SecurePass123",
+                    "confirm_password": "SecurePass123",
+                    "is_active": True,
+                    "is_super_admin": False,
+                }
+            )
             assert form.validate() is True
-    
+
     def test_create_user_form_missing_username(self):
         """Test form validation with missing username"""
-        form = CreateUserForm(data={
-            'email': 'newuser@example.com',
-            'password': 'SecurePass123',
-            'confirm_password': 'SecurePass123'
-        })
+        form = CreateUserForm(
+            data={
+                "email": "newuser@example.com",
+                "password": "SecurePass123",
+                "confirm_password": "SecurePass123",
+            }
+        )
         assert form.validate() is False
-        assert 'username' in form.errors
-    
+        assert "username" in form.errors
+
     def test_create_user_form_missing_email(self):
         """Test form validation with missing email"""
-        form = CreateUserForm(data={
-            'username': 'newuser',
-            'password': 'SecurePass123',
-            'confirm_password': 'SecurePass123'
-        })
+        form = CreateUserForm(
+            data={
+                "username": "newuser",
+                "password": "SecurePass123",
+                "confirm_password": "SecurePass123",
+            }
+        )
         assert form.validate() is False
-        assert 'email' in form.errors
-    
+        assert "email" in form.errors
+
     def test_create_user_form_invalid_email(self):
         """Test form validation with invalid email"""
-        form = CreateUserForm(data={
-            'username': 'newuser',
-            'email': 'invalid-email',
-            'password': 'SecurePass123',
-            'confirm_password': 'SecurePass123'
-        })
+        form = CreateUserForm(
+            data={
+                "username": "newuser",
+                "email": "invalid-email",
+                "password": "SecurePass123",
+                "confirm_password": "SecurePass123",
+            }
+        )
         assert form.validate() is False
-        assert 'email' in form.errors
-        assert 'Invalid email address.' in form.errors['email']
-    
+        assert "email" in form.errors
+        assert "Invalid email address." in form.errors["email"]
+
     def test_create_user_form_password_mismatch(self):
         """Test form validation with password mismatch"""
-        form = CreateUserForm(data={
-            'username': 'newuser',
-            'email': 'newuser@example.com',
-            'password': 'SecurePass123',
-            'confirm_password': 'DifferentPass123'
-        })
+        form = CreateUserForm(
+            data={
+                "username": "newuser",
+                "email": "newuser@example.com",
+                "password": "SecurePass123",
+                "confirm_password": "DifferentPass123",
+            }
+        )
         assert form.validate() is False
-        assert 'confirm_password' in form.errors
-        assert 'Passwords must match.' in form.errors['confirm_password']
-    
+        assert "confirm_password" in form.errors
+        assert "Passwords must match." in form.errors["confirm_password"]
+
     def test_create_user_form_password_too_short(self):
         """Test form validation with password too short"""
-        form = CreateUserForm(data={
-            'username': 'newuser',
-            'email': 'newuser@example.com',
-            'password': 'short',
-            'confirm_password': 'short'
-        })
+        form = CreateUserForm(
+            data={
+                "username": "newuser",
+                "email": "newuser@example.com",
+                "password": "short",
+                "confirm_password": "short",
+            }
+        )
         assert form.validate() is False
-        assert 'password' in form.errors
-        assert 'Password must be at least 8 characters long.' in form.errors['password']
-    
+        assert "password" in form.errors
+        assert "Password must be at least 8 characters long." in form.errors["password"]
+
     def test_create_user_form_password_no_uppercase(self):
         """Test form validation with password missing uppercase"""
-        form = CreateUserForm(data={
-            'username': 'newuser',
-            'email': 'newuser@example.com',
-            'password': 'lowercase123',
-            'confirm_password': 'lowercase123'
-        })
+        form = CreateUserForm(
+            data={
+                "username": "newuser",
+                "email": "newuser@example.com",
+                "password": "lowercase123",
+                "confirm_password": "lowercase123",
+            }
+        )
         assert form.validate() is False
-        assert 'password' in form.errors
-        assert 'Password must contain at least one uppercase letter.' in form.errors['password']
-    
+        assert "password" in form.errors
+        assert "Password must contain at least one uppercase letter." in form.errors["password"]
+
     def test_create_user_form_password_no_lowercase(self):
         """Test form validation with password missing lowercase"""
-        form = CreateUserForm(data={
-            'username': 'newuser',
-            'email': 'newuser@example.com',
-            'password': 'UPPERCASE123',
-            'confirm_password': 'UPPERCASE123'
-        })
+        form = CreateUserForm(
+            data={
+                "username": "newuser",
+                "email": "newuser@example.com",
+                "password": "UPPERCASE123",
+                "confirm_password": "UPPERCASE123",
+            }
+        )
         assert form.validate() is False
-        assert 'password' in form.errors
-        assert 'Password must contain at least one lowercase letter.' in form.errors['password']
-    
+        assert "password" in form.errors
+        assert "Password must contain at least one lowercase letter." in form.errors["password"]
+
     def test_create_user_form_password_no_digit(self):
         """Test form validation with password missing digit"""
-        form = CreateUserForm(data={
-            'username': 'newuser',
-            'email': 'newuser@example.com',
-            'password': 'NoNumbers',
-            'confirm_password': 'NoNumbers'
-        })
+        form = CreateUserForm(
+            data={
+                "username": "newuser",
+                "email": "newuser@example.com",
+                "password": "NoNumbers",
+                "confirm_password": "NoNumbers",
+            }
+        )
         assert form.validate() is False
-        assert 'password' in form.errors
-        assert 'Password must contain at least one digit.' in form.errors['password']
-    
-    @patch('flask_app.models.User.find_by_username')
+        assert "password" in form.errors
+        assert "Password must contain at least one digit." in form.errors["password"]
+
+    @patch("flask_app.models.User.find_by_username")
     def test_create_user_form_username_exists(self, mock_find_username):
         """Test form validation with existing username"""
         mock_user = MagicMock()
         mock_find_username.return_value = mock_user
-        
-        form = CreateUserForm(data={
-            'username': 'existinguser',
-            'email': 'newuser@example.com',
-            'password': 'SecurePass123',
-            'confirm_password': 'SecurePass123'
-        })
+
+        form = CreateUserForm(
+            data={
+                "username": "existinguser",
+                "email": "newuser@example.com",
+                "password": "SecurePass123",
+                "confirm_password": "SecurePass123",
+            }
+        )
         assert form.validate() is False
-        assert 'username' in form.errors
-        assert 'Username already exists.' in form.errors['username']
-    
-    @patch('flask_app.models.User.find_by_email')
+        assert "username" in form.errors
+        assert "Username already exists." in form.errors["username"]
+
+    @patch("flask_app.models.User.find_by_email")
     def test_create_user_form_email_exists(self, mock_find_email):
         """Test form validation with existing email"""
         mock_user = MagicMock()
         mock_find_email.return_value = mock_user
-        
-        form = CreateUserForm(data={
-            'username': 'newuser',
-            'email': 'existing@example.com',
-            'password': 'SecurePass123',
-            'confirm_password': 'SecurePass123'
-        })
+
+        form = CreateUserForm(
+            data={
+                "username": "newuser",
+                "email": "existing@example.com",
+                "password": "SecurePass123",
+                "confirm_password": "SecurePass123",
+            }
+        )
         assert form.validate() is False
-        assert 'email' in form.errors
-        assert 'Email already exists.' in form.errors['email']
-    
+        assert "email" in form.errors
+        assert "Email already exists." in form.errors["email"]
+
     def test_create_user_form_username_invalid_characters(self):
         """Test form validation with invalid username characters"""
-        form = CreateUserForm(data={
-            'username': 'invalid@user!',
-            'email': 'newuser@example.com',
-            'password': 'SecurePass123',
-            'confirm_password': 'SecurePass123'
-        })
+        form = CreateUserForm(
+            data={
+                "username": "invalid@user!",
+                "email": "newuser@example.com",
+                "password": "SecurePass123",
+                "confirm_password": "SecurePass123",
+            }
+        )
         assert form.validate() is False
-        assert 'username' in form.errors
-        assert 'Username can only contain letters, numbers, underscores, and hyphens.' in form.errors['username']
-    
+        assert "username" in form.errors
+        assert (
+            "Username can only contain letters, numbers, underscores, and hyphens."
+            in form.errors["username"]
+        )
+
     def test_create_user_form_field_lengths(self):
         """Test form validation with fields too long"""
-        form = CreateUserForm(data={
-            'username': 'a' * 65,  # Too long
-            'email': 'a' * 121 + '@example.com',  # Too long
-            'first_name': 'a' * 65,  # Too long
-            'last_name': 'a' * 65,  # Too long
-            'password': 'SecurePass123',
-            'confirm_password': 'SecurePass123'
-        })
+        form = CreateUserForm(
+            data={
+                "username": "a" * 65,  # Too long
+                "email": "a" * 121 + "@example.com",  # Too long
+                "first_name": "a" * 65,  # Too long
+                "last_name": "a" * 65,  # Too long
+                "password": "SecurePass123",
+                "confirm_password": "SecurePass123",
+            }
+        )
         assert form.validate() is False
-        assert 'username' in form.errors
-        assert 'email' in form.errors
-        assert 'first_name' in form.errors
-        assert 'last_name' in form.errors
+        assert "username" in form.errors
+        assert "email" in form.errors
+        assert "first_name" in form.errors
+        assert "last_name" in form.errors
 
 
 class TestUpdateUserForm:
     """Test UpdateUserForm functionality"""
-    
+
     def test_update_user_form_creation(self):
         """Test creating an update user form"""
         mock_user = MagicMock()
         mock_user.id = 1
-        mock_user.username = 'existinguser'
-        mock_user.email = 'existing@example.com'
-        
+        mock_user.username = "existinguser"
+        mock_user.email = "existing@example.com"
+
         form = UpdateUserForm(user=mock_user)
         assert form.user == mock_user
         assert form.username.data is None
         assert form.email.data is None
-    
+
     def test_update_user_form_valid_data(self):
         """Test update user form with valid data"""
         mock_user = MagicMock()
         mock_user.id = 1
-        
-        form = UpdateUserForm(user=mock_user, data={
-            'username': 'updateduser',
-            'email': 'updated@example.com',
-            'first_name': 'Updated',
-            'last_name': 'User',
-            'is_active': True,
-            'is_super_admin': False
-        })
-        assert form.username.data == 'updateduser'
-        assert form.email.data == 'updated@example.com'
-        assert form.first_name.data == 'Updated'
-        assert form.last_name.data == 'User'
+
+        form = UpdateUserForm(
+            user=mock_user,
+            data={
+                "username": "updateduser",
+                "email": "updated@example.com",
+                "first_name": "Updated",
+                "last_name": "User",
+                "is_active": True,
+                "is_super_admin": False,
+            },
+        )
+        assert form.username.data == "updateduser"
+        assert form.email.data == "updated@example.com"
+        assert form.first_name.data == "Updated"
+        assert form.last_name.data == "User"
         assert form.is_active.data is True
         assert form.is_super_admin.data is False
-    
-    @patch('flask_app.models.User.find_by_username')
+
+    @patch("flask_app.models.User.find_by_username")
     def test_update_user_form_validation_success(self, mock_find_username):
         """Test successful form validation"""
         mock_find_username.return_value = None  # Username doesn't exist
-        
-        with patch('flask_app.models.User.find_by_email') as mock_find_email:
+
+        with patch("flask_app.models.User.find_by_email") as mock_find_email:
             mock_find_email.return_value = None  # Email doesn't exist
-            
+
             mock_user = MagicMock()
             mock_user.id = 1
-            
-            form = UpdateUserForm(user=mock_user, data={
-                'username': 'updateduser',
-                'email': 'updated@example.com',
-                'first_name': 'Updated',
-                'last_name': 'User',
-                'is_active': True,
-                'is_super_admin': False
-            })
+
+            form = UpdateUserForm(
+                user=mock_user,
+                data={
+                    "username": "updateduser",
+                    "email": "updated@example.com",
+                    "first_name": "Updated",
+                    "last_name": "User",
+                    "is_active": True,
+                    "is_super_admin": False,
+                },
+            )
             assert form.validate() is True
-    
-    @patch('flask_app.models.User.find_by_username')
+
+    @patch("flask_app.models.User.find_by_username")
     def test_update_user_form_same_user_username(self, mock_find_username):
         """Test form validation with same user's username"""
         mock_user = MagicMock()
         mock_user.id = 1
         mock_find_username.return_value = mock_user  # Return same user
-        
-        with patch('flask_app.models.User.find_by_email') as mock_find_email:
+
+        with patch("flask_app.models.User.find_by_email") as mock_find_email:
             mock_find_email.return_value = None
-            
-            form = UpdateUserForm(user=mock_user, data={
-                'username': 'existinguser',
-                'email': 'updated@example.com',
-                'is_active': True,
-                'is_super_admin': False
-            })
+
+            form = UpdateUserForm(
+                user=mock_user,
+                data={
+                    "username": "existinguser",
+                    "email": "updated@example.com",
+                    "is_active": True,
+                    "is_super_admin": False,
+                },
+            )
             assert form.validate() is True
-    
-    @patch('flask_app.models.User.find_by_username')
+
+    @patch("flask_app.models.User.find_by_username")
     def test_update_user_form_different_user_username(self, mock_find_username):
         """Test form validation with different user's username"""
         mock_user = MagicMock()
         mock_user.id = 1
-        
+
         different_user = MagicMock()
         different_user.id = 2
         mock_find_username.return_value = different_user  # Return different user
-        
-        form = UpdateUserForm(user=mock_user, data={
-            'username': 'existinguser',
-            'email': 'updated@example.com',
-            'is_active': True,
-            'is_super_admin': False
-        })
+
+        form = UpdateUserForm(
+            user=mock_user,
+            data={
+                "username": "existinguser",
+                "email": "updated@example.com",
+                "is_active": True,
+                "is_super_admin": False,
+            },
+        )
         assert form.validate() is False
-        assert 'username' in form.errors
-        assert 'Username already exists.' in form.errors['username']
-    
-    @patch('flask_app.models.User.find_by_email')
+        assert "username" in form.errors
+        assert "Username already exists." in form.errors["username"]
+
+    @patch("flask_app.models.User.find_by_email")
     def test_update_user_form_same_user_email(self, mock_find_email):
         """Test form validation with same user's email"""
         mock_user = MagicMock()
         mock_user.id = 1
         mock_find_email.return_value = mock_user  # Return same user
-        
-        with patch('flask_app.models.User.find_by_username') as mock_find_username:
+
+        with patch("flask_app.models.User.find_by_username") as mock_find_username:
             mock_find_username.return_value = None
-            
-            form = UpdateUserForm(user=mock_user, data={
-                'username': 'updateduser',
-                'email': 'existing@example.com',
-                'is_active': True,
-                'is_super_admin': False
-            })
+
+            form = UpdateUserForm(
+                user=mock_user,
+                data={
+                    "username": "updateduser",
+                    "email": "existing@example.com",
+                    "is_active": True,
+                    "is_super_admin": False,
+                },
+            )
             assert form.validate() is True
-    
-    @patch('flask_app.models.User.find_by_email')
+
+    @patch("flask_app.models.User.find_by_email")
     def test_update_user_form_different_user_email(self, mock_find_email):
         """Test form validation with different user's email"""
         mock_user = MagicMock()
         mock_user.id = 1
-        
+
         different_user = MagicMock()
         different_user.id = 2
         mock_find_email.return_value = different_user  # Return different user
-        
-        form = UpdateUserForm(user=mock_user, data={
-            'username': 'updateduser',
-            'email': 'existing@example.com',
-            'is_active': True,
-            'is_super_admin': False
-        })
+
+        form = UpdateUserForm(
+            user=mock_user,
+            data={
+                "username": "updateduser",
+                "email": "existing@example.com",
+                "is_active": True,
+                "is_super_admin": False,
+            },
+        )
         assert form.validate() is False
-        assert 'email' in form.errors
-        assert 'Email already exists.' in form.errors['email']
+        assert "email" in form.errors
+        assert "Email already exists." in form.errors["email"]
 
 
 class TestChangePasswordForm:
     """Test ChangePasswordForm functionality"""
-    
+
     def test_change_password_form_creation(self):
         """Test creating a change password form"""
         form = ChangePasswordForm()
         assert form.new_password.data is None
         assert form.confirm_password.data is None
-    
+
     def test_change_password_form_valid_data(self):
         """Test change password form with valid data"""
-        form = ChangePasswordForm(data={
-            'new_password': 'NewSecurePass123',
-            'confirm_password': 'NewSecurePass123'
-        })
-        assert form.new_password.data == 'NewSecurePass123'
-        assert form.confirm_password.data == 'NewSecurePass123'
-    
+        form = ChangePasswordForm(
+            data={"new_password": "NewSecurePass123", "confirm_password": "NewSecurePass123"}
+        )
+        assert form.new_password.data == "NewSecurePass123"
+        assert form.confirm_password.data == "NewSecurePass123"
+
     def test_change_password_form_validation_success(self):
         """Test successful form validation"""
-        form = ChangePasswordForm(data={
-            'new_password': 'NewSecurePass123',
-            'confirm_password': 'NewSecurePass123'
-        })
+        form = ChangePasswordForm(
+            data={"new_password": "NewSecurePass123", "confirm_password": "NewSecurePass123"}
+        )
         assert form.validate() is True
-    
+
     def test_change_password_form_missing_password(self):
         """Test form validation with missing password"""
-        form = ChangePasswordForm(data={
-            'confirm_password': 'NewSecurePass123'
-        })
+        form = ChangePasswordForm(data={"confirm_password": "NewSecurePass123"})
         assert form.validate() is False
-        assert 'new_password' in form.errors
-    
+        assert "new_password" in form.errors
+
     def test_change_password_form_missing_confirm(self):
         """Test form validation with missing confirm password"""
-        form = ChangePasswordForm(data={
-            'new_password': 'NewSecurePass123'
-        })
+        form = ChangePasswordForm(data={"new_password": "NewSecurePass123"})
         assert form.validate() is False
-        assert 'confirm_password' in form.errors
-    
+        assert "confirm_password" in form.errors
+
     def test_change_password_form_password_mismatch(self):
         """Test form validation with password mismatch"""
-        form = ChangePasswordForm(data={
-            'new_password': 'NewSecurePass123',
-            'confirm_password': 'DifferentPass123'
-        })
+        form = ChangePasswordForm(
+            data={"new_password": "NewSecurePass123", "confirm_password": "DifferentPass123"}
+        )
         assert form.validate() is False
-        assert 'confirm_password' in form.errors
-        assert 'Passwords must match.' in form.errors['confirm_password']
-    
+        assert "confirm_password" in form.errors
+        assert "Passwords must match." in form.errors["confirm_password"]
+
     def test_change_password_form_password_too_short(self):
         """Test form validation with password too short"""
-        form = ChangePasswordForm(data={
-            'new_password': 'short',
-            'confirm_password': 'short'
-        })
+        form = ChangePasswordForm(data={"new_password": "short", "confirm_password": "short"})
         assert form.validate() is False
-        assert 'new_password' in form.errors
-        assert 'Password must be at least 8 characters long.' in form.errors['new_password']
-    
+        assert "new_password" in form.errors
+        assert "Password must be at least 8 characters long." in form.errors["new_password"]
+
     def test_change_password_form_password_no_uppercase(self):
         """Test form validation with password missing uppercase"""
-        form = ChangePasswordForm(data={
-            'new_password': 'lowercase123',
-            'confirm_password': 'lowercase123'
-        })
+        form = ChangePasswordForm(
+            data={"new_password": "lowercase123", "confirm_password": "lowercase123"}
+        )
         assert form.validate() is False
-        assert 'new_password' in form.errors
-        assert 'Password must contain at least one uppercase letter.' in form.errors['new_password']
-    
+        assert "new_password" in form.errors
+        assert "Password must contain at least one uppercase letter." in form.errors["new_password"]
+
     def test_change_password_form_password_no_lowercase(self):
         """Test form validation with password missing lowercase"""
-        form = ChangePasswordForm(data={
-            'new_password': 'UPPERCASE123',
-            'confirm_password': 'UPPERCASE123'
-        })
+        form = ChangePasswordForm(
+            data={"new_password": "UPPERCASE123", "confirm_password": "UPPERCASE123"}
+        )
         assert form.validate() is False
-        assert 'new_password' in form.errors
-        assert 'Password must contain at least one lowercase letter.' in form.errors['new_password']
-    
+        assert "new_password" in form.errors
+        assert "Password must contain at least one lowercase letter." in form.errors["new_password"]
+
     def test_change_password_form_password_no_digit(self):
         """Test form validation with password missing digit"""
-        form = ChangePasswordForm(data={
-            'new_password': 'NoNumbers',
-            'confirm_password': 'NoNumbers'
-        })
+        form = ChangePasswordForm(
+            data={"new_password": "NoNumbers", "confirm_password": "NoNumbers"}
+        )
         assert form.validate() is False
-        assert 'new_password' in form.errors
-        assert 'Password must contain at least one digit.' in form.errors['new_password']
+        assert "new_password" in form.errors
+        assert "Password must contain at least one digit." in form.errors["new_password"]
 
 
 class TestBulkUserActionForm:
     """Test BulkUserActionForm functionality"""
-    
+
     def test_bulk_user_action_form_creation(self):
         """Test creating a bulk user action form"""
         form = BulkUserActionForm()
         assert form.action.data is None
         assert form.user_ids.data is None
-    
+
     def test_bulk_user_action_form_valid_data(self):
         """Test bulk user action form with valid data"""
-        form = BulkUserActionForm(data={
-            'action': 'activate',
-            'user_ids': '1,2,3'
-        })
-        assert form.action.data == 'activate'
-        assert form.user_ids.data == '1,2,3'
-    
+        form = BulkUserActionForm(data={"action": "activate", "user_ids": "1,2,3"})
+        assert form.action.data == "activate"
+        assert form.user_ids.data == "1,2,3"
+
     def test_bulk_user_action_form_validation_success(self):
         """Test successful form validation"""
-        form = BulkUserActionForm(data={
-            'action': 'activate',
-            'user_ids': '1,2,3'
-        })
+        form = BulkUserActionForm(data={"action": "activate", "user_ids": "1,2,3"})
         assert form.validate() is True
-        assert hasattr(form, 'user_ids_list')
+        assert hasattr(form, "user_ids_list")
         assert form.user_ids_list == [1, 2, 3]
-    
+
     def test_bulk_user_action_form_missing_action(self):
         """Test form validation with missing action"""
-        form = BulkUserActionForm(data={
-            'user_ids': '1,2,3'
-        })
+        form = BulkUserActionForm(data={"user_ids": "1,2,3"})
         assert form.validate() is False
-        assert 'action' in form.errors
-    
+        assert "action" in form.errors
+
     def test_bulk_user_action_form_missing_user_ids(self):
         """Test form validation with missing user IDs"""
-        form = BulkUserActionForm(data={
-            'action': 'activate'
-        })
+        form = BulkUserActionForm(data={"action": "activate"})
         assert form.validate() is False
-        assert 'user_ids' in form.errors
-    
+        assert "user_ids" in form.errors
+
     def test_bulk_user_action_form_invalid_user_ids(self):
         """Test form validation with invalid user IDs"""
-        form = BulkUserActionForm(data={
-            'action': 'activate',
-            'user_ids': '1,abc,3'
-        })
+        form = BulkUserActionForm(data={"action": "activate", "user_ids": "1,abc,3"})
         assert form.validate() is False
-        assert 'user_ids' in form.errors
-        assert 'User IDs must be numbers separated by commas.' in form.errors['user_ids']
-    
+        assert "user_ids" in form.errors
+        assert "User IDs must be numbers separated by commas." in form.errors["user_ids"]
+
     def test_bulk_user_action_form_empty_user_ids(self):
         """Test form validation with empty user IDs"""
-        form = BulkUserActionForm(data={
-            'action': 'activate',
-            'user_ids': ''
-        })
+        form = BulkUserActionForm(data={"action": "activate", "user_ids": ""})
         assert form.validate() is False
-        assert 'user_ids' in form.errors
-    
+        assert "user_ids" in form.errors
+
     def test_bulk_user_action_form_whitespace_user_ids(self):
         """Test form validation with whitespace-only user IDs"""
-        form = BulkUserActionForm(data={
-            'action': 'activate',
-            'user_ids': '   ,  ,  '
-        })
+        form = BulkUserActionForm(data={"action": "activate", "user_ids": "   ,  ,  "})
         assert form.validate() is False
-        assert 'user_ids' in form.errors
+        assert "user_ids" in form.errors
         # Check that we get a validation error for invalid user IDs
-        assert len(form.errors['user_ids']) > 0
-    
+        assert len(form.errors["user_ids"]) > 0
+
     def test_bulk_user_action_form_valid_actions(self):
         """Test form validation with all valid actions"""
-        valid_actions = ['activate', 'deactivate', 'delete', 'export']
-        
+        valid_actions = ["activate", "deactivate", "delete", "export"]
+
         for action in valid_actions:
-            form = BulkUserActionForm(data={
-                'action': action,
-                'user_ids': '1,2,3'
-            })
+            form = BulkUserActionForm(data={"action": action, "user_ids": "1,2,3"})
             assert form.validate() is True
-    
+
     def test_bulk_user_action_form_user_ids_whitespace_handling(self):
         """Test form validation with user IDs containing whitespace"""
-        form = BulkUserActionForm(data={
-            'action': 'activate',
-            'user_ids': ' 1 , 2 , 3 '
-        })
+        form = BulkUserActionForm(data={"action": "activate", "user_ids": " 1 , 2 , 3 "})
         assert form.validate() is True
         assert form.user_ids_list == [1, 2, 3]
 
 
 class TestCreateOrganizationForm:
     """Test CreateOrganizationForm functionality"""
-    
+
     def test_create_organization_form_creation(self):
         """Test creating a create organization form"""
         form = CreateOrganizationForm()
@@ -647,171 +648,180 @@ class TestCreateOrganizationForm:
         assert form.slug.data is None
         assert form.description.data is None
         assert form.is_active.data is True
-    
+
     def test_create_organization_form_valid_data(self, app):
         """Test create organization form with valid data"""
         with app.app_context():
-            form = CreateOrganizationForm(data={
-                'name': 'Test Organization',
-                'slug': 'test-organization',
-                'description': 'A test organization',
-                'is_active': True
-            })
-            assert form.name.data == 'Test Organization'
-            assert form.slug.data == 'test-organization'
-            assert form.description.data == 'A test organization'
+            form = CreateOrganizationForm(
+                data={
+                    "name": "Test Organization",
+                    "slug": "test-organization",
+                    "description": "A test organization",
+                    "is_active": True,
+                }
+            )
+            assert form.name.data == "Test Organization"
+            assert form.slug.data == "test-organization"
+            assert form.description.data == "A test organization"
             assert form.is_active.data is True
-    
+
     def test_create_organization_form_validation_success(self, app):
         """Test successful form validation"""
         with app.app_context():
-            form = CreateOrganizationForm(data={
-                'name': 'Valid Organization',
-                'slug': 'valid-organization',
-                'description': 'Description',
-                'is_active': True
-            })
+            form = CreateOrganizationForm(
+                data={
+                    "name": "Valid Organization",
+                    "slug": "valid-organization",
+                    "description": "Description",
+                    "is_active": True,
+                }
+            )
             assert form.validate() is True
-    
+
     def test_create_organization_form_missing_name(self):
         """Test form validation with missing name"""
-        form = CreateOrganizationForm(data={
-            'slug': 'test-organization'
-        })
+        form = CreateOrganizationForm(data={"slug": "test-organization"})
         assert form.validate() is False
-        assert 'name' in form.errors
-    
+        assert "name" in form.errors
+
     def test_create_organization_form_missing_slug(self):
         """Test form validation with missing slug"""
-        form = CreateOrganizationForm(data={
-            'name': 'Test Organization'
-        })
+        form = CreateOrganizationForm(data={"name": "Test Organization"})
         assert form.validate() is False
-        assert 'slug' in form.errors
-    
+        assert "slug" in form.errors
+
     def test_create_organization_form_name_too_short(self):
         """Test form validation with name too short"""
-        form = CreateOrganizationForm(data={
-            'name': 'A',  # Less than 2 characters
-            'slug': 'test-org'
-        })
+        form = CreateOrganizationForm(
+            data={"name": "A", "slug": "test-org"}  # Less than 2 characters
+        )
         assert form.validate() is False
-        assert 'name' in form.errors
-    
+        assert "name" in form.errors
+
     def test_create_organization_form_name_too_long(self):
         """Test form validation with name too long"""
-        form = CreateOrganizationForm(data={
-            'name': 'A' * 201,  # More than 200 characters
-            'slug': 'test-org'
-        })
+        form = CreateOrganizationForm(
+            data={"name": "A" * 201, "slug": "test-org"}  # More than 200 characters
+        )
         assert form.validate() is False
-        assert 'name' in form.errors
-    
+        assert "name" in form.errors
+
     def test_create_organization_form_slug_too_short(self):
         """Test form validation with slug too short"""
-        form = CreateOrganizationForm(data={
-            'name': 'Test Organization',
-            'slug': 'a'  # Less than 2 characters
-        })
+        form = CreateOrganizationForm(
+            data={"name": "Test Organization", "slug": "a"}  # Less than 2 characters
+        )
         assert form.validate() is False
-        assert 'slug' in form.errors
-    
+        assert "slug" in form.errors
+
     def test_create_organization_form_slug_invalid_characters(self, app):
         """Test form validation with invalid slug characters"""
         with app.app_context():
-            form = CreateOrganizationForm(data={
-                'name': 'Test Organization',
-                'slug': 'Test_Organization!'  # Invalid characters
-            })
+            form = CreateOrganizationForm(
+                data={
+                    "name": "Test Organization",
+                    "slug": "Test_Organization!",  # Invalid characters
+                }
+            )
             assert form.validate() is False
-            assert 'slug' in form.errors
-            assert 'lowercase letters, numbers, and hyphens' in form.errors['slug'][0]
-    
+            assert "slug" in form.errors
+            assert "lowercase letters, numbers, and hyphens" in form.errors["slug"][0]
+
     def test_create_organization_form_duplicate_name(self, test_organization, app):
         """Test form validation with duplicate name"""
         with app.app_context():
-            form = CreateOrganizationForm(data={
-                'name': 'Test Organization',  # Same as test_organization
-                'slug': 'different-slug'
-            })
+            form = CreateOrganizationForm(
+                data={
+                    "name": "Test Organization",  # Same as test_organization
+                    "slug": "different-slug",
+                }
+            )
             assert form.validate() is False
-            assert 'name' in form.errors
-            assert 'already exists' in form.errors['name'][0]
-    
+            assert "name" in form.errors
+            assert "already exists" in form.errors["name"][0]
+
     def test_create_organization_form_duplicate_slug(self, test_organization, app):
         """Test form validation with duplicate slug"""
         with app.app_context():
-            form = CreateOrganizationForm(data={
-                'name': 'Different Name',
-                'slug': 'test-organization'  # Same as test_organization
-            })
+            form = CreateOrganizationForm(
+                data={
+                    "name": "Different Name",
+                    "slug": "test-organization",  # Same as test_organization
+                }
+            )
             assert form.validate() is False
-            assert 'slug' in form.errors
-            assert 'already exists' in form.errors['slug'][0]
-    
+            assert "slug" in form.errors
+            assert "already exists" in form.errors["slug"][0]
+
     def test_create_organization_form_description_optional(self):
         """Test that description is optional"""
-        form = CreateOrganizationForm(data={
-            'name': 'Test Organization',
-            'slug': 'test-organization'
-        })
+        form = CreateOrganizationForm(
+            data={"name": "Test Organization", "slug": "test-organization"}
+        )
         assert form.validate() is True
         assert form.description.data is None
-    
+
     def test_create_organization_form_description_too_long(self, app):
         """Test form validation with description too long"""
         with app.app_context():
-            form = CreateOrganizationForm(data={
-                'name': 'Test Organization',
-                'slug': 'test-organization',
-                'description': 'A' * 1001  # More than 1000 characters
-            })
+            form = CreateOrganizationForm(
+                data={
+                    "name": "Test Organization",
+                    "slug": "test-organization",
+                    "description": "A" * 1001,  # More than 1000 characters
+                }
+            )
             assert form.validate() is False
-            assert 'description' in form.errors
-    
+            assert "description" in form.errors
+
     def test_create_organization_form_name_stripping(self, app):
         """Test that name whitespace is stripped"""
         with app.app_context():
-            form = CreateOrganizationForm(data={
-                'name': '  Test Organization  ',
-                'slug': 'test-organization'
-            })
+            form = CreateOrganizationForm(
+                data={"name": "  Test Organization  ", "slug": "test-organization"}
+            )
             form.validate()
-            assert form.name.data == 'Test Organization'
+            assert form.name.data == "Test Organization"
 
 
 class TestUpdateOrganizationForm:
     """Test UpdateOrganizationForm functionality"""
-    
+
     def test_update_organization_form_creation(self, test_organization):
         """Test creating an update organization form"""
         form = UpdateOrganizationForm(organization=test_organization)
         assert form.organization == test_organization
-    
+
     def test_update_organization_form_valid_data(self, test_organization):
         """Test update organization form with valid data"""
-        form = UpdateOrganizationForm(organization=test_organization, data={
-            'name': 'Updated Organization',
-            'slug': 'updated-organization',
-            'description': 'Updated description',
-            'is_active': True
-        })
-        assert form.name.data == 'Updated Organization'
-        assert form.slug.data == 'updated-organization'
-        assert form.description.data == 'Updated description'
+        form = UpdateOrganizationForm(
+            organization=test_organization,
+            data={
+                "name": "Updated Organization",
+                "slug": "updated-organization",
+                "description": "Updated description",
+                "is_active": True,
+            },
+        )
+        assert form.name.data == "Updated Organization"
+        assert form.slug.data == "updated-organization"
+        assert form.description.data == "Updated description"
         assert form.is_active.data is True
-    
+
     def test_update_organization_form_validation_success(self, test_organization, app):
         """Test successful form validation"""
         with app.app_context():
-            form = UpdateOrganizationForm(organization=test_organization, data={
-                'name': 'Updated Name',
-                'slug': 'updated-slug',
-                'description': 'Updated',
-                'is_active': True
-            })
+            form = UpdateOrganizationForm(
+                organization=test_organization,
+                data={
+                    "name": "Updated Name",
+                    "slug": "updated-slug",
+                    "description": "Updated",
+                    "is_active": True,
+                },
+            )
             assert form.validate() is True
-    
+
     def test_update_organization_form_same_name(self, test_organization, app):
         """Test form validation with same organization name"""
         # Store ID before object becomes detached
@@ -819,13 +829,16 @@ class TestUpdateOrganizationForm:
         with app.app_context():
             # Re-query to avoid detached instance
             org = db.session.get(Organization, org_id)
-            form = UpdateOrganizationForm(organization=org, data={
-                'name': 'Test Organization',  # Same as test_organization
-                'slug': 'test-organization',
-                'is_active': True
-            })
+            form = UpdateOrganizationForm(
+                organization=org,
+                data={
+                    "name": "Test Organization",  # Same as test_organization
+                    "slug": "test-organization",
+                    "is_active": True,
+                },
+            )
             assert form.validate() is True  # Should allow same name for same org
-    
+
     def test_update_organization_form_different_org_name(self, test_organization, app):
         """Test form validation with different organization's name"""
         # Store ID before object becomes detached
@@ -834,19 +847,22 @@ class TestUpdateOrganizationForm:
             # Re-query to avoid detached instance
             org = db.session.get(Organization, org_id)
             # Create another organization
-            other_org = Organization(name='Other Org', slug='other-org')
+            other_org = Organization(name="Other Org", slug="other-org")
             db.session.add(other_org)
             db.session.commit()
-            
-            form = UpdateOrganizationForm(organization=org, data={
-                'name': 'Other Org',  # Same as other_org
-                'slug': 'test-organization',
-                'is_active': True
-            })
+
+            form = UpdateOrganizationForm(
+                organization=org,
+                data={
+                    "name": "Other Org",  # Same as other_org
+                    "slug": "test-organization",
+                    "is_active": True,
+                },
+            )
             assert form.validate() is False
-            assert 'name' in form.errors
-            assert 'already exists' in form.errors['name'][0]
-    
+            assert "name" in form.errors
+            assert "already exists" in form.errors["name"][0]
+
     def test_update_organization_form_same_slug(self, test_organization, app):
         """Test form validation with same organization slug"""
         # Store ID before object becomes detached
@@ -854,13 +870,16 @@ class TestUpdateOrganizationForm:
         with app.app_context():
             # Re-query to avoid detached instance
             org = db.session.get(Organization, org_id)
-            form = UpdateOrganizationForm(organization=org, data={
-                'name': 'Test Organization',
-                'slug': 'test-organization',  # Same as test_organization
-                'is_active': True
-            })
+            form = UpdateOrganizationForm(
+                organization=org,
+                data={
+                    "name": "Test Organization",
+                    "slug": "test-organization",  # Same as test_organization
+                    "is_active": True,
+                },
+            )
             assert form.validate() is True  # Should allow same slug for same org
-    
+
     def test_update_organization_form_different_org_slug(self, test_organization, app):
         """Test form validation with different organization's slug"""
         # Store ID before object becomes detached
@@ -869,15 +888,18 @@ class TestUpdateOrganizationForm:
             # Re-query to avoid detached instance
             org = db.session.get(Organization, org_id)
             # Create another organization
-            other_org = Organization(name='Other Org', slug='other-org')
+            other_org = Organization(name="Other Org", slug="other-org")
             db.session.add(other_org)
             db.session.commit()
-            
-            form = UpdateOrganizationForm(organization=org, data={
-                'name': 'Test Organization',
-                'slug': 'other-org',  # Same as other_org
-                'is_active': True
-            })
+
+            form = UpdateOrganizationForm(
+                organization=org,
+                data={
+                    "name": "Test Organization",
+                    "slug": "other-org",  # Same as other_org
+                    "is_active": True,
+                },
+            )
             assert form.validate() is False
-            assert 'slug' in form.errors
-            assert 'already exists' in form.errors['slug'][0]
+            assert "slug" in form.errors
+            assert "already exists" in form.errors["slug"][0]

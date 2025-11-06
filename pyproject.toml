@@ -1,0 +1,54 @@
+# Polaris Project Configuration
+# Configuration for development tools (black, isort, mypy, etc.)
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.venv
+  | venv
+  | migrations
+  | __pycache__
+  | \.eggs
+  | \.mypy_cache
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+known_first_party = ["flask_app", "config"]
+skip = ["migrations", "venv", ".venv", "__pycache__"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+exclude = [
+    "migrations/",
+    "venv/",
+    ".venv/",
+    "__pycache__/",
+]
+
+[tool.flake8]
+max-line-length = 100
+extend-ignore = ["E203"]
+exclude = [
+    ".git",
+    "__pycache__",
+    "migrations",
+    "venv",
+    ".venv",
+    "build",
+    "dist",
+    "*.egg-info",
+]
+# Note: per-file-ignores configured in .pre-commit-config.yaml

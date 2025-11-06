@@ -24,7 +24,7 @@
                 <div class="card-body">
                     <form method="POST">
                         {{ form.hidden_tag() }}
-                        
+
                         <div class="form-group">
                             {{ form.name.label(class="form-label") }}
                             {{ form.name(class="form-control" + (" is-invalid" if form.name.errors else "")) }}
@@ -91,7 +91,7 @@
     document.addEventListener('DOMContentLoaded', function() {
         const nameField = document.getElementById('name');
         const slugField = document.getElementById('slug');
-        
+
         if (nameField && slugField) {
             nameField.addEventListener('input', function() {
                 if (!slugField.dataset.manualEdit) {
@@ -104,7 +104,7 @@
                     slugField.value = slug;
                 }
             });
-            
+
             slugField.addEventListener('input', function() {
                 slugField.dataset.manualEdit = 'true';
             });
@@ -112,4 +112,3 @@
     });
 </script>
 {% endblock %}
-

@@ -1,0 +1,17 @@
+# Development Dependencies for Polaris
+# Install with: pip install -r requirements-dev.txt
+
+# Code Formatting
+black>=23.0.0
+
+# Import Sorting
+isort>=5.12.0
+
+# Linting
+flake8>=6.0.0
+
+# Type Checking
+mypy>=1.0.0
+
+# Pre-commit Hook Framework
+pre-commit>=3.0.0

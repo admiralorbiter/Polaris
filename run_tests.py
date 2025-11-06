@@ -5,10 +5,10 @@ Test runner script for the Flask application.
 This script provides different test execution modes and options.
 """
 
-import sys
-import subprocess
 import argparse
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 
@@ -18,7 +18,7 @@ def run_command(cmd, description):
     print(f"Running: {description}")
     print(f"Command: {' '.join(cmd)}")
     print(f"{'='*60}")
-    
+
     try:
         result = subprocess.run(cmd, check=False)
         return result.returncode
@@ -55,14 +55,16 @@ def run_fast_tests():
 def run_with_coverage():
     """Run tests with coverage report"""
     cmd = [
-        "python", "-m", "pytest", 
-        "tests/", 
-        "--cov=flask_app", 
+        "python",
+        "-m",
+        "pytest",
+        "tests/",
+        "--cov=flask_app",
         "--cov=app",
-        "--cov-report=html", 
+        "--cov-report=html",
         "--cov-report=term-missing",
         "--cov-report=xml",
-        "-v"
+        "-v",
     ]
     return run_command(cmd, "Tests with Coverage")
 
@@ -90,10 +92,12 @@ def lint_code():
     print(f"\n{'='*60}")
     print("Running: Code Linting")
     print(f"{'='*60}")
-    
+
     # Run flake8 if available
     try:
-        result = subprocess.run(["flake8", "flask_app/", "tests/", "--max-line-length=120"], check=False)
+        result = subprocess.run(
+            ["flake8", "flask_app/", "tests/", "--max-line-length=120"], check=False
+        )
         if result.returncode == 0:
             print("✓ Code linting passed")
         else:
@@ -109,7 +113,7 @@ def check_security():
     print(f"\n{'='*60}")
     print("Running: Security Checks")
     print(f"{'='*60}")
-    
+
     # Run bandit if available
     try:
         result = subprocess.run(["bandit", "-r", "flask_app/"], check=False)
@@ -130,35 +134,32 @@ def main():
         "mode",
         nargs="?",
         choices=[
-            "unit", "integration", "all", "fast", "coverage", 
-            "parallel", "smoke", "lint", "security", "ci"
+            "unit",
+            "integration",
+            "all",
+            "fast",
+            "coverage",
+            "parallel",
+            "smoke",
+            "lint",
+            "security",
+            "ci",
         ],
         default="all",
-        help="Test mode to run (default: all)"
+        help="Test mode to run (default: all)",
     )
-    parser.add_argument(
-        "--test",
-        help="Run a specific test file or test function"
-    )
-    parser.add_argument(
-        "--verbose", "-v",
-        action="store_true",
-        help="Verbose output"
-    )
-    parser.add_argument(
-        "--no-lint",
-        action="store_true",
-        help="Skip linting in CI mode"
-    )
-    
+    parser.add_argument("--test", help="Run a specific test file or test function")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
+    parser.add_argument("--no-lint", action="store_true", help="Skip linting in CI mode")
+
     args = parser.parse_args()
-    
+
     # Change to project root directory
     project_root = Path(__file__).parent
     os.chdir(project_root)
-    
+
     exit_code = 0
-    
+
     if args.test:
         exit_code = run_specific_test(args.test)
     elif args.mode == "unit":
@@ -182,23 +183,23 @@ def main():
     elif args.mode == "ci":
         # CI mode: run all checks
         print("Running CI pipeline...")
-        
+
         # Run linting
         if not args.no_lint:
             lint_exit = lint_code()
             if lint_exit != 0:
                 exit_code = lint_exit
-        
+
         # Run security checks
         security_exit = check_security()
         if security_exit != 0:
             exit_code = security_exit
-        
+
         # Run tests with coverage
         test_exit = run_with_coverage()
         if test_exit != 0:
             exit_code = test_exit
-    
+
     if exit_code == 0:
         print(f"\n{'='*60}")
         print("✓ All checks passed!")
@@ -207,7 +208,7 @@ def main():
         print(f"\n{'='*60}")
         print("✗ Some checks failed!")
         print(f"{'='*60}")
-    
+
     sys.exit(exit_code)
 
 

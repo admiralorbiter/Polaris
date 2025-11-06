@@ -163,19 +163,19 @@
         align-items: flex-start;
         gap: var(--spacing-md);
     }
-    
+
     .stats-grid {
         grid-template-columns: 1fr;
     }
-    
+
     .action-buttons {
         flex-direction: column;
     }
-    
+
     .action-buttons .btn {
         width: 100%;
     }
-    
+
     .table-responsive {
         font-size: var(--font-size-sm);
     }

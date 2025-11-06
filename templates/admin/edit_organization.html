@@ -26,7 +26,7 @@
                 <div class="card-body">
                     <form method="POST">
                         {{ form.hidden_tag() }}
-                        
+
                         <div class="form-group">
                             {{ form.name.label(class="form-label") }}
                             {{ form.name(class="form-control" + (" is-invalid" if form.name.errors else "")) }}
@@ -89,4 +89,3 @@
 
 {% block extra_js %}
 {% endblock %}
-
