@@ -1,6 +1,6 @@
 # app.py
 
-from flask import Flask, current_app
+from flask import Flask, current_app, render_template
 from flask_login import LoginManager
 from dotenv import load_dotenv
 import os
@@ -73,12 +73,12 @@ init_routes(app)
 # Register error handlers
 @app.errorhandler(404)
 def not_found_error(error):
-    return {'error': 'Not found'}, 404
+    return render_template('errors/404.html'), 404
 
 @app.errorhandler(500)
 def internal_error(error):
     db.session.rollback()
-    return {'error': 'Internal server error'}, 500
+    return render_template('errors/500.html'), 500
 
 # Load environment variables from .env file
 load_dotenv()

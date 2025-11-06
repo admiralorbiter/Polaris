@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Server Error - Polaris{% endblock %}
+
+{% block extra_css %}
+<style>
+    .error-container {
+        text-align: center;
+        padding: var(--spacing-3xl) var(--spacing-md);
+        min-height: 60vh;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+    }
+    
+    .error-code {
+        font-size: var(--font-size-6xl);
+        font-weight: var(--font-weight-bold);
+        color: var(--color-primary);
+        margin-bottom: var(--spacing-md);
+        line-height: var(--line-height-tight);
+    }
+    
+    .error-title {
+        font-size: var(--font-size-3xl);
+        color: var(--text-secondary);
+        margin-bottom: var(--spacing-md);
+    }
+    
+    .error-message {
+        font-size: var(--font-size-lg);
+        color: var(--text-muted);
+        margin-bottom: var(--spacing-xl);
+        max-width: 600px;
+    }
+    
+    .error-icon {
+        font-size: 8rem;
+        color: var(--color-primary);
+        opacity: 0.3;
+        margin-bottom: var(--spacing-lg);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="error-container">
+    <div class="error-icon">
+        <i class="fas fa-exclamation-triangle"></i>
+    </div>
+    <div class="error-code">500</div>
+    <h1 class="error-title">Internal Server Error</h1>
+    <p class="error-message">
+        Something went wrong on our end. We've been notified and are working to fix the issue. 
+        Please try again in a few moments.
+    </p>
+    <div class="action-buttons">
+        <a href="{{ url_for('index') }}" class="btn btn-primary">
+            <i class="fas fa-home"></i>
+            <span class="btn-text">Go Home</span>
+        </a>
+        <a href="javascript:location.reload()" class="btn btn-outline-secondary">
+            <i class="fas fa-redo"></i>
+            <span class="btn-text">Try Again</span>
+        </a>
+    </div>
+</div>
+{% endblock %}
+
