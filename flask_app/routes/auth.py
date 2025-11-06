@@ -26,9 +26,12 @@ def register_auth_routes(app):
 
                 # Query user with error handling
                 user = User.find_by_username(username)
-                if user is None and not isinstance(user, User):
-                    # This means there was a database error
-                    flash("A database error occurred. Please try again.", "danger")
+                if user is None:
+                    # User not found or database error occurred
+                    # Note: find_by_username returns None on error or when user doesn't exist
+                    # We'll show generic error message to prevent username enumeration
+                    current_app.logger.warning(f"Login attempt for non-existent user: {username}")
+                    flash("Invalid username or password.", "danger")
                     return render_template("login.html", form=form)
 
                 # Validate user and password

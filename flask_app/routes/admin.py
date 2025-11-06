@@ -238,20 +238,69 @@ def register_admin_routes(app):
                             "admin/create_user.html", form=form, organization=organization
                         )
 
-                # Create new user
-                new_user, error = User.safe_create(
-                    username=form.username.data.strip(),
-                    email=form.email.data.strip().lower(),
-                    password_hash=generate_password_hash(form.password.data),
-                    first_name=form.first_name.data.strip() if form.first_name.data else None,
-                    last_name=form.last_name.data.strip() if form.last_name.data else None,
-                    is_active=form.is_active.data,
-                    is_super_admin=is_super_admin,
-                )
+                # Create new user within transaction to prevent race conditions
+                # Database unique constraints will catch any duplicate usernames/emails
+                # that might occur between form validation and creation
+                try:
+                    new_user, error = User.safe_create(
+                        username=form.username.data.strip(),
+                        email=form.email.data.strip().lower(),
+                        password_hash=generate_password_hash(form.password.data),
+                        first_name=form.first_name.data.strip() if form.first_name.data else None,
+                        last_name=form.last_name.data.strip() if form.last_name.data else None,
+                        is_active=form.is_active.data,
+                        is_super_admin=is_super_admin,
+                    )
 
-                if error:
-                    flash(f"Error creating user: {error}", "danger")
-                    current_app.logger.error(f"Error creating user: {error}")
+                    if error:
+                        # Check if error is due to unique constraint violation (race condition)
+                        error_lower = error.lower()
+                        if (
+                            "unique" in error_lower
+                            or "duplicate" in error_lower
+                            or "already exists" in error_lower
+                        ):
+                            if "username" in error_lower or "user" in error_lower:
+                                flash(
+                                    "Username already exists. Please choose a different username.",
+                                    "danger",
+                                )
+                            elif "email" in error_lower:
+                                flash(
+                                    "Email address already exists. Please use a different email.",
+                                    "danger",
+                                )
+                            else:
+                                flash(
+                                    "A user with this information already exists. "
+                                    "Please check username and email.",
+                                    "danger",
+                                )
+                        else:
+                            flash(f"Error creating user: {error}", "danger")
+                        current_app.logger.error(f"Error creating user: {error}")
+                        return render_template(
+                            "admin/create_user.html", form=form, organization=organization
+                        )
+                except Exception as create_exception:
+                    # Catch any unexpected errors during user creation
+                    current_app.logger.error(
+                        f"Unexpected error creating user: {str(create_exception)}", exc_info=True
+                    )
+                    flash(
+                        "An unexpected error occurred while creating the user. Please try again.",
+                        "danger",
+                    )
+                    return render_template(
+                        "admin/create_user.html", form=form, organization=organization
+                    )
+
+                if not new_user:
+                    flash("Failed to create user. Please try again.", "danger")
+                    current_app.logger.error("User creation returned None without error")
+                    return render_template(
+                        "admin/create_user.html", form=form, organization=organization
+                    )
                 else:
                     # Add user to organization if organization_id is provided
                     # (for non-super-admin users)
@@ -307,11 +356,23 @@ def register_admin_routes(app):
                                     is_active=True,
                                 )
                                 db.session.add(user_org)
-                                db.session.commit()
-                                current_app.logger.info(
-                                    f"Added user {new_user.username} to organization "
-                                    f"{org.name} with role {role.display_name}"
-                                )
+                                try:
+                                    db.session.commit()
+                                    current_app.logger.info(
+                                        f"Added user {new_user.username} to organization "
+                                        f"{org.name} with role {role.display_name}"
+                                    )
+                                except Exception as commit_error:
+                                    db.session.rollback()
+                                    current_app.logger.error(
+                                        f"Error adding user to organization: {str(commit_error)}"
+                                    )
+                                    # Don't fail user creation if org assignment fails
+                                    flash(
+                                        f"User created but failed to add to organization: "
+                                        f"{str(commit_error)}",
+                                        "warning",
+                                    )
                         else:
                             current_app.logger.warning(
                                 f"Could not add user to organization: org={org_id}, role={role_id}"
@@ -492,7 +553,25 @@ def register_admin_routes(app):
                                     )
                                     db.session.add(user_org)
 
-                                db.session.commit()
+                                try:
+                                    db.session.commit()
+                                except Exception as commit_error:
+                                    db.session.rollback()
+                                    current_app.logger.error(
+                                        f"Error updating user organization membership: "
+                                        f"{str(commit_error)}"
+                                    )
+                                    flash(
+                                        f"Error updating organization membership: "
+                                        f"{str(commit_error)}",
+                                        "danger",
+                                    )
+                                    return render_template(
+                                        "admin/edit_user.html",
+                                        form=form,
+                                        user=user,
+                                        organization=organization,
+                                    )
 
                     # Log admin action
                     AdminLog.log_action(

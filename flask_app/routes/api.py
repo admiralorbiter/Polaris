@@ -90,7 +90,11 @@ def register_api_routes(app):
         try:
             import re
 
-            data = request.get_json()
+            # Validate JSON request
+            data = request.get_json() or {}
+            if not isinstance(data, dict):
+                return jsonify({"success": False, "error": "Invalid JSON data"}), 400
+
             org_name = data.get("name", "").strip()
             org_description = data.get("description") or None
             if org_description:
@@ -98,6 +102,18 @@ def register_api_routes(app):
 
             if not org_name:
                 return jsonify({"success": False, "error": "Organization name is required"}), 400
+
+            # Validate organization name length (max 200 characters per model)
+            if len(org_name) > 200:
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": "Organization name must be 200 characters or less",
+                        }
+                    ),
+                    400,
+                )
 
             # Only super admins can create organizations
             if not current_user.is_super_admin:
