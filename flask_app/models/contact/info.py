@@ -41,9 +41,14 @@ class ContactEmail(BaseModel):
         """Validate email format"""
         if value:
             from email_validator import validate_email, EmailNotValidError
+            from flask import current_app
 
             try:
-                validate_email(value)
+                # Skip deliverability checks in testing or if configured
+                check_deliverability = current_app.config.get(
+                    "EMAIL_VALIDATION_CHECK_DELIVERABILITY", True
+                )
+                validate_email(value, check_deliverability=check_deliverability)
             except EmailNotValidError:
                 raise ValueError(f"Invalid email format: {value}")
         return value

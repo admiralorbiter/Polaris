@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from flask_app.models import (
     AddressType,
     AgeGroup,
+    ClearanceStatus,
     Contact,
     ContactAddress,
     ContactEmail,
@@ -21,11 +22,16 @@ from flask_app.models import (
     ContactStatus,
     ContactTag,
     ContactType,
+    EducationLevel,
     EmailType,
     EmergencyContact,
+    Gender,
     Organization,
     PhoneType,
+    PreferredLanguage,
+    RaceEthnicity,
     RoleType,
+    Salutation,
     Student,
     Teacher,
     Volunteer,
@@ -40,72 +46,82 @@ from flask_app.models import (
 
 @pytest.fixture
 def test_organization(app):
-    """Create a test organization"""
-    with app.app_context():
-        org = Organization(name="Test Organization", slug="test-org")
-        db.session.add(org)
-        db.session.commit()
-        return org
+    """Create a test organization
+    Note: app_context fixture is autouse, so app context is already available
+    """
+    org = Organization(name="Test Organization", slug="test-org")
+    db.session.add(org)
+    db.session.commit()
+    # Object stays in session since we're in the same app_context as tests
+    return org
 
 
 @pytest.fixture
 def test_contact(app):
-    """Create a basic test contact"""
-    with app.app_context():
-        contact = Contact(
-            first_name="John",
-            last_name="Doe",
-            contact_type=ContactType.CONTACT,
-            status=ContactStatus.ACTIVE,
-        )
-        db.session.add(contact)
-        db.session.commit()
-        return contact
+    """Create a basic test contact
+    Note: app_context fixture is autouse, so app context is already available
+    """
+    contact = Contact(
+        first_name="John",
+        last_name="Doe",
+        contact_type=ContactType.CONTACT,
+        status=ContactStatus.ACTIVE,
+    )
+    db.session.add(contact)
+    db.session.commit()
+    # Object stays in session since we're in the same app_context as tests
+    return contact
 
 
 @pytest.fixture
 def test_volunteer(app):
-    """Create a test volunteer"""
-    with app.app_context():
-        volunteer = Volunteer(
-            first_name="Jane",
-            last_name="Volunteer",
-            contact_type=ContactType.VOLUNTEER,
-            status=ContactStatus.ACTIVE,
-        )
-        db.session.add(volunteer)
-        db.session.commit()
-        return volunteer
+    """Create a test volunteer
+    Note: app_context fixture is autouse, so app context is already available
+    """
+    volunteer = Volunteer(
+        first_name="Jane",
+        last_name="Volunteer",
+        contact_type=ContactType.VOLUNTEER,
+        status=ContactStatus.ACTIVE,
+    )
+    db.session.add(volunteer)
+    db.session.commit()
+    # Object stays in session since we're in the same app_context as tests
+    return volunteer
 
 
 @pytest.fixture
 def test_student(app):
-    """Create a test student"""
-    with app.app_context():
-        student = Student(
-            first_name="Alice",
-            last_name="Student",
-            contact_type=ContactType.STUDENT,
-            status=ContactStatus.ACTIVE,
-        )
-        db.session.add(student)
-        db.session.commit()
-        return student
+    """Create a test student
+    Note: app_context fixture is autouse, so app context is already available
+    """
+    student = Student(
+        first_name="Alice",
+        last_name="Student",
+        contact_type=ContactType.STUDENT,
+        status=ContactStatus.ACTIVE,
+    )
+    db.session.add(student)
+    db.session.commit()
+    # Object stays in session since we're in the same app_context as tests
+    return student
 
 
 @pytest.fixture
 def test_teacher(app):
-    """Create a test teacher"""
-    with app.app_context():
-        teacher = Teacher(
-            first_name="Bob",
-            last_name="Teacher",
-            contact_type=ContactType.TEACHER,
-            status=ContactStatus.ACTIVE,
-        )
-        db.session.add(teacher)
-        db.session.commit()
-        return teacher
+    """Create a test teacher
+    Note: app_context fixture is autouse, so app context is already available
+    """
+    teacher = Teacher(
+        first_name="Bob",
+        last_name="Teacher",
+        contact_type=ContactType.TEACHER,
+        status=ContactStatus.ACTIVE,
+    )
+    db.session.add(teacher)
+    db.session.commit()
+    # Object stays in session since we're in the same app_context as tests
+    return teacher
 
 
 class TestContactModel:
@@ -130,22 +146,22 @@ class TestContactModel:
         with app.app_context():
             birthdate = date(1990, 1, 15)
             contact = Contact(
-                salutation="Mr.",
+                salutation=Salutation.MR,
                 first_name="John",
                 middle_name="Middle",
                 last_name="Doe",
                 suffix="Jr.",
                 preferred_name="Johnny",
-                gender="Male",
-                race="Caucasian",
+                gender=Gender.MALE,
+                race=RaceEthnicity.WHITE,
                 birthdate=birthdate,
-                education_level="Bachelor's",
+                education_level=EducationLevel.BACHELORS,
                 is_local=True,
                 type="General",
                 do_not_call=False,
                 do_not_email=False,
                 do_not_contact=False,
-                preferred_language="English",
+                preferred_language=PreferredLanguage.ENGLISH,
                 status=ContactStatus.ACTIVE,
                 source="Website",
                 last_contact_date=date.today(),
@@ -156,7 +172,7 @@ class TestContactModel:
             db.session.add(contact)
             db.session.commit()
 
-            assert contact.salutation == "Mr."
+            assert contact.salutation == Salutation.MR
             assert contact.first_name == "John"
             assert contact.middle_name == "Middle"
             assert contact.last_name == "Doe"
@@ -208,10 +224,10 @@ class TestContactModel:
         """Test birthdate validation rejects future dates"""
         with app.app_context():
             future_date = date.today() + timedelta(days=1)
-            contact = Contact(first_name="Test", last_name="Contact", birthdate=future_date)
+            contact = Contact(first_name="Test", last_name="Contact")
+            # Validation happens on attribute assignment, not commit
             with pytest.raises(ValueError, match="cannot be in the future"):
-                db.session.add(contact)
-                db.session.commit()
+                contact.birthdate = future_date
 
     def test_validate_birthdate_past(self, app):
         """Test birthdate validation accepts past dates"""
@@ -704,7 +720,7 @@ class TestContactSubclasses:
                 volunteer_status=VolunteerStatus.ACTIVE,
                 title="Software Engineer",
                 industry="Technology",
-                clearance_status="Cleared",
+                clearance_status=ClearanceStatus.APPROVED,
                 first_volunteer_date=date(2024, 1, 1),
             )
             db.session.add(volunteer)
@@ -714,7 +730,7 @@ class TestContactSubclasses:
             assert volunteer.volunteer_status == VolunteerStatus.ACTIVE
             assert volunteer.title == "Software Engineer"
             assert volunteer.industry == "Technology"
-            assert volunteer.clearance_status == "Cleared"
+            assert volunteer.clearance_status == ClearanceStatus.APPROVED
             assert volunteer.first_volunteer_date == date(2024, 1, 1)
             assert volunteer.total_volunteer_hours == 0.0
             assert isinstance(volunteer, Contact)
@@ -830,7 +846,7 @@ class TestVolunteerEnhanced:
                 volunteer_status=VolunteerStatus.ACTIVE,
                 title="Manager",
                 industry="Non-profit",
-                clearance_status="Pending",
+                clearance_status=ClearanceStatus.PENDING,
                 first_volunteer_date=date(2023, 6, 1),
                 last_volunteer_date=date(2024, 12, 15),
                 total_volunteer_hours=150.5,
@@ -1235,12 +1251,377 @@ class TestContactEdgeCases:
             role, _ = test_contact.add_role(RoleType.VOLUNTEER, start_date=date(2020, 1, 1))
             assert role.start_date == date(2020, 1, 1)
 
-            # End role
-            test_contact.end_role(RoleType.VOLUNTEER, end_date=date(2023, 12, 31))
+            # End role - returns (result, error) tuple
+            result, error = test_contact.end_role(RoleType.VOLUNTEER, end_date=date(2023, 12, 31))
+            assert result is True
+            assert error is None
             assert test_contact.has_role(RoleType.VOLUNTEER) is False
 
             # Can add same role again after ending
             new_role, _ = test_contact.add_role(RoleType.VOLUNTEER, start_date=date(2024, 1, 1))
             assert new_role.start_date == date(2024, 1, 1)
-            assert test_contact.has_role(RoleType.VOLUNTEER) is True
+            # Reload contact from database to refresh relationships
+            contact_id = test_contact.id
+            db.session.expire_all()
+            reloaded_contact = db.session.get(Contact, contact_id)
+            assert reloaded_contact.has_role(RoleType.VOLUNTEER) is True
+
+    def test_can_volunteer_in_person(self, app):
+        """Test can_volunteer_in_person method"""
+        with app.app_context():
+            contact = Contact(first_name="Test", last_name="Contact", is_local=True)
+            assert contact.can_volunteer_in_person() is True
+
+            contact2 = Contact(first_name="Test", last_name="Contact", is_local=False)
+            assert contact2.can_volunteer_in_person() is False
+
+    def test_update_age_group_error_handling(self, app):
+        """Test update_age_group error handling"""
+        with app.app_context():
+            contact = Contact(
+                first_name="Test",
+                last_name="Contact",
+                birthdate=date(1990, 1, 1),
+            )
+            db.session.add(contact)
+            db.session.commit()
+
+            # Mock database error
+            with patch("flask_app.models.contact.base.db.session.commit") as mock_commit:
+                mock_commit.side_effect = SQLAlchemyError("Database error")
+                result = contact.update_age_group()
+                assert result is False
+
+    def test_find_by_email_error_handling(self, app):
+        """Test find_by_email error handling"""
+        with app.app_context():
+            # Mock database error - patch the imported ContactEmail inside the method
+            with patch("flask_app.models.contact.info.ContactEmail.query") as mock_query:
+                mock_query.filter_by.return_value.first.side_effect = SQLAlchemyError("Database error")
+                result = Contact.find_by_email("test@example.com")
+                assert result is None
+
+    def test_find_by_phone_error_handling(self, app):
+        """Test find_by_phone error handling"""
+        with app.app_context():
+            # Mock database error - patch the imported ContactPhone inside the method
+            with patch("flask_app.models.contact.info.ContactPhone.query") as mock_query:
+                mock_query.filter_by.return_value.first.side_effect = SQLAlchemyError("Database error")
+                result = Contact.find_by_phone("555-1234")
+                assert result is None
+
+    def test_contact_cascade_delete_emails(self, app):
+        """Test that deleting contact cascades to emails"""
+        with app.app_context():
+            contact = Contact(first_name="Test", last_name="Contact")
+            db.session.add(contact)
+            db.session.flush()
+
+            email = ContactEmail(
+                contact_id=contact.id,
+                email="test@example.com",
+                email_type=EmailType.PERSONAL,
+                is_primary=True,
+            )
+            db.session.add(email)
+            db.session.commit()
+
+            contact_id = contact.id
+            email_id = email.id
+
+            db.session.delete(contact)
+            db.session.commit()
+
+            # Verify email was deleted
+            deleted_email = db.session.get(ContactEmail, email_id)
+            assert deleted_email is None
+
+    def test_contact_cascade_delete_phones(self, app):
+        """Test that deleting contact cascades to phones"""
+        with app.app_context():
+            contact = Contact(first_name="Test", last_name="Contact")
+            db.session.add(contact)
+            db.session.flush()
+
+            phone = ContactPhone(
+                contact_id=contact.id,
+                phone_number="555-1234",
+                phone_type=PhoneType.MOBILE,
+                is_primary=True,
+            )
+            db.session.add(phone)
+            db.session.commit()
+
+            contact_id = contact.id
+            phone_id = phone.id
+
+            db.session.delete(contact)
+            db.session.commit()
+
+            # Verify phone was deleted
+            deleted_phone = db.session.get(ContactPhone, phone_id)
+            assert deleted_phone is None
+
+    def test_contact_cascade_delete_addresses(self, app):
+        """Test that deleting contact cascades to addresses"""
+        with app.app_context():
+            contact = Contact(first_name="Test", last_name="Contact")
+            db.session.add(contact)
+            db.session.flush()
+
+            address = ContactAddress(
+                contact_id=contact.id,
+                address_type=AddressType.HOME,
+                street_address_1="123 Main St",
+                city="Springfield",
+                state="IL",
+                postal_code="62701",
+                is_primary=True,
+            )
+            db.session.add(address)
+            db.session.commit()
+
+            contact_id = contact.id
+            address_id = address.id
+
+            db.session.delete(contact)
+            db.session.commit()
+
+            # Verify address was deleted
+            deleted_address = db.session.get(ContactAddress, address_id)
+            assert deleted_address is None
+
+    def test_contact_cascade_delete_roles(self, app):
+        """Test that deleting contact cascades to roles"""
+        with app.app_context():
+            contact = Contact(first_name="Test", last_name="Contact")
+            db.session.add(contact)
+            db.session.flush()
+
+            role = ContactRole(
+                contact_id=contact.id,
+                role_type=RoleType.VOLUNTEER,
+                start_date=date.today(),
+            )
+            db.session.add(role)
+            db.session.commit()
+
+            contact_id = contact.id
+            role_id = role.id
+
+            db.session.delete(contact)
+            db.session.commit()
+
+            # Verify role was deleted
+            deleted_role = db.session.get(ContactRole, role_id)
+            assert deleted_role is None
+
+    def test_volunteer_get_interests_list(self, test_volunteer, app):
+        """Test get_interests_list helper method"""
+        with app.app_context():
+            test_volunteer.add_interest("Education", "Community")
+            test_volunteer.add_interest("Environment", "Community")
+            test_volunteer.add_interest("Technology", "Professional")
+
+            all_interests = test_volunteer.get_interests_list()
+            assert len(all_interests) == 3
+
+            community_interests = test_volunteer.get_interests_list(category="Community")
+            assert len(community_interests) == 2
+
+    def test_volunteer_get_availability_for_day(self, test_volunteer, app):
+        """Test get_availability_for_day helper method"""
+        with app.app_context():
+            from datetime import time
+
+            test_volunteer.add_availability(0, time(9, 0), time(12, 0), is_recurring=True)
+            test_volunteer.add_availability(0, time(13, 0), time(17, 0), is_recurring=True)
+
+            availabilities = test_volunteer.get_availability_for_day(0)
+            assert len(availabilities) == 2
+
+            availabilities = test_volunteer.get_availability_for_day(1)
+            assert len(availabilities) == 0
+
+    def test_volunteer_is_available_on_day_with_date(self, test_volunteer, app):
+        """Test is_available_on_day with date parameter"""
+        with app.app_context():
+            from datetime import time
+
+            test_date = date(2024, 6, 10)  # Monday
+            test_volunteer.add_availability(
+                0, time(9, 0), time(17, 0), is_recurring=True, start_date=test_date
+            )
+
+            assert test_volunteer.is_available_on_day(0, date=test_date) is True
+            assert test_volunteer.is_available_on_day(1, date=test_date) is False
+
+    def test_volunteer_add_skill_error_handling(self, test_volunteer, app):
+        """Test add_skill error handling"""
+        with app.app_context():
+            # Mock database error
+            with patch("flask_app.models.contact.volunteer.db.session.commit") as mock_commit:
+                mock_commit.side_effect = SQLAlchemyError("Database error")
+                skill, error = test_volunteer.add_skill("Python", "Technical", "Advanced")
+                assert skill is None
+                assert error is not None
+
+    def test_volunteer_add_interest_error_handling(self, test_volunteer, app):
+        """Test add_interest error handling"""
+        with app.app_context():
+            # Mock database error
+            with patch("flask_app.models.contact.volunteer.db.session.commit") as mock_commit:
+                mock_commit.side_effect = SQLAlchemyError("Database error")
+                interest, error = test_volunteer.add_interest("Education", "Community")
+                assert interest is None
+                assert error is not None
+
+    def test_volunteer_add_availability_error_handling(self, test_volunteer, app):
+        """Test add_availability error handling"""
+        with app.app_context():
+            from datetime import time
+
+            # Mock database error
+            with patch("flask_app.models.contact.volunteer.db.session.commit") as mock_commit:
+                mock_commit.side_effect = SQLAlchemyError("Database error")
+                avail, error = test_volunteer.add_availability(
+                    0, time(9, 0), time(17, 0), is_recurring=True
+                )
+                assert avail is None
+                assert error is not None
+
+    def test_volunteer_log_hours_error_handling(self, test_volunteer, test_organization, app):
+        """Test log_hours error handling"""
+        with app.app_context():
+            from datetime import date
+
+            # Mock database error
+            with patch("flask_app.models.contact.volunteer.db.session.commit") as mock_commit:
+                mock_commit.side_effect = SQLAlchemyError("Database error")
+                hours_entry, error = test_volunteer.log_hours(
+                    date(2024, 1, 1), 5.0, organization_id=test_organization.id
+                )
+                assert hours_entry is None
+                assert error is not None
+
+    def test_volunteer_get_total_hours_recalculate(self, test_volunteer, app):
+        """Test get_total_hours with recalculate=True"""
+        with app.app_context():
+            from datetime import date
+
+            test_volunteer.log_hours(date(2024, 1, 1), 2.0)
+            test_volunteer.log_hours(date(2024, 1, 2), 3.5)
+
+            # Manually set total to wrong value
+            test_volunteer.total_volunteer_hours = 0.0
+            db.session.commit()
+
+            # Recalculate should fix it
+            total = test_volunteer.get_total_hours(recalculate=True)
+            assert total == 5.5
+            assert float(test_volunteer.total_volunteer_hours) == 5.5
+
+    def test_volunteer_get_total_hours_recalculate_error(self, test_volunteer, app):
+        """Test get_total_hours recalculate error handling"""
+        with app.app_context():
+            from datetime import date
+
+            test_volunteer.log_hours(date(2024, 1, 1), 2.0)
+
+            # Mock database error during recalculate
+            with patch("flask_app.models.contact.volunteer.db.session.commit") as mock_commit:
+                mock_commit.side_effect = SQLAlchemyError("Database error")
+                # Should still return current total even if recalculate fails
+                total = test_volunteer.get_total_hours(recalculate=True)
+                assert total >= 0.0  # Should return some value
+
+    def test_contact_email_ensure_single_primary(self, test_contact, app):
+        """Test ContactEmail.ensure_single_primary static method"""
+        with app.app_context():
+            # Create multiple primary emails
+            email1 = ContactEmail(
+                contact_id=test_contact.id,
+                email="primary1@example.com",
+                email_type=EmailType.PERSONAL,
+                is_primary=True,
+            )
+            email2 = ContactEmail(
+                contact_id=test_contact.id,
+                email="primary2@example.com",
+                email_type=EmailType.WORK,
+                is_primary=True,
+            )
+            db.session.add(email1)
+            db.session.add(email2)
+            db.session.commit()
+
+            # Ensure only one primary
+            ContactEmail.ensure_single_primary(test_contact.id, exclude_id=email1.id)
+            db.session.commit()
+
+            # Refresh and check
+            db.session.refresh(email2)
+            assert email2.is_primary is False
+
+    def test_contact_phone_ensure_single_primary(self, test_contact, app):
+        """Test ContactPhone.ensure_single_primary static method"""
+        with app.app_context():
+            # Create multiple primary phones
+            phone1 = ContactPhone(
+                contact_id=test_contact.id,
+                phone_number="555-1111",
+                phone_type=PhoneType.MOBILE,
+                is_primary=True,
+            )
+            phone2 = ContactPhone(
+                contact_id=test_contact.id,
+                phone_number="555-2222",
+                phone_type=PhoneType.HOME,
+                is_primary=True,
+            )
+            db.session.add(phone1)
+            db.session.add(phone2)
+            db.session.commit()
+
+            # Ensure only one primary
+            ContactPhone.ensure_single_primary(test_contact.id, exclude_id=phone1.id)
+            db.session.commit()
+
+            # Refresh and check
+            db.session.refresh(phone2)
+            assert phone2.is_primary is False
+
+    def test_contact_address_ensure_single_primary(self, test_contact, app):
+        """Test ContactAddress.ensure_single_primary static method"""
+        with app.app_context():
+            # Create multiple primary addresses
+            address1 = ContactAddress(
+                contact_id=test_contact.id,
+                address_type=AddressType.HOME,
+                street_address_1="123 Main St",
+                city="Springfield",
+                state="IL",
+                postal_code="62701",
+                is_primary=True,
+            )
+            address2 = ContactAddress(
+                contact_id=test_contact.id,
+                address_type=AddressType.WORK,
+                street_address_1="456 Work St",
+                city="Springfield",
+                state="IL",
+                postal_code="62701",
+                is_primary=True,
+            )
+            db.session.add(address1)
+            db.session.add(address2)
+            db.session.commit()
+
+            # Ensure only one primary
+            ContactAddress.ensure_single_primary(test_contact.id, exclude_id=address1.id)
+            db.session.commit()
+
+            # Refresh and check
+            db.session.refresh(address2)
+            assert address2.is_primary is False
 

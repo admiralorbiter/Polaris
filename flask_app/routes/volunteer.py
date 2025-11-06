@@ -240,7 +240,8 @@ def register_volunteer_routes(app):
     def volunteers_view(volunteer_id):
         """View volunteer details"""
         try:
-            volunteer = Volunteer.query.options(
+            from sqlalchemy.orm import joinedload
+            volunteer = db.session.query(Volunteer).options(
                 joinedload(Volunteer.emails),
                 joinedload(Volunteer.phones),
                 joinedload(Volunteer.addresses),
@@ -248,7 +249,10 @@ def register_volunteer_routes(app):
                 joinedload(Volunteer.interests),
                 joinedload(Volunteer.availability_slots),
                 joinedload(Volunteer.volunteer_hours),
-            ).get_or_404(volunteer_id)
+            ).filter_by(id=volunteer_id).first()
+            if not volunteer:
+                from flask import abort
+                abort(404)
 
             return render_template("volunteers/view.html", volunteer=volunteer)
 
@@ -261,35 +265,41 @@ def register_volunteer_routes(app):
     @login_required
     def volunteers_edit(volunteer_id):
         """Edit volunteer information"""
-        volunteer = Volunteer.query.options(
+        from sqlalchemy.orm import joinedload
+        volunteer = db.session.query(Volunteer).options(
             joinedload(Volunteer.emails),
             joinedload(Volunteer.phones),
-        ).get_or_404(volunteer_id)
+        ).filter_by(id=volunteer_id).first()
+        if not volunteer:
+            from flask import abort
+            abort(404)
 
         form = UpdateVolunteerForm(obj=volunteer)
 
-        # Pre-populate email and phone from primary contact info
-        primary_email = volunteer.get_primary_email()
-        primary_phone_obj = next((p for p in volunteer.phones if p.is_primary), None)
-        if primary_email:
-            form.email.data = primary_email
-        if primary_phone_obj:
-            form.phone_number.data = primary_phone_obj.phone_number
-            form.can_text.data = primary_phone_obj.can_text
+        # Pre-populate form fields only on GET requests
+        if request.method == "GET":
+            # Pre-populate email and phone from primary contact info
+            primary_email = volunteer.get_primary_email()
+            primary_phone_obj = next((p for p in volunteer.phones if p.is_primary), None)
+            if primary_email:
+                form.email.data = primary_email
+            if primary_phone_obj:
+                form.phone_number.data = primary_phone_obj.phone_number
+                form.can_text.data = primary_phone_obj.can_text
 
-        # Pre-populate enum fields
-        if volunteer.salutation:
-            form.salutation.data = volunteer.salutation.value if hasattr(volunteer.salutation, 'value') else str(volunteer.salutation)
-        if volunteer.gender:
-            form.gender.data = volunteer.gender.value if hasattr(volunteer.gender, 'value') else str(volunteer.gender)
-        if volunteer.race:
-            form.race.data = volunteer.race.value if hasattr(volunteer.race, 'value') else str(volunteer.race)
-        if volunteer.education_level:
-            form.education_level.data = volunteer.education_level.value if hasattr(volunteer.education_level, 'value') else str(volunteer.education_level)
-        if volunteer.preferred_language:
-            form.preferred_language.data = volunteer.preferred_language.value if hasattr(volunteer.preferred_language, 'value') else str(volunteer.preferred_language)
-        if volunteer.clearance_status:
-            form.clearance_status.data = volunteer.clearance_status.value if hasattr(volunteer.clearance_status, 'value') else str(volunteer.clearance_status)
+            # Pre-populate enum fields
+            if volunteer.salutation:
+                form.salutation.data = volunteer.salutation.value if hasattr(volunteer.salutation, 'value') else str(volunteer.salutation)
+            if volunteer.gender:
+                form.gender.data = volunteer.gender.value if hasattr(volunteer.gender, 'value') else str(volunteer.gender)
+            if volunteer.race:
+                form.race.data = volunteer.race.value if hasattr(volunteer.race, 'value') else str(volunteer.race)
+            if volunteer.education_level:
+                form.education_level.data = volunteer.education_level.value if hasattr(volunteer.education_level, 'value') else str(volunteer.education_level)
+            if volunteer.preferred_language:
+                form.preferred_language.data = volunteer.preferred_language.value if hasattr(volunteer.preferred_language, 'value') else str(volunteer.preferred_language)
+            if volunteer.clearance_status:
+                form.clearance_status.data = volunteer.clearance_status.value if hasattr(volunteer.clearance_status, 'value') else str(volunteer.clearance_status)
 
         try:
             if form.validate_on_submit():
@@ -312,10 +322,24 @@ def register_volunteer_routes(app):
                 volunteer.race = race_enum
                 volunteer.birthdate = form.birthdate.data if form.birthdate.data else None
                 volunteer.education_level = education_enum
-                volunteer.is_local = form.is_local.data
-                volunteer.do_not_call = form.do_not_call.data
-                volunteer.do_not_email = form.do_not_email.data
-                volunteer.do_not_contact = form.do_not_contact.data
+                # Boolean fields - check request form directly to get submitted values
+                # WTForms BooleanField might use default/pre-populated values instead of submitted
+                if 'is_local' in request.form:
+                    volunteer.is_local = request.form.get('is_local', '').lower() in ('true', '1', 'on', 'yes')
+                else:
+                    volunteer.is_local = form.is_local.data
+                if 'do_not_call' in request.form:
+                    volunteer.do_not_call = request.form.get('do_not_call', '').lower() in ('true', '1', 'on', 'yes')
+                else:
+                    volunteer.do_not_call = form.do_not_call.data
+                if 'do_not_email' in request.form:
+                    volunteer.do_not_email = request.form.get('do_not_email', '').lower() in ('true', '1', 'on', 'yes')
+                else:
+                    volunteer.do_not_email = form.do_not_email.data
+                if 'do_not_contact' in request.form:
+                    volunteer.do_not_contact = request.form.get('do_not_contact', '').lower() in ('true', '1', 'on', 'yes')
+                else:
+                    volunteer.do_not_contact = form.do_not_contact.data
                 volunteer.preferred_language = language_enum
                 volunteer.notes = form.notes.data.strip() if form.notes.data else None
                 volunteer.internal_notes = form.internal_notes.data.strip() if form.internal_notes.data else None
@@ -327,30 +351,83 @@ def register_volunteer_routes(app):
                 volunteer.clearance_status = clearance_enum
 
                 # Update primary email if changed
-                if form.email.data:
-                    primary_email_obj = next((e for e in volunteer.emails if e.is_primary), None)
+                email_value = form.email.data.strip() if form.email.data else ""
+                
+                if email_value:
+                    # Validate email first
+                    try:
+                        from email_validator import validate_email, EmailNotValidError
+                        check_deliverability = current_app.config.get(
+                            "EMAIL_VALIDATION_CHECK_DELIVERABILITY", True
+                        )
+                        validate_email(email_value, check_deliverability=check_deliverability)
+                    except (ValueError, EmailNotValidError) as e:
+                        current_app.logger.error(f"Email validation error: {str(e)}")
+                        flash(f"Invalid email address: {str(e)}", "danger")
+                        db.session.rollback()
+                        return render_template("volunteers/edit.html", form=form, volunteer=volunteer)
+                    
+                    # Get primary email - always query directly to ensure fresh data
+                    primary_email_obj = db.session.query(ContactEmail).filter_by(
+                        contact_id=volunteer.id, is_primary=True
+                    ).first()
+                    
                     if primary_email_obj:
-                        if primary_email_obj.email != form.email.data.strip():
-                            primary_email_obj.email = form.email.data.strip()
+                        # Update existing primary email
+                        if primary_email_obj.email != email_value:
+                            current_app.logger.info(f"Updating email from '{primary_email_obj.email}' to '{email_value}' for volunteer {volunteer.id}")
+                            # Get the email ID and query fresh to ensure it's in the session
+                            email_id = primary_email_obj.id
+                            email_to_delete = db.session.query(ContactEmail).filter_by(id=email_id).first()
+                            if email_to_delete:
+                                current_app.logger.info(f"Deleting email {email_id} and creating new one")
+                                db.session.delete(email_to_delete)
+                                db.session.flush()  # Flush delete
+                                
+                                # Create new primary email with updated value
+                                new_email = ContactEmail(
+                                    contact_id=volunteer.id,
+                                    email=email_value,
+                                    email_type=EmailType.PERSONAL,
+                                    is_primary=True,
+                                    is_verified=False,
+                                )
+                                db.session.add(new_email)
+                                db.session.flush()  # Flush create
+                                current_app.logger.info(f"Created new email with value '{new_email.email}'")
+                            else:
+                                current_app.logger.warning(f"Email {email_id} not found for delete")
+                        else:
+                            current_app.logger.debug(f"Email already set to '{email_value}', skipping update")
                     else:
                         # Create new primary email
+                        current_app.logger.info(f"No primary email found, creating new one with '{email_value}'")
                         email = ContactEmail(
                             contact_id=volunteer.id,
-                            email=form.email.data.strip(),
+                            email=email_value,
                             email_type=EmailType.PERSONAL,
                             is_primary=True,
                             is_verified=False,
                         )
                         db.session.add(email)
-                elif primary_email:
+                else:
                     # Remove primary email if form is empty
-                    primary_email_obj = next((e for e in volunteer.emails if e.is_primary), None)
+                    # Always query directly to ensure fresh data
+                    primary_email_obj = db.session.query(ContactEmail).filter_by(
+                        contact_id=volunteer.id, is_primary=True
+                    ).first()
                     if primary_email_obj:
+                        # Ensure the object is in the current session before deleting
+                        primary_email_obj = db.session.merge(primary_email_obj)
                         db.session.delete(primary_email_obj)
 
                 # Update primary phone if changed
+                # Query primary phone directly to ensure fresh data
+                primary_phone_obj = db.session.query(ContactPhone).filter_by(
+                    contact_id=volunteer.id, is_primary=True
+                ).first()
+                
                 if form.phone_number.data:
-                    primary_phone_obj = next((p for p in volunteer.phones if p.is_primary), None)
                     if primary_phone_obj:
                         if primary_phone_obj.phone_number != form.phone_number.data.strip():
                             primary_phone_obj.phone_number = form.phone_number.data.strip()
@@ -365,13 +442,17 @@ def register_volunteer_routes(app):
                             can_text=form.can_text.data,
                         )
                         db.session.add(phone)
-                elif primary_phone:
-                    # Remove primary phone if form is empty
-                    primary_phone_obj = next((p for p in volunteer.phones if p.is_primary), None)
-                    if primary_phone_obj:
-                        db.session.delete(primary_phone_obj)
+                elif primary_phone_obj:
+                    # Remove primary phone if form is empty and one existed before
+                    # Ensure the object is in the current session before deleting
+                    primary_phone_obj = db.session.merge(primary_phone_obj)
+                    db.session.delete(primary_phone_obj)
 
+                # Commit all changes
                 db.session.commit()
+                
+                # Expire the volunteer's emails relationship to ensure fresh data on next access
+                db.session.expire(volunteer, ['emails'])
 
                 flash(f"Volunteer {volunteer.get_full_name()} updated successfully!", "success")
                 return redirect(url_for("volunteers_view", volunteer_id=volunteer_id))

@@ -69,6 +69,7 @@ def app():
                 "ENABLE_FILE_LOGGING": True,  # Enable file logging for tests
                 "ENABLE_CONSOLE_LOGGING": True,  # Enable console logging for tests
                 "LOG_LEVEL": "DEBUG",  # Set DEBUG level for tests
+                "EMAIL_VALIDATION_CHECK_DELIVERABILITY": False,  # Skip DNS checks in tests
             }
         )
 
