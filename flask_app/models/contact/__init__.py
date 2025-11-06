@@ -8,11 +8,17 @@ from .base import Contact
 from .enums import (
     AddressType,
     AgeGroup,
+    ClearanceStatus,
     ContactStatus,
     ContactType,
+    EducationLevel,
     EmailType,
+    Gender,
     PhoneType,
+    PreferredLanguage,
+    RaceEthnicity,
     RoleType,
+    Salutation,
     VolunteerStatus,
 )
 from .info import ContactAddress, ContactEmail, ContactPhone
@@ -44,6 +50,12 @@ __all__ = [
     "AddressType",
     "AgeGroup",
     "VolunteerStatus",
+    "Gender",
+    "RaceEthnicity",
+    "EducationLevel",
+    "Salutation",
+    "ClearanceStatus",
+    "PreferredLanguage",
     # Info models
     "ContactEmail",
     "ContactPhone",

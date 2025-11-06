@@ -11,7 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from ..base import BaseModel, db
 from .base import Contact
-from .enums import ContactType, VolunteerStatus
+from .enums import ClearanceStatus, ContactType, VolunteerStatus
 
 
 class Volunteer(Contact):
@@ -35,7 +35,9 @@ class Volunteer(Contact):
     # Core volunteer information
     title = db.Column(db.String(200), nullable=True)  # Job title/position
     industry = db.Column(db.String(200), nullable=True)  # Industry/field they work in
-    clearance_status = db.Column(db.String(50), nullable=True)  # Background check/clearance status
+    clearance_status = db.Column(
+        Enum(ClearanceStatus, name="clearance_status_enum"), nullable=True
+    )  # Background check/clearance status
 
     # Volunteer dates
     first_volunteer_date = db.Column(db.Date, nullable=True, index=True)

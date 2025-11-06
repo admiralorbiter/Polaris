@@ -10,11 +10,17 @@ from sqlalchemy.orm import joinedload
 
 from flask_app.forms.volunteer import CreateVolunteerForm, UpdateVolunteerForm
 from flask_app.models import (
+    ClearanceStatus,
     ContactEmail,
     ContactPhone,
     ContactType,
+    EducationLevel,
     EmailType,
+    Gender,
     PhoneType,
+    PreferredLanguage,
+    RaceEthnicity,
+    Salutation,
     Volunteer,
     VolunteerStatus,
     db,
@@ -156,30 +162,38 @@ def register_volunteer_routes(app):
         try:
             if form.validate_on_submit():
                 # Create Contact record first (base for Volunteer)
+                # Convert enum string values to enum objects
+                salutation_enum = Salutation(form.salutation.data) if form.salutation.data else None
+                gender_enum = Gender(form.gender.data) if form.gender.data else None
+                race_enum = RaceEthnicity(form.race.data) if form.race.data else None
+                education_enum = EducationLevel(form.education_level.data) if form.education_level.data else None
+                language_enum = PreferredLanguage(form.preferred_language.data) if form.preferred_language.data else None
+                clearance_enum = ClearanceStatus(form.clearance_status.data) if form.clearance_status.data else None
+
                 contact = Volunteer(
                     contact_type=ContactType.VOLUNTEER,
                     first_name=form.first_name.data.strip(),
                     last_name=form.last_name.data.strip(),
-                    salutation=form.salutation.data.strip() if form.salutation.data else None,
+                    salutation=salutation_enum,
                     middle_name=form.middle_name.data.strip() if form.middle_name.data else None,
                     suffix=form.suffix.data.strip() if form.suffix.data else None,
                     preferred_name=form.preferred_name.data.strip() if form.preferred_name.data else None,
-                    gender=form.gender.data.strip() if form.gender.data else None,
-                    race=form.race.data.strip() if form.race.data else None,
+                    gender=gender_enum,
+                    race=race_enum,
                     birthdate=form.birthdate.data if form.birthdate.data else None,
-                    education_level=form.education_level.data.strip() if form.education_level.data else None,
+                    education_level=education_enum,
                     is_local=form.is_local.data,
                     do_not_call=form.do_not_call.data,
                     do_not_email=form.do_not_email.data,
                     do_not_contact=form.do_not_contact.data,
-                    preferred_language=form.preferred_language.data.strip() if form.preferred_language.data else None,
+                    preferred_language=language_enum,
                     notes=form.notes.data.strip() if form.notes.data else None,
                     internal_notes=form.internal_notes.data.strip() if form.internal_notes.data else None,
                     # Volunteer-specific fields
                     volunteer_status=VolunteerStatus(form.volunteer_status.data),
                     title=form.title.data.strip() if form.title.data else None,
                     industry=form.industry.data.strip() if form.industry.data else None,
-                    clearance_status=form.clearance_status.data.strip() if form.clearance_status.data else None,
+                    clearance_status=clearance_enum,
                 )
 
                 db.session.add(contact)
@@ -263,24 +277,46 @@ def register_volunteer_routes(app):
             form.phone_number.data = primary_phone_obj.phone_number
             form.can_text.data = primary_phone_obj.can_text
 
+        # Pre-populate enum fields
+        if volunteer.salutation:
+            form.salutation.data = volunteer.salutation.value if hasattr(volunteer.salutation, 'value') else str(volunteer.salutation)
+        if volunteer.gender:
+            form.gender.data = volunteer.gender.value if hasattr(volunteer.gender, 'value') else str(volunteer.gender)
+        if volunteer.race:
+            form.race.data = volunteer.race.value if hasattr(volunteer.race, 'value') else str(volunteer.race)
+        if volunteer.education_level:
+            form.education_level.data = volunteer.education_level.value if hasattr(volunteer.education_level, 'value') else str(volunteer.education_level)
+        if volunteer.preferred_language:
+            form.preferred_language.data = volunteer.preferred_language.value if hasattr(volunteer.preferred_language, 'value') else str(volunteer.preferred_language)
+        if volunteer.clearance_status:
+            form.clearance_status.data = volunteer.clearance_status.value if hasattr(volunteer.clearance_status, 'value') else str(volunteer.clearance_status)
+
         try:
             if form.validate_on_submit():
+                # Convert enum string values to enum objects
+                salutation_enum = Salutation(form.salutation.data) if form.salutation.data else None
+                gender_enum = Gender(form.gender.data) if form.gender.data else None
+                race_enum = RaceEthnicity(form.race.data) if form.race.data else None
+                education_enum = EducationLevel(form.education_level.data) if form.education_level.data else None
+                language_enum = PreferredLanguage(form.preferred_language.data) if form.preferred_language.data else None
+                clearance_enum = ClearanceStatus(form.clearance_status.data) if form.clearance_status.data else None
+
                 # Update base contact fields
                 volunteer.first_name = form.first_name.data.strip()
                 volunteer.last_name = form.last_name.data.strip()
-                volunteer.salutation = form.salutation.data.strip() if form.salutation.data else None
+                volunteer.salutation = salutation_enum
                 volunteer.middle_name = form.middle_name.data.strip() if form.middle_name.data else None
                 volunteer.suffix = form.suffix.data.strip() if form.suffix.data else None
                 volunteer.preferred_name = form.preferred_name.data.strip() if form.preferred_name.data else None
-                volunteer.gender = form.gender.data.strip() if form.gender.data else None
-                volunteer.race = form.race.data.strip() if form.race.data else None
+                volunteer.gender = gender_enum
+                volunteer.race = race_enum
                 volunteer.birthdate = form.birthdate.data if form.birthdate.data else None
-                volunteer.education_level = form.education_level.data.strip() if form.education_level.data else None
+                volunteer.education_level = education_enum
                 volunteer.is_local = form.is_local.data
                 volunteer.do_not_call = form.do_not_call.data
                 volunteer.do_not_email = form.do_not_email.data
                 volunteer.do_not_contact = form.do_not_contact.data
-                volunteer.preferred_language = form.preferred_language.data.strip() if form.preferred_language.data else None
+                volunteer.preferred_language = language_enum
                 volunteer.notes = form.notes.data.strip() if form.notes.data else None
                 volunteer.internal_notes = form.internal_notes.data.strip() if form.internal_notes.data else None
 
@@ -288,7 +324,7 @@ def register_volunteer_routes(app):
                 volunteer.volunteer_status = VolunteerStatus(form.volunteer_status.data)
                 volunteer.title = form.title.data.strip() if form.title.data else None
                 volunteer.industry = form.industry.data.strip() if form.industry.data else None
-                volunteer.clearance_status = form.clearance_status.data.strip() if form.clearance_status.data else None
+                volunteer.clearance_status = clearance_enum
 
                 # Update primary email if changed
                 if form.email.data:

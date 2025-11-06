@@ -27,24 +27,11 @@
                     <form method="POST">
                         {{ form.hidden_tag() }}
 
-                        <!-- Basic Information Section -->
-                        <h5 class="mb-3">Basic Information</h5>
+                        <!-- Always Visible: Essential Information -->
+                        <h5 class="mb-3">Essential Information</h5>
                         <div class="row">
-                            <div class="col-md-2">
-                                <div class="form-group">
-                                    {{ form.salutation.label(class="form-label") }}
-                                    {{ form.salutation(class="form-control" + (" is-invalid" if form.salutation.errors else "")) }}
-                                    {% if form.salutation.errors %}
-                                        <div class="invalid-feedback">
-                                            {% for error in form.salutation.errors %}
-                                                {{ error }}
-                                            {% endfor %}
-                                        </div>
-                                    {% endif %}
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-group">
+                            <div class="col-md-6">
+                                <div class="form-group mb-3">
                                     {{ form.first_name.label(class="form-label") }} <span class="text-danger">*</span>
                                     {{ form.first_name(class="form-control" + (" is-invalid" if form.first_name.errors else "")) }}
                                     {% if form.first_name.errors %}
@@ -56,21 +43,8 @@
                                     {% endif %}
                                 </div>
                             </div>
-                            <div class="col-md-3">
-                                <div class="form-group">
-                                    {{ form.middle_name.label(class="form-label") }}
-                                    {{ form.middle_name(class="form-control" + (" is-invalid" if form.middle_name.errors else "")) }}
-                                    {% if form.middle_name.errors %}
-                                        <div class="invalid-feedback">
-                                            {% for error in form.middle_name.errors %}
-                                                {{ error }}
-                                            {% endfor %}
-                                        </div>
-                                    {% endif %}
-                                </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="form-group">
+                            <div class="col-md-6">
+                                <div class="form-group mb-3">
                                     {{ form.last_name.label(class="form-label") }} <span class="text-danger">*</span>
                                     {{ form.last_name(class="form-control" + (" is-invalid" if form.last_name.errors else "")) }}
                                     {% if form.last_name.errors %}
@@ -84,40 +58,8 @@
                             </div>
                         </div>
                         <div class="row">
-                            <div class="col-md-3">
-                                <div class="form-group">
-                                    {{ form.suffix.label(class="form-label") }}
-                                    {{ form.suffix(class="form-control" + (" is-invalid" if form.suffix.errors else "")) }}
-                                    {% if form.suffix.errors %}
-                                        <div class="invalid-feedback">
-                                            {% for error in form.suffix.errors %}
-                                                {{ error }}
-                                            {% endfor %}
-                                        </div>
-                                    {% endif %}
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-group">
-                                    {{ form.preferred_name.label(class="form-label") }}
-                                    {{ form.preferred_name(class="form-control" + (" is-invalid" if form.preferred_name.errors else "")) }}
-                                    {% if form.preferred_name.errors %}
-                                        <div class="invalid-feedback">
-                                            {% for error in form.preferred_name.errors %}
-                                                {{ error }}
-                                            {% endfor %}
-                                        </div>
-                                    {% endif %}
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Contact Information Section -->
-                        <hr class="my-4">
-                        <h5 class="mb-3">Contact Information</h5>
-                        <div class="row">
                             <div class="col-md-6">
-                                <div class="form-group">
+                                <div class="form-group mb-3">
                                     {{ form.email.label(class="form-label") }}
                                     {{ form.email(class="form-control" + (" is-invalid" if form.email.errors else "")) }}
                                     {% if form.email.errors %}
@@ -130,7 +72,7 @@
                                 </div>
                             </div>
                             <div class="col-md-6">
-                                <div class="form-group">
+                                <div class="form-group mb-3">
                                     {{ form.phone_number.label(class="form-label") }}
                                     {{ form.phone_number(class="form-control" + (" is-invalid" if form.phone_number.errors else "")) }}
                                     {% if form.phone_number.errors %}
@@ -145,81 +87,9 @@
                         </div>
                         <div class="row">
                             <div class="col-md-6">
-                                <div class="form-group">
-                                    <div class="form-check">
-                                        {{ form.can_text(class="form-check-input") }}
-                                        {{ form.can_text.label(class="form-check-label") }}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Demographics Section -->
-                        <hr class="my-4">
-                        <h5 class="mb-3">Demographics</h5>
-                        <div class="row">
-                            <div class="col-md-3">
-                                <div class="form-group">
-                                    {{ form.gender.label(class="form-label") }}
-                                    {{ form.gender(class="form-control" + (" is-invalid" if form.gender.errors else "")) }}
-                                    {% if form.gender.errors %}
-                                        <div class="invalid-feedback">
-                                            {% for error in form.gender.errors %}
-                                                {{ error }}
-                                            {% endfor %}
-                                        </div>
-                                    {% endif %}
-                                </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="form-group">
-                                    {{ form.race.label(class="form-label") }}
-                                    {{ form.race(class="form-control" + (" is-invalid" if form.race.errors else "")) }}
-                                    {% if form.race.errors %}
-                                        <div class="invalid-feedback">
-                                            {% for error in form.race.errors %}
-                                                {{ error }}
-                                            {% endfor %}
-                                        </div>
-                                    {% endif %}
-                                </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="form-group">
-                                    {{ form.birthdate.label(class="form-label") }}
-                                    {{ form.birthdate(class="form-control" + (" is-invalid" if form.birthdate.errors else "")) }}
-                                    {% if form.birthdate.errors %}
-                                        <div class="invalid-feedback">
-                                            {% for error in form.birthdate.errors %}
-                                                {{ error }}
-                                            {% endfor %}
-                                        </div>
-                                    {% endif %}
-                                </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="form-group">
-                                    {{ form.education_level.label(class="form-label") }}
-                                    {{ form.education_level(class="form-control" + (" is-invalid" if form.education_level.errors else "")) }}
-                                    {% if form.education_level.errors %}
-                                        <div class="invalid-feedback">
-                                            {% for error in form.education_level.errors %}
-                                                {{ error }}
-                                            {% endfor %}
-                                        </div>
-                                    {% endif %}
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Volunteer Information Section -->
-                        <hr class="my-4">
-                        <h5 class="mb-3">Volunteer Information</h5>
-                        <div class="row">
-                            <div class="col-md-3">
-                                <div class="form-group">
+                                <div class="form-group mb-3">
                                     {{ form.volunteer_status.label(class="form-label") }} <span class="text-danger">*</span>
-                                    {{ form.volunteer_status(class="form-control" + (" is-invalid" if form.volunteer_status.errors else "")) }}
+                                    {{ form.volunteer_status(class="form-select" + (" is-invalid" if form.volunteer_status.errors else "")) }}
                                     {% if form.volunteer_status.errors %}
                                         <div class="invalid-feedback">
                                             {% for error in form.volunteer_status.errors %}
@@ -229,50 +99,9 @@
                                     {% endif %}
                                 </div>
                             </div>
-                            <div class="col-md-3">
-                                <div class="form-group">
-                                    {{ form.title.label(class="form-label") }}
-                                    {{ form.title(class="form-control" + (" is-invalid" if form.title.errors else "")) }}
-                                    {% if form.title.errors %}
-                                        <div class="invalid-feedback">
-                                            {% for error in form.title.errors %}
-                                                {{ error }}
-                                            {% endfor %}
-                                        </div>
-                                    {% endif %}
-                                </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="form-group">
-                                    {{ form.industry.label(class="form-label") }}
-                                    {{ form.industry(class="form-control" + (" is-invalid" if form.industry.errors else "")) }}
-                                    {% if form.industry.errors %}
-                                        <div class="invalid-feedback">
-                                            {% for error in form.industry.errors %}
-                                                {{ error }}
-                                            {% endfor %}
-                                        </div>
-                                    {% endif %}
-                                </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="form-group">
-                                    {{ form.clearance_status.label(class="form-label") }}
-                                    {{ form.clearance_status(class="form-control" + (" is-invalid" if form.clearance_status.errors else "")) }}
-                                    {% if form.clearance_status.errors %}
-                                        <div class="invalid-feedback">
-                                            {% for error in form.clearance_status.errors %}
-                                                {{ error }}
-                                            {% endfor %}
-                                        </div>
-                                    {% endif %}
-                                </div>
-                            </div>
-                        </div>
-                        <div class="row">
                             <div class="col-md-6">
-                                <div class="form-group">
-                                    <div class="form-check">
+                                <div class="form-group mb-3">
+                                    <div class="form-check mt-4">
                                         {{ form.is_local(class="form-check-input") }}
                                         {{ form.is_local.label(class="form-check-label") }}
                                     </div>
@@ -281,81 +110,305 @@
                             </div>
                         </div>
 
-                        <!-- Contact Preferences Section -->
-                        <hr class="my-4">
-                        <h5 class="mb-3">Contact Preferences</h5>
-                        <div class="row">
-                            <div class="col-md-4">
-                                <div class="form-group">
-                                    <div class="form-check">
-                                        {{ form.do_not_call(class="form-check-input") }}
-                                        {{ form.do_not_call.label(class="form-check-label") }}
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-group">
-                                    <div class="form-check">
-                                        {{ form.do_not_email(class="form-check-input") }}
-                                        {{ form.do_not_email.label(class="form-check-label") }}
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="form-group">
-                                    <div class="form-check">
-                                        {{ form.do_not_contact(class="form-check-input") }}
-                                        {{ form.do_not_contact.label(class="form-check-label") }}
+                        <!-- Collapsible: Additional Name Details -->
+                        <div class="accordion mb-3" id="nameAccordion">
+                            <div class="accordion-item">
+                                <h2 class="accordion-header" id="nameHeading">
+                                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#nameCollapse" aria-expanded="false" aria-controls="nameCollapse">
+                                        <i class="fas fa-user me-2"></i> Additional Name Details
+                                    </button>
+                                </h2>
+                                <div id="nameCollapse" class="accordion-collapse collapse" aria-labelledby="nameHeading" data-bs-parent="#nameAccordion">
+                                    <div class="accordion-body">
+                                        <div class="row">
+                                            <div class="col-md-3">
+                                                <div class="form-group mb-3">
+                                                    {{ form.salutation.label(class="form-label") }}
+                                                    {{ form.salutation(class="form-select" + (" is-invalid" if form.salutation.errors else "")) }}
+                                                    {% if form.salutation.errors %}
+                                                        <div class="invalid-feedback">
+                                                            {% for error in form.salutation.errors %}
+                                                                {{ error }}
+                                                            {% endfor %}
+                                                        </div>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+                                            <div class="col-md-4">
+                                                <div class="form-group mb-3">
+                                                    {{ form.middle_name.label(class="form-label") }}
+                                                    {{ form.middle_name(class="form-control" + (" is-invalid" if form.middle_name.errors else "")) }}
+                                                    {% if form.middle_name.errors %}
+                                                        <div class="invalid-feedback">
+                                                            {% for error in form.middle_name.errors %}
+                                                                {{ error }}
+                                                            {% endfor %}
+                                                        </div>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <div class="form-group mb-3">
+                                                    {{ form.suffix.label(class="form-label") }}
+                                                    {{ form.suffix(class="form-control" + (" is-invalid" if form.suffix.errors else "")) }}
+                                                    {% if form.suffix.errors %}
+                                                        <div class="invalid-feedback">
+                                                            {% for error in form.suffix.errors %}
+                                                                {{ error }}
+                                                            {% endfor %}
+                                                        </div>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+                                            <div class="col-md-2">
+                                                <div class="form-group mb-3">
+                                                    {{ form.preferred_name.label(class="form-label") }}
+                                                    {{ form.preferred_name(class="form-control" + (" is-invalid" if form.preferred_name.errors else "")) }}
+                                                    {% if form.preferred_name.errors %}
+                                                        <div class="invalid-feedback">
+                                                            {% for error in form.preferred_name.errors %}
+                                                                {{ error }}
+                                                            {% endfor %}
+                                                        </div>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- Additional Information Section -->
-                        <hr class="my-4">
-                        <h5 class="mb-3">Additional Information</h5>
-                        <div class="row">
-                            <div class="col-md-6">
-                                <div class="form-group">
-                                    {{ form.preferred_language.label(class="form-label") }}
-                                    {{ form.preferred_language(class="form-control" + (" is-invalid" if form.preferred_language.errors else "")) }}
-                                    {% if form.preferred_language.errors %}
-                                        <div class="invalid-feedback">
-                                            {% for error in form.preferred_language.errors %}
-                                                {{ error }}
-                                            {% endfor %}
+                        <!-- Collapsible: Demographics -->
+                        <div class="accordion mb-3" id="demographicsAccordion">
+                            <div class="accordion-item">
+                                <h2 class="accordion-header" id="demographicsHeading">
+                                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#demographicsCollapse" aria-expanded="false" aria-controls="demographicsCollapse">
+                                        <i class="fas fa-users me-2"></i> Demographics
+                                    </button>
+                                </h2>
+                                <div id="demographicsCollapse" class="accordion-collapse collapse" aria-labelledby="demographicsHeading" data-bs-parent="#demographicsAccordion">
+                                    <div class="accordion-body">
+                                        <div class="row">
+                                            <div class="col-md-3">
+                                                <div class="form-group mb-3">
+                                                    {{ form.gender.label(class="form-label") }}
+                                                    {{ form.gender(class="form-select" + (" is-invalid" if form.gender.errors else "")) }}
+                                                    {% if form.gender.errors %}
+                                                        <div class="invalid-feedback">
+                                                            {% for error in form.gender.errors %}
+                                                                {{ error }}
+                                                            {% endfor %}
+                                                        </div>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <div class="form-group mb-3">
+                                                    {{ form.race.label(class="form-label") }}
+                                                    {{ form.race(class="form-select" + (" is-invalid" if form.race.errors else "")) }}
+                                                    {% if form.race.errors %}
+                                                        <div class="invalid-feedback">
+                                                            {% for error in form.race.errors %}
+                                                                {{ error }}
+                                                            {% endfor %}
+                                                        </div>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <div class="form-group mb-3">
+                                                    {{ form.birthdate.label(class="form-label") }}
+                                                    {{ form.birthdate(class="form-control" + (" is-invalid" if form.birthdate.errors else "")) }}
+                                                    {% if form.birthdate.errors %}
+                                                        <div class="invalid-feedback">
+                                                            {% for error in form.birthdate.errors %}
+                                                                {{ error }}
+                                                            {% endfor %}
+                                                        </div>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <div class="form-group mb-3">
+                                                    {{ form.education_level.label(class="form-label") }}
+                                                    {{ form.education_level(class="form-select" + (" is-invalid" if form.education_level.errors else "")) }}
+                                                    {% if form.education_level.errors %}
+                                                        <div class="invalid-feedback">
+                                                            {% for error in form.education_level.errors %}
+                                                                {{ error }}
+                                                            {% endfor %}
+                                                        </div>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
                                         </div>
-                                    {% endif %}
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                        <div class="row">
-                            <div class="col-md-6">
-                                <div class="form-group">
-                                    {{ form.notes.label(class="form-label") }}
-                                    {{ form.notes(class="form-control" + (" is-invalid" if form.notes.errors else "")) }}
-                                    {% if form.notes.errors %}
-                                        <div class="invalid-feedback">
-                                            {% for error in form.notes.errors %}
-                                                {{ error }}
-                                            {% endfor %}
+
+                        <!-- Collapsible: Volunteer Details -->
+                        <div class="accordion mb-3" id="volunteerDetailsAccordion">
+                            <div class="accordion-item">
+                                <h2 class="accordion-header" id="volunteerDetailsHeading">
+                                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#volunteerDetailsCollapse" aria-expanded="false" aria-controls="volunteerDetailsCollapse">
+                                        <i class="fas fa-briefcase me-2"></i> Volunteer Details
+                                    </button>
+                                </h2>
+                                <div id="volunteerDetailsCollapse" class="accordion-collapse collapse" aria-labelledby="volunteerDetailsHeading" data-bs-parent="#volunteerDetailsAccordion">
+                                    <div class="accordion-body">
+                                        <div class="row">
+                                            <div class="col-md-4">
+                                                <div class="form-group mb-3">
+                                                    {{ form.title.label(class="form-label") }}
+                                                    {{ form.title(class="form-control" + (" is-invalid" if form.title.errors else "")) }}
+                                                    {% if form.title.errors %}
+                                                        <div class="invalid-feedback">
+                                                            {% for error in form.title.errors %}
+                                                                {{ error }}
+                                                            {% endfor %}
+                                                        </div>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+                                            <div class="col-md-4">
+                                                <div class="form-group mb-3">
+                                                    {{ form.industry.label(class="form-label") }}
+                                                    {{ form.industry(class="form-control" + (" is-invalid" if form.industry.errors else "")) }}
+                                                    {% if form.industry.errors %}
+                                                        <div class="invalid-feedback">
+                                                            {% for error in form.industry.errors %}
+                                                                {{ error }}
+                                                            {% endfor %}
+                                                        </div>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+                                            <div class="col-md-4">
+                                                <div class="form-group mb-3">
+                                                    {{ form.clearance_status.label(class="form-label") }}
+                                                    {{ form.clearance_status(class="form-select" + (" is-invalid" if form.clearance_status.errors else "")) }}
+                                                    {% if form.clearance_status.errors %}
+                                                        <div class="invalid-feedback">
+                                                            {% for error in form.clearance_status.errors %}
+                                                                {{ error }}
+                                                            {% endfor %}
+                                                        </div>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
                                         </div>
-                                    {% endif %}
-                                    <small class="form-text text-muted">Public notes</small>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="col-md-6">
-                                <div class="form-group">
-                                    {{ form.internal_notes.label(class="form-label") }}
-                                    {{ form.internal_notes(class="form-control" + (" is-invalid" if form.internal_notes.errors else "")) }}
-                                    {% if form.internal_notes.errors %}
-                                        <div class="invalid-feedback">
-                                            {% for error in form.internal_notes.errors %}
-                                                {{ error }}
-                                            {% endfor %}
+                        </div>
+
+                        <!-- Collapsible: Contact Preferences -->
+                        <div class="accordion mb-3" id="contactPrefsAccordion">
+                            <div class="accordion-item">
+                                <h2 class="accordion-header" id="contactPrefsHeading">
+                                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#contactPrefsCollapse" aria-expanded="false" aria-controls="contactPrefsCollapse">
+                                        <i class="fas fa-phone me-2"></i> Contact Preferences
+                                    </button>
+                                </h2>
+                                <div id="contactPrefsCollapse" class="accordion-collapse collapse" aria-labelledby="contactPrefsHeading" data-bs-parent="#contactPrefsAccordion">
+                                    <div class="accordion-body">
+                                        <div class="row">
+                                            <div class="col-md-3">
+                                                <div class="form-group mb-3">
+                                                    <div class="form-check">
+                                                        {{ form.can_text(class="form-check-input") }}
+                                                        {{ form.can_text.label(class="form-check-label") }}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <div class="form-group mb-3">
+                                                    <div class="form-check">
+                                                        {{ form.do_not_call(class="form-check-input") }}
+                                                        {{ form.do_not_call.label(class="form-check-label") }}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <div class="form-group mb-3">
+                                                    <div class="form-check">
+                                                        {{ form.do_not_email(class="form-check-input") }}
+                                                        {{ form.do_not_email.label(class="form-check-label") }}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <div class="form-group mb-3">
+                                                    <div class="form-check">
+                                                        {{ form.do_not_contact(class="form-check-input") }}
+                                                        {{ form.do_not_contact.label(class="form-check-label") }}
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
-                                    {% endif %}
-                                    <small class="form-text text-muted">Staff-only notes</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Collapsible: Additional Information -->
+                        <div class="accordion mb-3" id="additionalInfoAccordion">
+                            <div class="accordion-item">
+                                <h2 class="accordion-header" id="additionalInfoHeading">
+                                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#additionalInfoCollapse" aria-expanded="false" aria-controls="additionalInfoCollapse">
+                                        <i class="fas fa-info-circle me-2"></i> Additional Information
+                                    </button>
+                                </h2>
+                                <div id="additionalInfoCollapse" class="accordion-collapse collapse" aria-labelledby="additionalInfoHeading" data-bs-parent="#additionalInfoAccordion">
+                                    <div class="accordion-body">
+                                        <div class="row">
+                                            <div class="col-md-6">
+                                                <div class="form-group mb-3">
+                                                    {{ form.preferred_language.label(class="form-label") }}
+                                                    {{ form.preferred_language(class="form-select" + (" is-invalid" if form.preferred_language.errors else "")) }}
+                                                    {% if form.preferred_language.errors %}
+                                                        <div class="invalid-feedback">
+                                                            {% for error in form.preferred_language.errors %}
+                                                                {{ error }}
+                                                            {% endfor %}
+                                                        </div>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="row">
+                                            <div class="col-md-6">
+                                                <div class="form-group mb-3">
+                                                    {{ form.notes.label(class="form-label") }}
+                                                    {{ form.notes(class="form-control" + (" is-invalid" if form.notes.errors else "")) }}
+                                                    {% if form.notes.errors %}
+                                                        <div class="invalid-feedback">
+                                                            {% for error in form.notes.errors %}
+                                                                {{ error }}
+                                                            {% endfor %}
+                                                        </div>
+                                                    {% endif %}
+                                                    <small class="form-text text-muted">Public notes</small>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-6">
+                                                <div class="form-group mb-3">
+                                                    {{ form.internal_notes.label(class="form-label") }}
+                                                    {{ form.internal_notes(class="form-control" + (" is-invalid" if form.internal_notes.errors else "")) }}
+                                                    {% if form.internal_notes.errors %}
+                                                        <div class="invalid-feedback">
+                                                            {% for error in form.internal_notes.errors %}
+                                                                {{ error }}
+                                                            {% endfor %}
+                                                        </div>
+                                                    {% endif %}
+                                                    <small class="form-text text-muted">Staff-only notes</small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -374,4 +427,3 @@
     </div>
 </div>
 {% endblock %}
-

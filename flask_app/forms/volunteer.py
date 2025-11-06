@@ -8,14 +8,19 @@ from wtforms import BooleanField, DateField, SelectField, StringField, SubmitFie
 from wtforms.validators import DataRequired, Email, Length, Optional
 
 
+def format_enum_display(enum_value):
+    """Format enum value for display (e.g., 'male' -> 'Male', 'non_binary' -> 'Non Binary')"""
+    return enum_value.replace("_", " ").title()
+
+
 class CreateVolunteerForm(FlaskForm):
     """Form for creating new volunteers"""
 
     # Name fields
-    salutation = StringField(
+    salutation = SelectField(
         "Salutation",
-        validators=[Length(max=20, message="Salutation must be less than 20 characters.")],
-        render_kw={"placeholder": "Mr., Mrs., Dr., etc."},
+        validators=[Optional()],
+        choices=[],  # Will be populated in __init__
     )
     first_name = StringField(
         "First Name",
@@ -67,25 +72,25 @@ class CreateVolunteerForm(FlaskForm):
     can_text = BooleanField("Can receive text messages", default=False)
 
     # Demographics
-    gender = StringField(
+    gender = SelectField(
         "Gender",
-        validators=[Length(max=50, message="Gender must be less than 50 characters.")],
-        render_kw={"placeholder": "Enter gender"},
+        validators=[Optional()],
+        choices=[],  # Will be populated in __init__
     )
-    race = StringField(
-        "Race",
-        validators=[Length(max=100, message="Race must be less than 100 characters.")],
-        render_kw={"placeholder": "Enter race"},
+    race = SelectField(
+        "Race/Ethnicity",
+        validators=[Optional()],
+        choices=[],  # Will be populated in __init__
     )
     birthdate = DateField(
         "Birthdate",
         validators=[Optional()],
         render_kw={"placeholder": "YYYY-MM-DD"},
     )
-    education_level = StringField(
+    education_level = SelectField(
         "Education Level",
-        validators=[Length(max=100, message="Education level must be less than 100 characters.")],
-        render_kw={"placeholder": "Enter education level"},
+        validators=[Optional()],
+        choices=[],  # Will be populated in __init__
     )
 
     # Volunteer-specific fields
@@ -105,10 +110,10 @@ class CreateVolunteerForm(FlaskForm):
         validators=[Length(max=200, message="Industry must be less than 200 characters.")],
         render_kw={"placeholder": "Enter industry or field"},
     )
-    clearance_status = StringField(
+    clearance_status = SelectField(
         "Clearance Status",
-        validators=[Length(max=50, message="Clearance status must be less than 50 characters.")],
-        render_kw={"placeholder": "Enter clearance status"},
+        validators=[Optional()],
+        choices=[],  # Will be populated in __init__
     )
     is_local = BooleanField("Is Local (can volunteer in person)", default=True)
 
@@ -118,10 +123,10 @@ class CreateVolunteerForm(FlaskForm):
     do_not_contact = BooleanField("Do Not Contact", default=False)
 
     # Additional information
-    preferred_language = StringField(
+    preferred_language = SelectField(
         "Preferred Language",
-        validators=[Length(max=50, message="Preferred language must be less than 50 characters.")],
-        render_kw={"placeholder": "Enter preferred language"},
+        validators=[Optional()],
+        choices=[],  # Will be populated in __init__
     )
     notes = TextAreaField(
         "Notes",
@@ -139,7 +144,15 @@ class CreateVolunteerForm(FlaskForm):
     def __init__(self, *args, **kwargs):
         super(CreateVolunteerForm, self).__init__(*args, **kwargs)
         # Import here to avoid circular imports
-        from flask_app.models import VolunteerStatus
+        from flask_app.models import (
+            ClearanceStatus,
+            EducationLevel,
+            Gender,
+            PreferredLanguage,
+            RaceEthnicity,
+            Salutation,
+            VolunteerStatus,
+        )
 
         # Set volunteer_status choices
         self.volunteer_status.choices = [
@@ -148,15 +161,51 @@ class CreateVolunteerForm(FlaskForm):
             (VolunteerStatus.INACTIVE.value, "Inactive"),
         ]
 
+        # Set salutation choices with "None" option
+        self.salutation.choices = [("", "None")] + [
+            (sal.value, format_enum_display(sal.value).replace("Mr", "Mr.").replace("Mrs", "Mrs.").replace("Ms", "Ms.").replace("Miss", "Miss.").replace("Dr", "Dr.").replace("Prof", "Prof.").replace("Rev", "Rev.").replace("Hon", "Hon."))
+            for sal in Salutation
+        ]
+
+        # Set gender choices with "None" option
+        self.gender.choices = [("", "None")] + [
+            (gen.value, format_enum_display(gen.value))
+            for gen in Gender
+        ]
+
+        # Set race/ethnicity choices with "None" option
+        self.race.choices = [("", "None")] + [
+            (race.value, format_enum_display(race.value))
+            for race in RaceEthnicity
+        ]
+
+        # Set education level choices with "None" option
+        self.education_level.choices = [("", "None")] + [
+            (edu.value, format_enum_display(edu.value))
+            for edu in EducationLevel
+        ]
+
+        # Set clearance status choices with "None" option
+        self.clearance_status.choices = [("", "None")] + [
+            (clear.value, format_enum_display(clear.value))
+            for clear in ClearanceStatus
+        ]
+
+        # Set preferred language choices with "None" option
+        self.preferred_language.choices = [("", "None")] + [
+            (lang.value, format_enum_display(lang.value))
+            for lang in PreferredLanguage
+        ]
+
 
 class UpdateVolunteerForm(FlaskForm):
     """Form for updating existing volunteers"""
 
     # Name fields
-    salutation = StringField(
+    salutation = SelectField(
         "Salutation",
-        validators=[Length(max=20, message="Salutation must be less than 20 characters.")],
-        render_kw={"placeholder": "Mr., Mrs., Dr., etc."},
+        validators=[Optional()],
+        choices=[],  # Will be populated in __init__
     )
     first_name = StringField(
         "First Name",
@@ -208,25 +257,25 @@ class UpdateVolunteerForm(FlaskForm):
     can_text = BooleanField("Can receive text messages", default=False)
 
     # Demographics
-    gender = StringField(
+    gender = SelectField(
         "Gender",
-        validators=[Length(max=50, message="Gender must be less than 50 characters.")],
-        render_kw={"placeholder": "Enter gender"},
+        validators=[Optional()],
+        choices=[],  # Will be populated in __init__
     )
-    race = StringField(
-        "Race",
-        validators=[Length(max=100, message="Race must be less than 100 characters.")],
-        render_kw={"placeholder": "Enter race"},
+    race = SelectField(
+        "Race/Ethnicity",
+        validators=[Optional()],
+        choices=[],  # Will be populated in __init__
     )
     birthdate = DateField(
         "Birthdate",
         validators=[Optional()],
         render_kw={"placeholder": "YYYY-MM-DD"},
     )
-    education_level = StringField(
+    education_level = SelectField(
         "Education Level",
-        validators=[Length(max=100, message="Education level must be less than 100 characters.")],
-        render_kw={"placeholder": "Enter education level"},
+        validators=[Optional()],
+        choices=[],  # Will be populated in __init__
     )
 
     # Volunteer-specific fields
@@ -246,10 +295,10 @@ class UpdateVolunteerForm(FlaskForm):
         validators=[Length(max=200, message="Industry must be less than 200 characters.")],
         render_kw={"placeholder": "Enter industry or field"},
     )
-    clearance_status = StringField(
+    clearance_status = SelectField(
         "Clearance Status",
-        validators=[Length(max=50, message="Clearance status must be less than 50 characters.")],
-        render_kw={"placeholder": "Enter clearance status"},
+        validators=[Optional()],
+        choices=[],  # Will be populated in __init__
     )
     is_local = BooleanField("Is Local (can volunteer in person)", default=True)
 
@@ -259,10 +308,10 @@ class UpdateVolunteerForm(FlaskForm):
     do_not_contact = BooleanField("Do Not Contact", default=False)
 
     # Additional information
-    preferred_language = StringField(
+    preferred_language = SelectField(
         "Preferred Language",
-        validators=[Length(max=50, message="Preferred language must be less than 50 characters.")],
-        render_kw={"placeholder": "Enter preferred language"},
+        validators=[Optional()],
+        choices=[],  # Will be populated in __init__
     )
     notes = TextAreaField(
         "Notes",
@@ -280,12 +329,56 @@ class UpdateVolunteerForm(FlaskForm):
     def __init__(self, *args, **kwargs):
         super(UpdateVolunteerForm, self).__init__(*args, **kwargs)
         # Import here to avoid circular imports
-        from flask_app.models import VolunteerStatus
+        from flask_app.models import (
+            ClearanceStatus,
+            EducationLevel,
+            Gender,
+            PreferredLanguage,
+            RaceEthnicity,
+            Salutation,
+            VolunteerStatus,
+        )
 
         # Set volunteer_status choices
         self.volunteer_status.choices = [
             (VolunteerStatus.ACTIVE.value, "Active"),
             (VolunteerStatus.HOLD.value, "Hold"),
             (VolunteerStatus.INACTIVE.value, "Inactive"),
+        ]
+
+        # Set salutation choices with "None" option
+        self.salutation.choices = [("", "None")] + [
+            (sal.value, format_enum_display(sal.value).replace("Mr", "Mr.").replace("Mrs", "Mrs.").replace("Ms", "Ms.").replace("Miss", "Miss.").replace("Dr", "Dr.").replace("Prof", "Prof.").replace("Rev", "Rev.").replace("Hon", "Hon."))
+            for sal in Salutation
+        ]
+
+        # Set gender choices with "None" option
+        self.gender.choices = [("", "None")] + [
+            (gen.value, format_enum_display(gen.value))
+            for gen in Gender
+        ]
+
+        # Set race/ethnicity choices with "None" option
+        self.race.choices = [("", "None")] + [
+            (race.value, format_enum_display(race.value))
+            for race in RaceEthnicity
+        ]
+
+        # Set education level choices with "None" option
+        self.education_level.choices = [("", "None")] + [
+            (edu.value, format_enum_display(edu.value))
+            for edu in EducationLevel
+        ]
+
+        # Set clearance status choices with "None" option
+        self.clearance_status.choices = [("", "None")] + [
+            (clear.value, format_enum_display(clear.value))
+            for clear in ClearanceStatus
+        ]
+
+        # Set preferred language choices with "None" option
+        self.preferred_language.choices = [("", "None")] + [
+            (lang.value, format_enum_display(lang.value))
+            for lang in PreferredLanguage
         ]
 

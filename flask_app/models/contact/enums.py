@@ -78,3 +78,83 @@ class VolunteerStatus(PyEnum):
     HOLD = "hold"
     INACTIVE = "inactive"
 
+
+class Gender(PyEnum):
+    """Gender enumeration"""
+
+    MALE = "male"
+    FEMALE = "female"
+    NON_BINARY = "non_binary"
+    PREFER_NOT_TO_SAY = "prefer_not_to_say"
+    OTHER = "other"
+
+
+class RaceEthnicity(PyEnum):
+    """Race and ethnicity enumeration (US Census categories)"""
+
+    WHITE = "white"
+    BLACK_OR_AFRICAN_AMERICAN = "black_or_african_american"
+    ASIAN = "asian"
+    HISPANIC_OR_LATINO = "hispanic_or_latino"
+    NATIVE_AMERICAN = "native_american"
+    PACIFIC_ISLANDER = "pacific_islander"
+    TWO_OR_MORE = "two_or_more"
+    PREFER_NOT_TO_SAY = "prefer_not_to_say"
+    OTHER = "other"
+
+
+class EducationLevel(PyEnum):
+    """Education level enumeration"""
+
+    LESS_THAN_HIGH_SCHOOL = "less_than_high_school"
+    HIGH_SCHOOL = "high_school"
+    SOME_COLLEGE = "some_college"
+    ASSOCIATES = "associates"
+    BACHELORS = "bachelors"
+    MASTERS = "masters"
+    DOCTORATE = "doctorate"
+    PROFESSIONAL = "professional"
+    OTHER = "other"
+
+
+class Salutation(PyEnum):
+    """Salutation/title enumeration"""
+
+    MR = "mr"
+    MRS = "mrs"
+    MS = "ms"
+    MISS = "miss"
+    DR = "dr"
+    PROF = "prof"
+    REV = "rev"
+    HON = "hon"
+    OTHER = "other"
+
+
+class ClearanceStatus(PyEnum):
+    """Background check/clearance status enumeration"""
+
+    PENDING = "pending"
+    APPROVED = "approved"
+    DENIED = "denied"
+    EXPIRED = "expired"
+    NOT_REQUIRED = "not_required"
+
+
+class PreferredLanguage(PyEnum):
+    """Preferred language enumeration"""
+
+    ENGLISH = "english"
+    SPANISH = "spanish"
+    FRENCH = "french"
+    GERMAN = "german"
+    CHINESE = "chinese"
+    JAPANESE = "japanese"
+    KOREAN = "korean"
+    ARABIC = "arabic"
+    HINDI = "hindi"
+    PORTUGUESE = "portuguese"
+    RUSSIAN = "russian"
+    ITALIAN = "italian"
+    OTHER = "other"
+

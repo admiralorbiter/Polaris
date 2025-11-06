@@ -12,7 +12,17 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import validates
 
 from ..base import BaseModel, db
-from .enums import AgeGroup, ContactStatus, ContactType, RoleType
+from .enums import (
+    AgeGroup,
+    ContactStatus,
+    ContactType,
+    EducationLevel,
+    Gender,
+    PreferredLanguage,
+    RaceEthnicity,
+    RoleType,
+    Salutation,
+)
 from .relationships import ContactRole
 
 
@@ -37,7 +47,9 @@ class Contact(BaseModel):
     )
 
     # Name fields
-    salutation = db.Column(db.String(20), nullable=True)  # Mr., Mrs., Dr., etc.
+    salutation = db.Column(
+        Enum(Salutation, name="salutation_enum"), nullable=True
+    )  # Mr., Mrs., Dr., etc.
     first_name = db.Column(db.String(100), nullable=False, index=True)
     middle_name = db.Column(db.String(100), nullable=True)
     last_name = db.Column(db.String(100), nullable=False, index=True)
@@ -45,13 +57,15 @@ class Contact(BaseModel):
     preferred_name = db.Column(db.String(100), nullable=True)
 
     # Demographics
-    gender = db.Column(db.String(50), nullable=True)
-    race = db.Column(db.String(100), nullable=True)
+    gender = db.Column(Enum(Gender, name="gender_enum"), nullable=True)
+    race = db.Column(Enum(RaceEthnicity, name="race_ethnicity_enum"), nullable=True)
     birthdate = db.Column(db.Date, nullable=True, index=True)
     age_group = db.Column(
         Enum(AgeGroup, name="age_group_enum"), nullable=True
     )  # Computed or stored
-    education_level = db.Column(db.String(100), nullable=True)
+    education_level = db.Column(
+        Enum(EducationLevel, name="education_level_enum"), nullable=True
+    )
     is_local = db.Column(
         db.Boolean, default=True, nullable=False
     )  # Whether contact is in local area and can volunteer/do work in person
@@ -65,7 +79,9 @@ class Contact(BaseModel):
     do_not_contact = db.Column(db.Boolean, default=False, nullable=False)
 
     # Additional information
-    preferred_language = db.Column(db.String(50), nullable=True)
+    preferred_language = db.Column(
+        Enum(PreferredLanguage, name="preferred_language_enum"), nullable=True
+    )
     status = db.Column(
         Enum(ContactStatus, name="contact_status_enum"),
         default=ContactStatus.ACTIVE,
@@ -133,7 +149,15 @@ class Contact(BaseModel):
         """Format full name with salutation and suffix"""
         parts = []
         if self.salutation:
-            parts.append(self.salutation)
+            # Handle enum values
+            salutation_str = (
+                self.salutation.value if hasattr(self.salutation, "value") else str(self.salutation)
+            )
+            # Format salutation nicely (e.g., "mr" -> "Mr.")
+            salutation_display = salutation_str.replace("_", " ").title().replace(" ", "")
+            if salutation_display.lower() in ["mr", "mrs", "ms", "miss", "dr", "prof", "rev", "hon"]:
+                salutation_display = salutation_display.capitalize() + "."
+            parts.append(salutation_display)
         if self.first_name:
             parts.append(self.first_name)
         if self.middle_name:
