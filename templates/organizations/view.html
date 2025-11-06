@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+
+{% block title %}Organization Details - {{ organization.name }}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="admin-container">
+    <div class="admin-header">
+        <h1>Organization Details</h1>
+        <div class="header-actions">
+            <a href="{{ url_for('organizations_edit', org_id=organization.id) }}" class="btn btn-primary">
+                <i class="fas fa-edit"></i> Edit Organization
+            </a>
+            <a href="{{ url_for('organizations_list') }}" class="btn btn-secondary">
+                <i class="fas fa-arrow-left"></i> Back to Organizations
+            </a>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Basic Information -->
+        <div class="col-md-8">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Basic Information</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="info-item">
+                                <label>Organization Name:</label>
+                                <span>{{ organization.name }}</span>
+                            </div>
+                            <div class="info-item">
+                                <label>Organization Type:</label>
+                                <span>
+                                    {% if organization.organization_type %}
+                                        <span class="badge bg-info">{{ organization.organization_type.value.replace('_', ' ').title() }}</span>
+                                    {% else %}
+                                        <span class="text-muted">—</span>
+                                    {% endif %}
+                                </span>
+                            </div>
+                            <div class="info-item">
+                                <label>Status:</label>
+                                <span>
+                                    {% if organization.is_active %}
+                                        <span class="badge bg-success">Active</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">Inactive</span>
+                                    {% endif %}
+                                </span>
+                            </div>
+                            <div class="info-item">
+                                <label>Slug:</label>
+                                <span class="text-muted">{{ organization.slug }}</span>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            {% if organization.founded_date %}
+                            <div class="info-item">
+                                <label>Founded Date:</label>
+                                <span>{{ organization.founded_date.strftime('%Y-%m-%d') }}</span>
+                            </div>
+                            {% endif %}
+                            {% if organization.tax_id %}
+                            <div class="info-item">
+                                <label>Tax ID / EIN:</label>
+                                <span>{{ organization.tax_id }}</span>
+                            </div>
+                            {% endif %}
+                            {% if organization.logo_url %}
+                            <div class="info-item">
+                                <label>Logo:</label>
+                                <span>
+                                    <a href="{{ organization.logo_url }}" target="_blank" rel="noopener noreferrer">
+                                        <i class="fas fa-external-link-alt"></i> View Logo
+                                    </a>
+                                </span>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% if organization.description %}
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <div class="info-item">
+                                <label>Description:</label>
+                                <p>{{ organization.description }}</p>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Contact Information -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Contact Information</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            {% if organization.email %}
+                            <div class="info-item">
+                                <label>Email:</label>
+                                <span><a href="mailto:{{ organization.email }}">{{ organization.email }}</a></span>
+                            </div>
+                            {% endif %}
+                            {% if organization.phone %}
+                            <div class="info-item">
+                                <label>Phone:</label>
+                                <span><a href="tel:{{ organization.phone }}">{{ organization.phone }}</a></span>
+                            </div>
+                            {% endif %}
+                            {% if organization.website %}
+                            <div class="info-item">
+                                <label>Website:</label>
+                                <span>
+                                    <a href="{{ organization.website }}" target="_blank" rel="noopener noreferrer">
+                                        {{ organization.website }} <i class="fas fa-external-link-alt"></i>
+                                    </a>
+                                </span>
+                            </div>
+                            {% endif %}
+                        </div>
+                        <div class="col-md-6">
+                            {% if organization.contact_person_name %}
+                            <div class="info-item">
+                                <label>Contact Person:</label>
+                                <span>
+                                    {{ organization.contact_person_name }}
+                                    {% if organization.contact_person_title %}
+                                        <span class="text-muted">({{ organization.contact_person_title }})</span>
+                                    {% endif %}
+                                </span>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% if primary_address %}
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <div class="info-item">
+                                <label>Address:</label>
+                                <p>{{ primary_address.get_full_address() }}</p>
+                                <span class="text-muted">({{ primary_address.address_type.value }})</span>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Statistics -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Statistics</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="info-item">
+                                <label>Active Volunteers:</label>
+                                <span class="badge bg-primary">{{ stats.active_volunteers_count }}</span>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="info-item">
+                                <label>Total Volunteer Hours:</label>
+                                <span class="badge bg-success">{{ "%.1f"|format(stats.total_volunteer_hours) }}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sidebar -->
+        <div class="col-md-4">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Quick Actions</h5>
+                </div>
+                <div class="card-body">
+                    <div class="d-grid gap-2">
+                        <a href="{{ url_for('organizations_edit', org_id=organization.id) }}" class="btn btn-outline-primary">
+                            <i class="fas fa-edit"></i> Edit Organization
+                        </a>
+                        <a href="{{ url_for('organizations_list') }}" class="btn btn-outline-secondary">
+                            <i class="fas fa-arrow-left"></i> Back to List
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Metadata -->
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Metadata</h5>
+                </div>
+                <div class="card-body">
+                    <div class="info-item">
+                        <label>Created:</label>
+                        <span>{{ organization.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</span>
+                    </div>
+                    {% if organization.updated_at %}
+                    <div class="info-item">
+                        <label>Last Updated:</label>
+                        <span>{{ organization.updated_at.strftime('%Y-%m-%d %H:%M:%S') }}</span>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,275 @@
+{% extends "base.html" %}
+
+{% block title %}Organizations{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="admin-container">
+    <div class="admin-header">
+        <h1>Organizations</h1>
+        <a href="{{ url_for('organizations_create') }}" class="btn btn-primary">
+            <i class="fas fa-building-plus"></i> Create New Organization
+        </a>
+    </div>
+
+    <!-- Search Bar -->
+    <div class="mb-3">
+        <form method="GET" action="{{ url_for('organizations_list') }}" class="d-flex gap-2">
+            <div class="input-group flex-grow-1" style="max-width: 500px;">
+                <span class="input-group-text">
+                    <i class="fas fa-search"></i>
+                </span>
+                <input type="text"
+                       class="form-control"
+                       name="search"
+                       id="searchInput"
+                       placeholder="Search by name, description, type, email, website..."
+                       value="{{ search_term }}">
+                {% if search_term %}
+                <a href="{{ url_for('organizations_list', sort=sort_column, order=sort_order) }}"
+                   class="btn btn-outline-secondary"
+                   title="Clear search">
+                    <i class="fas fa-times"></i>
+                </a>
+                {% endif %}
+            </div>
+            <button type="submit" class="btn btn-primary">
+                <i class="fas fa-search"></i> Search
+            </button>
+            {% if search_term %}
+            <div class="d-flex align-items-center ms-2">
+                <span class="text-muted">
+                    {{ organizations.total }} result{{ 's' if organizations.total != 1 else '' }} found
+                </span>
+            </div>
+            {% endif %}
+            <!-- Preserve sort parameters -->
+            {% if sort_column %}
+            <input type="hidden" name="sort" value="{{ sort_column }}">
+            {% endif %}
+            {% if sort_order %}
+            <input type="hidden" name="order" value="{{ sort_order }}">
+            {% endif %}
+        </form>
+    </div>
+
+    <!-- Organizations Table -->
+    {% if organizations.items %}
+    <div class="table-responsive">
+        <table class="table table-striped table-hover">
+            <thead>
+                <tr>
+                    <th>
+                        <a href="{{ url_for('organizations_list', search=search_term, sort='name', order='asc' if sort_column != 'name' or sort_order == 'desc' else 'desc') }}"
+                           class="text-decoration-none text-white sortable-header">
+                            Name
+                            {% if sort_column == 'name' %}
+                                {% if sort_order == 'asc' %}
+                                    <i class="fas fa-sort-up ms-1"></i>
+                                {% else %}
+                                    <i class="fas fa-sort-down ms-1"></i>
+                                {% endif %}
+                            {% else %}
+                                <i class="fas fa-sort ms-1" style="opacity: 0.5;"></i>
+                            {% endif %}
+                        </a>
+                    </th>
+                    <th>
+                        <a href="{{ url_for('organizations_list', search=search_term, sort='type', order='asc' if sort_column != 'type' or sort_order == 'desc' else 'desc') }}"
+                           class="text-decoration-none text-white sortable-header">
+                            Type
+                            {% if sort_column == 'type' %}
+                                {% if sort_order == 'asc' %}
+                                    <i class="fas fa-sort-up ms-1"></i>
+                                {% else %}
+                                    <i class="fas fa-sort-down ms-1"></i>
+                                {% endif %}
+                            {% else %}
+                                <i class="fas fa-sort ms-1" style="opacity: 0.5;"></i>
+                            {% endif %}
+                        </a>
+                    </th>
+                    <th>Email</th>
+                    <th>Phone</th>
+                    <th>Website</th>
+                    <th>
+                        <a href="{{ url_for('organizations_list', search=search_term, sort='status', order='asc' if sort_column != 'status' or sort_order == 'desc' else 'desc') }}"
+                           class="text-decoration-none text-white sortable-header">
+                            Status
+                            {% if sort_column == 'status' %}
+                                {% if sort_order == 'asc' %}
+                                    <i class="fas fa-sort-up ms-1"></i>
+                                {% else %}
+                                    <i class="fas fa-sort-down ms-1"></i>
+                                {% endif %}
+                            {% else %}
+                                <i class="fas fa-sort ms-1" style="opacity: 0.5;"></i>
+                            {% endif %}
+                        </a>
+                    </th>
+                    <th>
+                        <a href="{{ url_for('organizations_list', search=search_term, sort='created', order='asc' if sort_column != 'created' or sort_order == 'desc' else 'desc') }}"
+                           class="text-decoration-none text-white sortable-header">
+                            Created
+                            {% if sort_column == 'created' %}
+                                {% if sort_order == 'asc' %}
+                                    <i class="fas fa-sort-up ms-1"></i>
+                                {% else %}
+                                    <i class="fas fa-sort-down ms-1"></i>
+                                {% endif %}
+                            {% else %}
+                                <i class="fas fa-sort ms-1" style="opacity: 0.5;"></i>
+                            {% endif %}
+                        </a>
+                    </th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for org in organizations.items %}
+                <tr>
+                    <td>
+                        <a href="{{ url_for('organizations_view', org_id=org.id) }}" class="user-link">
+                            {{ org.name }}
+                        </a>
+                    </td>
+                    <td>
+                        {% if org.organization_type %}
+                            <span class="badge bg-info">{{ org.organization_type.value.replace('_', ' ').title() }}</span>
+                        {% else %}
+                            <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if org.email %}
+                            <a href="mailto:{{ org.email }}">{{ org.email }}</a>
+                        {% else %}
+                            <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if org.phone %}
+                            <a href="tel:{{ org.phone }}">{{ org.phone }}</a>
+                        {% else %}
+                            <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if org.website %}
+                            <a href="{{ org.website }}" target="_blank" rel="noopener noreferrer">
+                                <i class="fas fa-external-link-alt"></i> Website
+                            </a>
+                        {% else %}
+                            <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if org.is_active %}
+                            <span class="badge bg-success">Active</span>
+                        {% else %}
+                            <span class="badge bg-secondary">Inactive</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ org.created_at.strftime('%Y-%m-%d') }}</td>
+                    <td>
+                        <div class="btn-group" role="group">
+                            <a href="{{ url_for('organizations_view', org_id=org.id) }}"
+                               class="btn btn-sm btn-outline-primary" title="View">
+                                <i class="fas fa-eye"></i>
+                                <span class="btn-text">View</span>
+                            </a>
+                            <a href="{{ url_for('organizations_edit', org_id=org.id) }}"
+                               class="btn btn-sm btn-outline-secondary" title="Edit">
+                                <i class="fas fa-edit"></i>
+                                <span class="btn-text">Edit</span>
+                            </a>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination -->
+    {% if organizations.pages > 1 %}
+    <div class="d-flex justify-content-center mt-4">
+        <nav aria-label="Organization pagination">
+            <ul class="pagination mb-0">
+            {% if organizations.has_prev %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('organizations_list', page=organizations.prev_num, search=search_term, sort=sort_column, order=sort_order) }}">Previous</a>
+                </li>
+            {% endif %}
+
+            {% for page_num in organizations.iter_pages() %}
+                {% if page_num %}
+                    {% if page_num != organizations.page %}
+                        <li class="page-item">
+                            <a class="page-link" href="{{ url_for('organizations_list', page=page_num, search=search_term, sort=sort_column, order=sort_order) }}">{{ page_num }}</a>
+                        </li>
+                    {% else %}
+                        <li class="page-item active">
+                            <span class="page-link">{{ page_num }}</span>
+                        </li>
+                    {% endif %}
+                {% else %}
+                    <li class="page-item disabled">
+                        <span class="page-link">...</span>
+                    </li>
+                {% endif %}
+            {% endfor %}
+
+            {% if organizations.has_next %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('organizations_list', page=organizations.next_num, search=search_term, sort=sort_column, order=sort_order) }}">Next</a>
+                </li>
+            {% endif %}
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
+    {% else %}
+    <div class="alert alert-info">
+        <i class="fas fa-info-circle me-2"></i>
+        {% if search_term %}
+            No organizations found matching "{{ search_term }}".
+            <a href="{{ url_for('organizations_list', sort=sort_column, order=sort_order) }}">Clear search</a> or
+            <a href="{{ url_for('organizations_create') }}">create a new organization</a>.
+        {% else %}
+            No organizations found. <a href="{{ url_for('organizations_create') }}">Create your first organization</a> to get started.
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Auto-submit search on Enter key
+document.addEventListener('DOMContentLoaded', function() {
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+        searchInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                this.form.submit();
+            }
+        });
+    }
+});
+</script>
+<style>
+.sortable-header {
+    transition: opacity 0.2s;
+}
+
+.sortable-header:hover {
+    opacity: 0.8;
+    text-decoration: underline !important;
+}
+</style>
+{% endblock %}
