@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+
+{% block title %}Volunteers{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="admin-container">
+    <div class="admin-header">
+        <h1>Volunteers</h1>
+        <a href="{{ url_for('volunteers_create') }}" class="btn btn-primary">
+            <i class="fas fa-user-plus"></i> Create New Volunteer
+        </a>
+    </div>
+
+    <!-- Volunteers Table -->
+    {% if volunteers.items %}
+    <div class="table-responsive">
+        <table class="table table-striped table-hover">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Phone</th>
+                    <th>Status</th>
+                    <th>Total Hours</th>
+                    <th>Last Volunteer Date</th>
+                    <th>Created</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for volunteer in volunteers.items %}
+                <tr>
+                    <td>
+                        <a href="#" class="user-link">
+                            {{ volunteer.get_full_name() }}
+                        </a>
+                    </td>
+                    <td>
+                        {% set primary_email = volunteer.get_primary_email() %}
+                        {% if primary_email %}
+                            {{ primary_email.email }}
+                        {% else %}
+                            <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% set primary_phone = volunteer.get_primary_phone() %}
+                        {% if primary_phone %}
+                            {{ primary_phone.phone_number }}
+                        {% else %}
+                            <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if volunteer.volunteer_status.value == 'active' %}
+                            <span class="badge bg-success">Active</span>
+                        {% elif volunteer.volunteer_status.value == 'hold' %}
+                            <span class="badge bg-warning">Hold</span>
+                        {% else %}
+                            <span class="badge bg-secondary">Inactive</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if volunteer.total_volunteer_hours %}
+                            {{ "%.1f"|format(volunteer.total_volunteer_hours) }}
+                        {% else %}
+                            <span class="text-muted">0.0</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if volunteer.last_volunteer_date %}
+                            {{ volunteer.last_volunteer_date.strftime('%Y-%m-%d') }}
+                        {% else %}
+                            <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ volunteer.created_at.strftime('%Y-%m-%d') }}</td>
+                    <td>
+                        <div class="btn-group" role="group">
+                            <a href="#"
+                               class="btn btn-sm btn-outline-primary" title="View">
+                                <i class="fas fa-eye"></i>
+                                <span class="btn-text">View</span>
+                            </a>
+                            <a href="#"
+                               class="btn btn-sm btn-outline-secondary" title="Edit">
+                                <i class="fas fa-edit"></i>
+                                <span class="btn-text">Edit</span>
+                            </a>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination -->
+    {% if volunteers.pages > 1 %}
+    <nav aria-label="Volunteer pagination">
+        <ul class="pagination justify-content-center">
+            {% if volunteers.has_prev %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('volunteers_list', page=volunteers.prev_num) }}">Previous</a>
+                </li>
+            {% endif %}
+
+            {% for page_num in volunteers.iter_pages() %}
+                {% if page_num %}
+                    {% if page_num != volunteers.page %}
+                        <li class="page-item">
+                            <a class="page-link" href="{{ url_for('volunteers_list', page=page_num) }}">{{ page_num }}</a>
+                        </li>
+                    {% else %}
+                        <li class="page-item active">
+                            <span class="page-link">{{ page_num }}</span>
+                        </li>
+                    {% endif %}
+                {% else %}
+                    <li class="page-item disabled">
+                        <span class="page-link">...</span>
+                    </li>
+                {% endif %}
+            {% endfor %}
+
+            {% if volunteers.has_next %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ url_for('volunteers_list', page=volunteers.next_num) }}">Next</a>
+                </li>
+            {% endif %}
+        </ul>
+    </nav>
+    {% endif %}
+    {% else %}
+    <div class="alert alert-info">
+        <i class="fas fa-info-circle me-2"></i>
+        No volunteers found. <a href="{{ url_for('volunteers_create') }}">Create your first volunteer</a> to get started.
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
