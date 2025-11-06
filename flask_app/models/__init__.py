@@ -22,6 +22,7 @@ from .contact import (
     EmailType,
     EmergencyContact,
     Gender,
+    OrganizationType,
     PhoneType,
     PreferredLanguage,
     RaceEthnicity,
@@ -33,11 +34,12 @@ from .contact import (
     VolunteerAvailability,
     VolunteerHours,
     VolunteerInterest,
+    VolunteerOrganizationStatus,
     VolunteerSkill,
     VolunteerStatus,
 )
 from .feature_flag import OrganizationFeatureFlag, SystemFeatureFlag
-from .organization import Organization
+from .organization import Organization, OrganizationAddress
 from .role import Permission, Role, RolePermission, UserOrganization
 from .user import User
 
@@ -48,6 +50,7 @@ __all__ = [
     "AdminLog",
     "SystemMetrics",
     "Organization",
+    "OrganizationAddress",
     "Role",
     "Permission",
     "RolePermission",
@@ -80,6 +83,8 @@ __all__ = [
     "Salutation",
     "ClearanceStatus",
     "PreferredLanguage",
+    "OrganizationType",
+    "VolunteerOrganizationStatus",
     # Volunteer models
     "VolunteerSkill",
     "VolunteerInterest",

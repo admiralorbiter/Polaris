@@ -14,29 +14,20 @@ from .enums import (
     EducationLevel,
     EmailType,
     Gender,
+    OrganizationType,
     PhoneType,
     PreferredLanguage,
     RaceEthnicity,
     RoleType,
     Salutation,
+    VolunteerOrganizationStatus,
     VolunteerStatus,
 )
 from .info import ContactAddress, ContactEmail, ContactPhone
-from .relationships import (
-    ContactOrganization,
-    ContactRole,
-    ContactTag,
-    EmergencyContact,
-)
+from .relationships import ContactOrganization, ContactRole, ContactTag, EmergencyContact
 from .student import Student
 from .teacher import Teacher
-from .volunteer import (
-    Volunteer,
-    VolunteerAvailability,
-    VolunteerHours,
-    VolunteerInterest,
-    VolunteerSkill,
-)
+from .volunteer import Volunteer, VolunteerAvailability, VolunteerHours, VolunteerInterest, VolunteerSkill
 
 __all__ = [
     # Base model
@@ -56,6 +47,8 @@ __all__ = [
     "Salutation",
     "ClearanceStatus",
     "PreferredLanguage",
+    "OrganizationType",
+    "VolunteerOrganizationStatus",
     # Info models
     "ContactEmail",
     "ContactPhone",
@@ -75,4 +68,3 @@ __all__ = [
     "VolunteerAvailability",
     "VolunteerHours",
 ]
-

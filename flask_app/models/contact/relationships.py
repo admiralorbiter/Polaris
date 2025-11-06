@@ -6,7 +6,7 @@ Contact relationship models: Roles, Organizations, Tags, Emergency Contacts
 from datetime import date
 
 from flask import current_app
-from sqlalchemy import CheckConstraint, Enum, Index
+from sqlalchemy import Enum, Index
 from sqlalchemy.exc import SQLAlchemyError
 
 from ..base import BaseModel, db
@@ -35,9 +35,7 @@ class ContactRole(BaseModel):
     # Constraints
     # Note: Uniqueness of active roles (end_date IS NULL) is enforced in application logic
     # Partial unique constraints are database-specific and not portable
-    __table_args__ = (
-        Index("idx_contact_role", "contact_id", "role_type"),
-    )
+    __table_args__ = (Index("idx_contact_role", "contact_id", "role_type"),)
 
     def __repr__(self):
         status = "active" if self.is_active and self.end_date is None else "inactive"
@@ -68,9 +66,7 @@ class ContactOrganization(BaseModel):
 
     id = db.Column(db.Integer, primary_key=True)
     contact_id = db.Column(db.Integer, db.ForeignKey("contacts.id"), nullable=False)
-    organization_id = db.Column(
-        db.Integer, db.ForeignKey("organizations.id"), nullable=False
-    )
+    organization_id = db.Column(db.Integer, db.ForeignKey("organizations.id"), nullable=False)
     is_primary = db.Column(db.Boolean, default=False, nullable=False)
     start_date = db.Column(db.Date, nullable=False, default=date.today)
     end_date = db.Column(db.Date, nullable=True)  # null = active
@@ -82,11 +78,36 @@ class ContactOrganization(BaseModel):
     # Constraints
     __table_args__ = (
         Index("idx_contact_org", "contact_id", "organization_id"),
+        Index("idx_contact_org_status", "contact_id", "organization_id", "end_date"),
         db.UniqueConstraint("contact_id", "organization_id", name="_contact_org_uc"),
     )
 
     def __repr__(self):
-        return f"<ContactOrganization contact={self.contact_id} org={self.organization_id}>"
+        status = "current" if self.is_current() else "past"
+        return f"<ContactOrganization contact={self.contact_id} org={self.organization_id} ({status})>"
+
+    def is_current(self):
+        """Returns True if this is a current relationship (end_date is None)"""
+        return self.end_date is None
+
+    def get_status(self):
+        """Get the status of this relationship"""
+        from .enums import VolunteerOrganizationStatus
+
+        return VolunteerOrganizationStatus.CURRENT if self.is_current() else VolunteerOrganizationStatus.PAST
+
+    def deactivate(self, end_date=None):
+        """Deactivate this organization relationship by setting end_date"""
+        if end_date is None:
+            end_date = date.today()
+        self.end_date = end_date
+        try:
+            db.session.commit()
+            return True
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            current_app.logger.error(f"Error deactivating contact-organization relationship {self.id}: {str(e)}")
+            return False
 
 
 class ContactTag(BaseModel):
@@ -134,4 +155,3 @@ class EmergencyContact(BaseModel):
     def get_full_name(self):
         """Get full name of emergency contact"""
         return f"{self.first_name} {self.last_name}".strip()
-

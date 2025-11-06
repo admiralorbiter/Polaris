@@ -3,7 +3,7 @@
 Volunteer model and related models (Skills, Interests, Availability, Hours)
 """
 
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
 from flask import current_app
 from sqlalchemy import CheckConstraint, Enum, Index, func
@@ -42,29 +42,21 @@ class Volunteer(Contact):
     # Volunteer dates
     first_volunteer_date = db.Column(db.Date, nullable=True, index=True)
     last_volunteer_date = db.Column(db.Date, nullable=True, index=True)
-    total_volunteer_hours = db.Column(
-        db.Numeric(10, 2), default=0.0, nullable=False
-    )  # Cumulative hours volunteered
+    total_volunteer_hours = db.Column(db.Numeric(10, 2), default=0.0, nullable=False)  # Cumulative hours volunteered
 
     # Legacy fields (kept for backward compatibility, will be replaced by separate models)
     start_date = db.Column(db.Date, nullable=True)  # Deprecated - use first_volunteer_date
     end_date = db.Column(db.Date, nullable=True)  # Deprecated - use volunteer_status
 
     # Relationships
-    skills = db.relationship(
-        "VolunteerSkill", back_populates="volunteer", cascade="all, delete-orphan"
-    )
-    interests = db.relationship(
-        "VolunteerInterest", back_populates="volunteer", cascade="all, delete-orphan"
-    )
+    skills = db.relationship("VolunteerSkill", back_populates="volunteer", cascade="all, delete-orphan")
+    interests = db.relationship("VolunteerInterest", back_populates="volunteer", cascade="all, delete-orphan")
     availability_slots = db.relationship(
         "VolunteerAvailability",
         back_populates="volunteer",
         cascade="all, delete-orphan",
     )
-    volunteer_hours = db.relationship(
-        "VolunteerHours", back_populates="volunteer", cascade="all, delete-orphan"
-    )
+    volunteer_hours = db.relationship("VolunteerHours", back_populates="volunteer", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Volunteer {self.get_full_name()} ({self.volunteer_status.value})>"
@@ -77,19 +69,13 @@ class Volunteer(Contact):
         Otherwise, return stored total_volunteer_hours.
         """
         if recalculate:
-            total = (
-                db.session.query(func.sum(VolunteerHours.hours_worked))
-                .filter_by(volunteer_id=self.id)
-                .scalar()
-            )
+            total = db.session.query(func.sum(VolunteerHours.hours_worked)).filter_by(volunteer_id=self.id).scalar()
             self.total_volunteer_hours = float(total) if total else 0.0
             try:
                 db.session.commit()
             except SQLAlchemyError as e:
                 db.session.rollback()
-                current_app.logger.error(
-                    f"Error updating total hours for volunteer {self.id}: {str(e)}"
-                )
+                current_app.logger.error(f"Error updating total hours for volunteer {self.id}: {str(e)}")
         return float(self.total_volunteer_hours) if self.total_volunteer_hours else 0.0
 
     def get_skills_list(self, category=None, verified_only=False):
@@ -114,9 +100,7 @@ class Volunteer(Contact):
         day_of_week: 0=Monday, 1=Tuesday, ..., 6=Sunday
         date: Optional date to check if availability is active for that date
         """
-        query = VolunteerAvailability.query.filter_by(
-            volunteer_id=self.id, day_of_week=day_of_week, is_active=True
-        )
+        query = VolunteerAvailability.query.filter_by(volunteer_id=self.id, day_of_week=day_of_week, is_active=True)
         availabilities = query.all()
 
         if not availabilities:
@@ -149,9 +133,7 @@ class Volunteer(Contact):
     def add_skill(self, skill_name, skill_category=None, proficiency_level=None, verified=False, notes=None):
         """Add a skill to the volunteer"""
         # Check if skill already exists
-        existing = VolunteerSkill.query.filter_by(
-            volunteer_id=self.id, skill_name=skill_name
-        ).first()
+        existing = VolunteerSkill.query.filter_by(volunteer_id=self.id, skill_name=skill_name).first()
         if existing:
             return existing, "Skill already exists"
 
@@ -175,9 +157,7 @@ class Volunteer(Contact):
     def add_interest(self, interest_name, interest_category=None, notes=None):
         """Add an interest to the volunteer"""
         # Check if interest already exists
-        existing = VolunteerInterest.query.filter_by(
-            volunteer_id=self.id, interest_name=interest_name
-        ).first()
+        existing = VolunteerInterest.query.filter_by(volunteer_id=self.id, interest_name=interest_name).first()
         if existing:
             return existing, "Interest already exists"
 
@@ -225,9 +205,7 @@ class Volunteer(Contact):
             return availability, None
         except SQLAlchemyError as e:
             db.session.rollback()
-            current_app.logger.error(
-                f"Error adding availability to volunteer {self.id}: {str(e)}"
-            )
+            current_app.logger.error(f"Error adding availability to volunteer {self.id}: {str(e)}")
             return None, str(e)
 
     def log_hours(
@@ -279,9 +257,38 @@ class Volunteer(Contact):
 
     def get_hours_by_organization(self, organization_id):
         """Get all volunteer hours for a specific organization"""
-        return VolunteerHours.query.filter_by(
-            volunteer_id=self.id, organization_id=organization_id
-        ).all()
+        return VolunteerHours.query.filter_by(volunteer_id=self.id, organization_id=organization_id).all()
+
+    def get_organizations(self, status="current"):
+        """
+        Get organizations associated with this volunteer.
+        status: 'current' (end_date is None) or 'past' (end_date is set) or 'all'
+        Returns list of ContactOrganization objects
+        """
+        from .relationships import ContactOrganization
+
+        query = ContactOrganization.query.filter_by(contact_id=self.id)
+
+        if status == "current":
+            query = query.filter(ContactOrganization.end_date.is_(None))
+        elif status == "past":
+            query = query.filter(ContactOrganization.end_date.isnot(None))
+        # If status is 'all', no additional filter
+
+        return query.all()
+
+    def get_current_organizations(self):
+        """Get all current (active) organization relationships for this volunteer"""
+        return self.get_organizations(status="current")
+
+    def get_total_hours_by_organization(self, organization_id):
+        """Get total volunteer hours for a specific organization"""
+        total = (
+            db.session.query(func.sum(VolunteerHours.hours_worked))
+            .filter_by(volunteer_id=self.id, organization_id=organization_id)
+            .scalar()
+        )
+        return float(total) if total else 0.0
 
 
 class VolunteerSkill(BaseModel):
@@ -320,9 +327,7 @@ class VolunteerInterest(BaseModel):
     id = db.Column(db.Integer, primary_key=True)
     volunteer_id = db.Column(db.Integer, db.ForeignKey("volunteers.id"), nullable=False)
     interest_name = db.Column(db.String(200), nullable=False)
-    interest_category = db.Column(
-        db.String(100), nullable=True
-    )  # e.g., "Community", "Education", "Environment"
+    interest_category = db.Column(db.String(100), nullable=True)  # e.g., "Community", "Education", "Environment"
     notes = db.Column(db.Text, nullable=True)
 
     # Relationships
@@ -345,19 +350,13 @@ class VolunteerAvailability(BaseModel):
 
     id = db.Column(db.Integer, primary_key=True)
     volunteer_id = db.Column(db.Integer, db.ForeignKey("volunteers.id"), nullable=False)
-    day_of_week = db.Column(
-        db.Integer, nullable=False
-    )  # 0=Monday, 1=Tuesday, ..., 6=Sunday
+    day_of_week = db.Column(db.Integer, nullable=False)  # 0=Monday, 1=Tuesday, ..., 6=Sunday
     start_time = db.Column(db.Time, nullable=False)
     end_time = db.Column(db.Time, nullable=False)
     timezone = db.Column(db.String(50), default="UTC", nullable=False)
     is_recurring = db.Column(db.Boolean, default=True, nullable=False)  # Recurring weekly vs one-time
-    start_date = db.Column(
-        db.Date, nullable=True
-    )  # For temporary availability, when it starts
-    end_date = db.Column(
-        db.Date, nullable=True
-    )  # For temporary availability, when it ends (null = ongoing)
+    start_date = db.Column(db.Date, nullable=True)  # For temporary availability, when it starts
+    end_date = db.Column(db.Date, nullable=True)  # For temporary availability, when it ends (null = ongoing)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     notes = db.Column(db.Text, nullable=True)
 
@@ -388,13 +387,9 @@ class VolunteerHours(BaseModel):
     )  # Which org they volunteered for
     volunteer_date = db.Column(db.Date, nullable=False, index=True)
     hours_worked = db.Column(db.Numeric(5, 2), nullable=False)  # Up to 999.99 hours per entry
-    activity_type = db.Column(
-        db.String(100), nullable=True
-    )  # e.g., "Event Support", "Tutoring", "Administrative"
+    activity_type = db.Column(db.String(100), nullable=True)  # e.g., "Event Support", "Tutoring", "Administrative"
     notes = db.Column(db.Text, nullable=True)
-    verified_by = db.Column(
-        db.Integer, db.ForeignKey("users.id"), nullable=True
-    )  # User who verified the hours
+    verified_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)  # User who verified the hours
     verified_at = db.Column(db.DateTime, nullable=True)
 
     # Relationships
@@ -406,9 +401,9 @@ class VolunteerHours(BaseModel):
     __table_args__ = (
         Index("idx_volunteer_hours_date", "volunteer_date"),
         Index("idx_volunteer_hours_volunteer_date", "volunteer_id", "volunteer_date"),
+        Index("idx_volunteer_hours_org_date", "organization_id", "volunteer_date"),
         CheckConstraint("hours_worked > 0", name="check_positive_hours"),
     )
 
     def __repr__(self):
         return f"<VolunteerHours {self.volunteer_date} - {self.hours_worked} hours>"
-

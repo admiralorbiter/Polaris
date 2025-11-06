@@ -7,7 +7,7 @@ Populates the database with comprehensive sample data for development and testin
 import argparse
 import os
 import sys
-from datetime import date, datetime, timedelta, time
+from datetime import date, time, timedelta
 from getpass import getpass
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -25,6 +25,8 @@ from flask_app.models import (
     ContactType,
     EmailType,
     Organization,
+    OrganizationAddress,
+    OrganizationType,
     PhoneType,
     Role,
     RoleType,
@@ -40,7 +42,7 @@ from flask_app.models import (
     VolunteerStatus,
     db,
 )
-from flask_app.models.contact import ContactAddress, ContactEmail, ContactPhone
+from flask_app.models.contact import AddressType, ContactAddress, ContactEmail, ContactPhone
 
 # Statistics tracking
 stats = {
@@ -86,21 +88,21 @@ def clear_database():
 def seed_admin_user(username="admin", email="admin@gmail.com", password=None, dry_run=False):
     """Create super admin user"""
     print("\n📝 Seeding admin user...")
-    
+
     if dry_run:
         print(f"  [DRY RUN] Would create admin user: {username} ({email})")
         return None
-    
+
     with app.app_context():
         # Check if admin already exists
         existing = User.query.filter_by(username=username).first()
         if existing:
             print(f"  ⏭️  Admin user '{username}' already exists, skipping")
             return existing
-        
+
         if not password:
             password = "admin"  # Default password
-        
+
         admin_user, error = User.safe_create(
             username=username,
             email=email,
@@ -108,77 +110,156 @@ def seed_admin_user(username="admin", email="admin@gmail.com", password=None, dr
             is_active=True,
             is_super_admin=True,
         )
-        
+
         if error:
             stats["errors"].append(f"Admin user: {error}")
             print(f"  ❌ Error creating admin user: {error}")
             return None
-        
+
         stats["admin_users"] += 1
         print(f"  ✅ Created admin user: {username} ({email})")
         return admin_user
 
 
 def seed_organizations(dry_run=False):
-    """Create sample organizations"""
+    """Create sample organizations with full details"""
     print("\n📝 Seeding organizations...")
-    
+
     organizations_data = [
         {
             "name": "Community Center",
             "slug": "community-center",
             "description": "Local community center providing various programs and services",
+            "organization_type": OrganizationType.NON_PROFIT,
+            "website": "https://communitycenter.example.com",
+            "phone": "555-1001",
+            "email": "info@communitycenter.example.com",
+            "tax_id": "12-3456789",
+            "contact_person_name": "Alice Johnson",
+            "contact_person_title": "Director",
+            "founded_date": date(2010, 1, 15),
+            "address": {
+                "street_address_1": "123 Main Street",
+                "street_address_2": "Suite 100",
+                "city": "Springfield",
+                "state": "IL",
+                "postal_code": "62701",
+                "country": "US",
+            },
         },
         {
             "name": "Local School District",
             "slug": "local-school",
             "description": "Public school district serving the local community",
+            "organization_type": OrganizationType.SCHOOL,
+            "website": "https://schools.example.com",
+            "phone": "555-2001",
+            "email": "info@schools.example.com",
+            "tax_id": "98-7654321",
+            "contact_person_name": "Dr. Robert Smith",
+            "contact_person_title": "Superintendent",
+            "founded_date": date(1950, 9, 1),
+            "address": {
+                "street_address_1": "456 Education Avenue",
+                "city": "Springfield",
+                "state": "IL",
+                "postal_code": "62702",
+                "country": "US",
+            },
         },
         {
             "name": "Non-Profit Organization",
             "slug": "nonprofit-org",
             "description": "Charitable organization focused on community outreach",
+            "organization_type": OrganizationType.NON_PROFIT,
+            "website": "https://nonprofit.example.com",
+            "phone": "555-3001",
+            "email": "contact@nonprofit.example.com",
+            "tax_id": "45-6789012",
+            "contact_person_name": "Sarah Williams",
+            "contact_person_title": "Executive Director",
+            "founded_date": date(2005, 6, 10),
+            "address": {
+                "street_address_1": "789 Charity Boulevard",
+                "city": "Springfield",
+                "state": "IL",
+                "postal_code": "62703",
+                "country": "US",
+            },
         },
     ]
-    
+
     created_orgs = []
-    
+
     for org_data in organizations_data:
         if dry_run:
             print(f"  [DRY RUN] Would create organization: {org_data['name']}")
             created_orgs.append(org_data)
             continue
-        
+
         with app.app_context():
             existing = Organization.query.filter_by(slug=org_data["slug"]).first()
             if existing:
                 print(f"  ⏭️  Organization '{org_data['name']}' already exists, skipping")
                 created_orgs.append(existing)
                 continue
-            
+
+            # Extract address data before creating organization
+            address_data = org_data.get("address")
+
             org, error = Organization.safe_create(
                 name=org_data["name"],
                 slug=org_data["slug"],
                 description=org_data["description"],
+                organization_type=org_data["organization_type"],
+                website=org_data.get("website"),
+                phone=org_data.get("phone"),
+                email=org_data.get("email"),
+                tax_id=org_data.get("tax_id"),
+                contact_person_name=org_data.get("contact_person_name"),
+                contact_person_title=org_data.get("contact_person_title"),
+                founded_date=org_data.get("founded_date"),
                 is_active=True,
             )
-            
+
             if error:
                 stats["errors"].append(f"Organization {org_data['name']}: {error}")
                 print(f"  ❌ Error creating organization {org_data['name']}: {error}")
                 continue
-            
+
+            # Add address if provided
+            if address_data:
+                try:
+                    address = OrganizationAddress(
+                        organization_id=org.id,
+                        address_type=AddressType.WORK,
+                        street_address_1=address_data["street_address_1"],
+                        street_address_2=address_data.get("street_address_2"),
+                        city=address_data["city"],
+                        state=address_data["state"],
+                        postal_code=address_data["postal_code"],
+                        country=address_data.get("country", "US"),
+                        is_primary=True,
+                    )
+                    db.session.add(address)
+                    db.session.commit()
+                    print(f"  ✅ Added address for {org_data['name']}")
+                except Exception as e:
+                    db.session.rollback()
+                    stats["errors"].append(f"Organization {org_data['name']} address: {str(e)}")
+                    print(f"  ⚠️  Error adding address for {org_data['name']}: {str(e)}")
+
             stats["organizations"] += 1
-            print(f"  ✅ Created organization: {org_data['name']}")
+            print(f"  ✅ Created organization: {org_data['name']} ({org_data['organization_type'].value})")
             created_orgs.append(org)
-    
+
     return created_orgs
 
 
 def seed_users(organizations, roles, dry_run=False):
     """Create sample users and assign to organizations"""
     print("\n📝 Seeding users...")
-    
+
     users_data = [
         # Org Admins
         {
@@ -249,36 +330,38 @@ def seed_users(organizations, roles, dry_run=False):
             "org_slug": "community-center",
         },
     ]
-    
+
     created_users = []
-    
+
     for user_data in users_data:
         if dry_run:
             print(f"  [DRY RUN] Would create user: {user_data['username']}")
             created_users.append(user_data)
             continue
-        
+
         with app.app_context():
             existing = User.query.filter_by(username=user_data["username"]).first()
             if existing:
                 print(f"  ⏭️  User '{user_data['username']}' already exists, skipping")
                 created_users.append(existing)
                 continue
-            
+
             # Find organization by slug (query within session context)
             org = Organization.query.filter_by(slug=user_data["org_slug"]).first()
             if not org:
-                stats["errors"].append(f"User {user_data['username']}: Organization '{user_data['org_slug']}' not found")
+                stats["errors"].append(
+                    f"User {user_data['username']}: Organization '{user_data['org_slug']}' not found"
+                )
                 print(f"  ❌ Organization '{user_data['org_slug']}' not found for user {user_data['username']}")
                 continue
-            
+
             # Find role (query within session context)
             role = Role.query.filter_by(name=user_data["role"]).first()
             if not role:
                 stats["errors"].append(f"User {user_data['username']}: Role '{user_data['role']}' not found")
                 print(f"  ❌ Role '{user_data['role']}' not found for user {user_data['username']}")
                 continue
-            
+
             # Create user
             user, error = User.safe_create(
                 username=user_data["username"],
@@ -289,12 +372,12 @@ def seed_users(organizations, roles, dry_run=False):
                 is_active=True,
                 is_super_admin=False,
             )
-            
+
             if error:
                 stats["errors"].append(f"User {user_data['username']}: {error}")
                 print(f"  ❌ Error creating user {user_data['username']}: {error}")
                 continue
-            
+
             # Assign to organization
             user_org = UserOrganization(
                 user_id=user.id,
@@ -303,7 +386,7 @@ def seed_users(organizations, roles, dry_run=False):
                 is_active=True,
             )
             db.session.add(user_org)
-            
+
             try:
                 db.session.commit()
                 stats["users"] += 1
@@ -313,14 +396,14 @@ def seed_users(organizations, roles, dry_run=False):
                 db.session.rollback()
                 stats["errors"].append(f"User {user_data['username']}: {str(e)}")
                 print(f"  ❌ Error assigning user to organization: {str(e)}")
-    
+
     return created_users
 
 
 def seed_volunteers(organizations, dry_run=False):
     """Create sample volunteers with full data - generates 75 volunteers for pagination testing"""
     print("\n📝 Seeding volunteers...")
-    
+
     # Predefined volunteers for variety
     volunteers_data = [
         {
@@ -389,11 +472,33 @@ def seed_volunteers(organizations, dry_run=False):
             "org_slug": "community-center",
         },
     ]
-    
+
     # Generate 70 more volunteers using Faker (total 75 for ~4 pages at 20 per page)
     org_slugs = ["community-center", "local-school", "nonprofit-org"]
-    industries = ["Technology", "Education", "Healthcare", "Marketing", "Finance", "Retail", "Construction", "Retired", "Student", "Various"]
-    titles = ["Software Engineer", "Teacher", "Nurse", "Marketing Manager", "Accountant", "Manager", "Consultant", "Retired", "Student", "Volunteer Coordinator"]
+    industries = [
+        "Technology",
+        "Education",
+        "Healthcare",
+        "Marketing",
+        "Finance",
+        "Retail",
+        "Construction",
+        "Retired",
+        "Student",
+        "Various",
+    ]
+    titles = [
+        "Software Engineer",
+        "Teacher",
+        "Nurse",
+        "Marketing Manager",
+        "Accountant",
+        "Manager",
+        "Consultant",
+        "Retired",
+        "Student",
+        "Volunteer Coordinator",
+    ]
     skill_pools = [
         ["Python", "Web Development", "Database Design"],
         ["Teaching", "Curriculum Development", "Mentoring"],
@@ -418,13 +523,13 @@ def seed_volunteers(organizations, dry_run=False):
         ["Social Justice", "Advocacy"],
         ["Animal Welfare", "Pets"],
     ]
-    
+
     for i in range(70):
         first_name = fake.first_name()
         last_name = fake.last_name()
         email = f"{first_name.lower()}.{last_name.lower()}{i}@gmail.com"
         phone = fake.phone_number()[:15]  # Limit phone length
-        
+
         # Vary status: 60% active, 25% hold, 15% inactive
         status_rand = fake.random_int(1, 100)
         if status_rand <= 60:
@@ -433,38 +538,47 @@ def seed_volunteers(organizations, dry_run=False):
             status = VolunteerStatus.HOLD
         else:
             status = VolunteerStatus.INACTIVE
-        
+
         # Randomly assign organization
         org_slug = fake.random.choice(org_slugs)
         industry = fake.random.choice(industries)
         title = fake.random.choice(titles)
         skills = fake.random.choice(skill_pools)
         interests = fake.random.choice(interest_pools)
-        
-        volunteers_data.append({
-            "first_name": first_name,
-            "last_name": last_name,
-            "email": email,
-            "phone": phone,
-            "volunteer_status": status,
-            "is_local": fake.boolean(chance_of_getting_true=75),
-            "title": title,
-            "industry": industry,
-            "skills": skills,
-            "interests": interests,
-            "org_slug": org_slug,
-        })
-    
+
+        volunteers_data.append(
+            {
+                "first_name": first_name,
+                "last_name": last_name,
+                "email": email,
+                "phone": phone,
+                "volunteer_status": status,
+                "is_local": fake.boolean(chance_of_getting_true=75),
+                "title": title,
+                "industry": industry,
+                "skills": skills,
+                "interests": interests,
+                "org_slug": org_slug,
+            }
+        )
+
     created_volunteers = []
     # Use local stats for detailed tracking, but update global stats for summary
-    local_stats = {"emails": 0, "phones": 0, "skills": 0, "interests": 0, "availability": 0, "hours": 0}
-    
+    local_stats = {
+        "emails": 0,
+        "phones": 0,
+        "skills": 0,
+        "interests": 0,
+        "availability": 0,
+        "hours": 0,
+    }
+
     for vol_data in volunteers_data:
         if dry_run:
             print(f"  [DRY RUN] Would create volunteer: {vol_data['first_name']} {vol_data['last_name']}")
             created_volunteers.append(vol_data)
             continue
-        
+
         with app.app_context():
             # Find organization by slug (query within session context)
             org_slug = vol_data["org_slug"]
@@ -473,18 +587,22 @@ def seed_volunteers(organizations, dry_run=False):
                 stats["errors"].append(f"Volunteer {vol_data['first_name']}: Organization '{org_slug}' not found")
                 print(f"  ❌ Organization '{org_slug}' not found for volunteer {vol_data['first_name']}")
                 continue
-            
+
             # Check if volunteer already exists (by email if provided, otherwise by name)
             if vol_data.get("email"):
-                existing = Volunteer.query.join(ContactEmail).filter(
-                    ContactEmail.email == vol_data["email"],
-                    Volunteer.contact_type == ContactType.VOLUNTEER
-                ).first()
+                existing = (
+                    Volunteer.query.join(ContactEmail)
+                    .filter(
+                        ContactEmail.email == vol_data["email"],
+                        Volunteer.contact_type == ContactType.VOLUNTEER,
+                    )
+                    .first()
+                )
                 if existing:
                     print(f"  ⏭️  Volunteer with email '{vol_data['email']}' already exists, skipping")
                     created_volunteers.append(existing)
                     continue
-            
+
             # Create volunteer
             volunteer = Volunteer(
                 contact_type=ContactType.VOLUNTEER,
@@ -498,10 +616,10 @@ def seed_volunteers(organizations, dry_run=False):
                 status=ContactStatus.ACTIVE,
                 first_volunteer_date=date.today() - timedelta(days=30 * (len(created_volunteers) + 1)),
             )
-            
+
             db.session.add(volunteer)
             db.session.flush()
-            
+
             # Add email
             if vol_data.get("email"):
                 email = ContactEmail(
@@ -513,7 +631,7 @@ def seed_volunteers(organizations, dry_run=False):
                 )
                 db.session.add(email)
                 local_stats["emails"] += 1
-            
+
             # Add phone
             if vol_data.get("phone"):
                 phone = ContactPhone(
@@ -525,7 +643,7 @@ def seed_volunteers(organizations, dry_run=False):
                 )
                 db.session.add(phone)
                 local_stats["phones"] += 1
-            
+
             # Add skills
             for skill_name in vol_data.get("skills", []):
                 skill = VolunteerSkill(
@@ -537,7 +655,7 @@ def seed_volunteers(organizations, dry_run=False):
                 )
                 db.session.add(skill)
                 local_stats["skills"] += 1
-            
+
             # Add interests
             for interest_name in vol_data.get("interests", []):
                 interest = VolunteerInterest(
@@ -547,7 +665,7 @@ def seed_volunteers(organizations, dry_run=False):
                 )
                 db.session.add(interest)
                 local_stats["interests"] += 1
-            
+
             # Add availability (Monday, Wednesday, Friday mornings)
             if vol_data["volunteer_status"] == VolunteerStatus.ACTIVE:
                 for day in [0, 2, 4]:  # Monday, Wednesday, Friday
@@ -562,7 +680,7 @@ def seed_volunteers(organizations, dry_run=False):
                     )
                     db.session.add(availability)
                     local_stats["availability"] += 1
-            
+
             # Add some volunteer hours
             if vol_data["volunteer_status"] == VolunteerStatus.ACTIVE:
                 for i in range(3):
@@ -577,11 +695,11 @@ def seed_volunteers(organizations, dry_run=False):
                     )
                     db.session.add(hours)
                     local_stats["hours"] += 1
-                
+
                 # Update total hours
                 volunteer.total_volunteer_hours = 12.0 + (len(created_volunteers) * 0.5)
                 volunteer.last_volunteer_date = date.today() - timedelta(days=7)
-            
+
             try:
                 db.session.commit()
                 stats["volunteers"] += 1
@@ -591,31 +709,62 @@ def seed_volunteers(organizations, dry_run=False):
                 db.session.rollback()
                 stats["errors"].append(f"Volunteer {vol_data['first_name']}: {str(e)}")
                 print(f"  ❌ Error creating volunteer: {str(e)}")
-    
-    print(f"  📊 Created {stats['volunteers']} volunteers with {local_stats['emails']} emails, {local_stats['phones']} phones, {local_stats['skills']} skills, {local_stats['interests']} interests, {local_stats['availability']} availability slots, and {local_stats['hours']} hours records")
+
+    print(
+        f"  📊 Created {stats['volunteers']} volunteers with "
+        f"{local_stats['emails']} emails, {local_stats['phones']} phones, "
+        f"{local_stats['skills']} skills, {local_stats['interests']} interests, "
+        f"{local_stats['availability']} availability slots, and "
+        f"{local_stats['hours']} hours records"
+    )
     return created_volunteers
 
 
 def seed_students(organizations, dry_run=False):
     """Create sample students"""
     print("\n📝 Seeding students...")
-    
+
     students_data = [
-        {"first_name": "Alex", "last_name": "Martinez", "email": "alex.m@gmail.com", "org_slug": "local-school"},
-        {"first_name": "Jessica", "last_name": "Anderson", "email": "jessica.a@gmail.com", "org_slug": "local-school"},
-        {"first_name": "Christopher", "last_name": "Thomas", "email": "chris.t@gmail.com", "org_slug": "local-school"},
-        {"first_name": "Amanda", "last_name": "Jackson", "email": "amanda.j@gmail.com", "org_slug": "local-school"},
-        {"first_name": "Daniel", "last_name": "White", "email": "daniel.w@gmail.com", "org_slug": "local-school"},
+        {
+            "first_name": "Alex",
+            "last_name": "Martinez",
+            "email": "alex.m@gmail.com",
+            "org_slug": "local-school",
+        },
+        {
+            "first_name": "Jessica",
+            "last_name": "Anderson",
+            "email": "jessica.a@gmail.com",
+            "org_slug": "local-school",
+        },
+        {
+            "first_name": "Christopher",
+            "last_name": "Thomas",
+            "email": "chris.t@gmail.com",
+            "org_slug": "local-school",
+        },
+        {
+            "first_name": "Amanda",
+            "last_name": "Jackson",
+            "email": "amanda.j@gmail.com",
+            "org_slug": "local-school",
+        },
+        {
+            "first_name": "Daniel",
+            "last_name": "White",
+            "email": "daniel.w@gmail.com",
+            "org_slug": "local-school",
+        },
     ]
-    
+
     created_students = []
-    
+
     for student_data in students_data:
         if dry_run:
             print(f"  [DRY RUN] Would create student: {student_data['first_name']} {student_data['last_name']}")
             created_students.append(student_data)
             continue
-        
+
         with app.app_context():
             # Find organization by slug (query within session context)
             org_slug = student_data["org_slug"]
@@ -624,7 +773,7 @@ def seed_students(organizations, dry_run=False):
                 stats["errors"].append(f"Student {student_data['first_name']}: Organization '{org_slug}' not found")
                 print(f"  ❌ Organization '{org_slug}' not found for student {student_data['first_name']}")
                 continue
-            
+
             student = Student(
                 contact_type=ContactType.STUDENT,
                 first_name=student_data["first_name"],
@@ -632,10 +781,10 @@ def seed_students(organizations, dry_run=False):
                 organization_id=org.id,
                 status=ContactStatus.ACTIVE,
             )
-            
+
             db.session.add(student)
             db.session.flush()
-            
+
             if student_data.get("email"):
                 email = ContactEmail(
                     contact_id=student.id,
@@ -644,7 +793,7 @@ def seed_students(organizations, dry_run=False):
                     is_primary=True,
                 )
                 db.session.add(email)
-            
+
             try:
                 db.session.commit()
                 stats["students"] += 1
@@ -654,28 +803,43 @@ def seed_students(organizations, dry_run=False):
                 db.session.rollback()
                 stats["errors"].append(f"Student {student_data['first_name']}: {str(e)}")
                 print(f"  ❌ Error creating student: {str(e)}")
-    
+
     return created_students
 
 
 def seed_teachers(organizations, dry_run=False):
     """Create sample teachers"""
     print("\n📝 Seeding teachers...")
-    
+
     teachers_data = [
-        {"first_name": "Dr. Maria", "last_name": "Garcia", "email": "maria.g@gmail.com", "org_slug": "local-school"},
-        {"first_name": "Prof. Richard", "last_name": "Lee", "email": "richard.l@gmail.com", "org_slug": "local-school"},
-        {"first_name": "Ms. Jennifer", "last_name": "Harris", "email": "jennifer.h@gmail.com", "org_slug": "local-school"},
+        {
+            "first_name": "Dr. Maria",
+            "last_name": "Garcia",
+            "email": "maria.g@gmail.com",
+            "org_slug": "local-school",
+        },
+        {
+            "first_name": "Prof. Richard",
+            "last_name": "Lee",
+            "email": "richard.l@gmail.com",
+            "org_slug": "local-school",
+        },
+        {
+            "first_name": "Ms. Jennifer",
+            "last_name": "Harris",
+            "email": "jennifer.h@gmail.com",
+            "org_slug": "local-school",
+        },
     ]
-    
+
     created_teachers = []
-    
+
     for teacher_data in teachers_data:
         if dry_run:
             print(f"  [DRY RUN] Would create teacher: {teacher_data['first_name']} {teacher_data['last_name']}")
             created_teachers.append(teacher_data)
             continue
-        
+
         with app.app_context():
             # Find organization by slug (query within session context)
             org_slug = teacher_data["org_slug"]
@@ -684,7 +848,7 @@ def seed_teachers(organizations, dry_run=False):
                 stats["errors"].append(f"Teacher {teacher_data['first_name']}: Organization '{org_slug}' not found")
                 print(f"  ❌ Organization '{org_slug}' not found for teacher {teacher_data['first_name']}")
                 continue
-            
+
             teacher = Teacher(
                 contact_type=ContactType.TEACHER,
                 first_name=teacher_data["first_name"],
@@ -692,10 +856,10 @@ def seed_teachers(organizations, dry_run=False):
                 organization_id=org.id,
                 status=ContactStatus.ACTIVE,
             )
-            
+
             db.session.add(teacher)
             db.session.flush()
-            
+
             if teacher_data.get("email"):
                 email = ContactEmail(
                     contact_id=teacher.id,
@@ -704,7 +868,7 @@ def seed_teachers(organizations, dry_run=False):
                     is_primary=True,
                 )
                 db.session.add(email)
-            
+
             try:
                 db.session.commit()
                 stats["teachers"] += 1
@@ -714,23 +878,24 @@ def seed_teachers(organizations, dry_run=False):
                 db.session.rollback()
                 stats["errors"].append(f"Teacher {teacher_data['first_name']}: {str(e)}")
                 print(f"  ❌ Error creating teacher: {str(e)}")
-    
+
     return created_teachers
 
 
 def seed_contact_relationships(contacts, organizations, dry_run=False):
     """Link contacts to organizations and add roles"""
     print("\n📝 Seeding contact relationships...")
-    
+
     if dry_run:
         print(f"  [DRY RUN] Would create relationships for {len(contacts)} contacts")
         return
-    
+
     with app.app_context():
         # Query all contacts within session context to avoid detached instance errors
-        from flask_app.models import Contact
         from sqlalchemy import inspect as sqlalchemy_inspect
-        
+
+        from flask_app.models import Contact
+
         # Get contact IDs from the passed contacts (they might be detached)
         contact_ids = []
         for contact in contacts:
@@ -752,23 +917,23 @@ def seed_contact_relationships(contacts, organizations, dry_run=False):
                 except Exception:
                     # Skip if we can't get the ID
                     pass
-        
+
         if not contact_ids:
             print("  ⏭️  No contacts to create relationships for")
             return
-        
+
         # Query contacts within session context
         all_contacts = Contact.query.filter(Contact.id.in_(contact_ids)).all()
-        
+
         for contact in all_contacts:
             if not contact.organization_id:
                 continue
-            
+
             # Create ContactOrganization link if it doesn't exist
             existing_link = ContactOrganization.query.filter_by(
                 contact_id=contact.id, organization_id=contact.organization_id
             ).first()
-            
+
             if not existing_link:
                 contact_org = ContactOrganization(
                     contact_id=contact.id,
@@ -777,20 +942,20 @@ def seed_contact_relationships(contacts, organizations, dry_run=False):
                     start_date=date.today(),
                 )
                 db.session.add(contact_org)
-            
+
             # Add ContactRole based on contact type
             role_type_map = {
                 ContactType.VOLUNTEER: RoleType.VOLUNTEER,
                 ContactType.STUDENT: RoleType.STUDENT,
                 ContactType.TEACHER: RoleType.TEACHER,
             }
-            
+
             role_type = role_type_map.get(contact.contact_type)
             if role_type:
                 existing_role = ContactRole.query.filter_by(
                     contact_id=contact.id, role_type=role_type, is_active=True
                 ).first()
-                
+
                 if not existing_role:
                     contact_role = ContactRole(
                         contact_id=contact.id,
@@ -799,7 +964,7 @@ def seed_contact_relationships(contacts, organizations, dry_run=False):
                         is_active=True,
                     )
                     db.session.add(contact_role)
-        
+
         try:
             db.session.commit()
             print(f"  ✅ Created contact relationships for {len(all_contacts)} contacts")
@@ -820,35 +985,35 @@ def seed_database(
     print("=" * 60)
     print("Database Seeding Script")
     print("=" * 60)
-    
+
     if dry_run:
         print("\n⚠️  DRY RUN MODE - No changes will be made to the database\n")
-    
+
     with app.app_context():
         # Check if init_database has been run
         roles = Role.query.filter_by(is_system_role=True).all()
         if not roles:
             print("❌ Error: Database not initialized. Please run 'python scripts/init_database.py' first.")
             sys.exit(1)
-        
+
         # Get roles dictionary
         roles_dict = {role.name: role for role in roles}
-        
+
         if clear:
             clear_database()
-        
+
         # Seed data
-        admin_user = seed_admin_user(admin_username, admin_email, admin_password, dry_run)
+        seed_admin_user(admin_username, admin_email, admin_password, dry_run)
         organizations = seed_organizations(dry_run)
-        users = seed_users(organizations, roles_dict, dry_run)
+        seed_users(organizations, roles_dict, dry_run)
         volunteers = seed_volunteers(organizations, dry_run)
         students = seed_students(organizations, dry_run)
         teachers = seed_teachers(organizations, dry_run)
-        
+
         # Combine all contacts for relationships
         all_contacts = volunteers + students + teachers
         seed_contact_relationships(all_contacts, organizations, dry_run)
-        
+
         # Print summary
         print("\n" + "=" * 60)
         print("Seeding Summary")
@@ -859,7 +1024,7 @@ def seed_database(
         print(f"Volunteers: {stats['volunteers']}")
         print(f"Students: {stats['students']}")
         print(f"Teachers: {stats['teachers']}")
-        
+
         if stats["errors"]:
             print(f"\n⚠️  Errors encountered: {len(stats['errors'])}")
             for error in stats["errors"][:10]:  # Show first 10 errors
@@ -868,7 +1033,7 @@ def seed_database(
                 print(f"  ... and {len(stats['errors']) - 10} more errors")
         else:
             print("\n✅ Seeding completed successfully!")
-        
+
         if not dry_run:
             print("\nDefault credentials:")
             print(f"  Admin: {admin_username} / {admin_password or 'admin'}")
@@ -902,15 +1067,15 @@ def main():
         action="store_true",
         help="Show what would be created without actually creating",
     )
-    
+
     args = parser.parse_args()
-    
+
     admin_password = args.admin_password
     if not admin_password and not args.dry_run:
         admin_password = getpass("Enter admin password (or press Enter for 'admin'): ")
         if not admin_password:
             admin_password = "admin"
-    
+
     seed_database(
         clear=args.clear,
         admin_username=args.admin_username,
@@ -922,4 +1087,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

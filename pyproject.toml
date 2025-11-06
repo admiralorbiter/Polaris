@@ -2,7 +2,7 @@
 # Configuration for development tools (black, isort, mypy, etc.)
 
 [tool.black]
-line-length = 100
+line-length = 120
 target-version = ['py311']
 include = '\.pyi?$'
 exclude = '''
@@ -21,7 +21,7 @@ exclude = '''
 
 [tool.isort]
 profile = "black"
-line_length = 100
+line_length = 120
 known_first_party = ["flask_app", "config"]
 skip = ["migrations", "venv", ".venv", "__pycache__"]
 
@@ -39,7 +39,7 @@ exclude = [
 ]
 
 [tool.flake8]
-max-line-length = 100
+max-line-length = 120
 extend-ignore = ["E203"]
 exclude = [
     ".git",

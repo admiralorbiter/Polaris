@@ -158,3 +158,19 @@ class PreferredLanguage(PyEnum):
     ITALIAN = "italian"
     OTHER = "other"
 
+
+class OrganizationType(PyEnum):
+    """Organization type enumeration"""
+
+    SCHOOL = "school"
+    BUSINESS = "business"
+    NON_PROFIT = "non_profit"
+    GOVERNMENT = "government"
+    OTHER = "other"
+
+
+class VolunteerOrganizationStatus(PyEnum):
+    """Volunteer-organization relationship status enumeration"""
+
+    CURRENT = "current"  # Active relationship (end_date is None)
+    PAST = "past"  # Past relationship (end_date is set)

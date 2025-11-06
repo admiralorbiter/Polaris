@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import app
 from flask_app.models import OrganizationFeatureFlag  # noqa: F401
-from flask_app.models import Organization, Permission, Role, RolePermission, SystemFeatureFlag, db
+from flask_app.models import Organization, OrganizationType, Permission, Role, RolePermission, SystemFeatureFlag, db
 
 
 def create_default_roles():
@@ -30,9 +30,7 @@ def create_default_roles():
         {
             "name": "ORG_ADMIN",
             "display_name": "Organization Administrator",
-            "description": (
-                "Administrator of a specific organization with full access within that org"
-            ),
+            "description": ("Administrator of a specific organization with full access within that org"),
             "is_system_role": True,
         },
         {
@@ -134,9 +132,7 @@ def assign_permissions_to_roles(roles, permissions):
     # SUPER_ADMIN gets all permissions
     super_admin = roles["SUPER_ADMIN"]
     for perm in permissions.values():
-        if not RolePermission.query.filter_by(
-            role_id=super_admin.id, permission_id=perm.id
-        ).first():
+        if not RolePermission.query.filter_by(role_id=super_admin.id, permission_id=perm.id).first():
             rp = RolePermission(role_id=super_admin.id, permission_id=perm.id)
             db.session.add(rp)
 
@@ -159,12 +155,7 @@ def assign_permissions_to_roles(roles, permissions):
     ]
     for perm_name in org_admin_perms:
         perm = permissions.get(perm_name)
-        if (
-            perm
-            and not RolePermission.query.filter_by(
-                role_id=org_admin.id, permission_id=perm.id
-            ).first()
-        ):
+        if perm and not RolePermission.query.filter_by(role_id=org_admin.id, permission_id=perm.id).first():
             rp = RolePermission(role_id=org_admin.id, permission_id=perm.id)
             db.session.add(rp)
 
@@ -180,12 +171,7 @@ def assign_permissions_to_roles(roles, permissions):
     ]
     for perm_name in coordinator_perms:
         perm = permissions.get(perm_name)
-        if (
-            perm
-            and not RolePermission.query.filter_by(
-                role_id=coordinator.id, permission_id=perm.id
-            ).first()
-        ):
+        if perm and not RolePermission.query.filter_by(role_id=coordinator.id, permission_id=perm.id).first():
             rp = RolePermission(role_id=coordinator.id, permission_id=perm.id)
             db.session.add(rp)
 
@@ -194,12 +180,7 @@ def assign_permissions_to_roles(roles, permissions):
     volunteer_perms = ["view_volunteers", "view_reports"]
     for perm_name in volunteer_perms:
         perm = permissions.get(perm_name)
-        if (
-            perm
-            and not RolePermission.query.filter_by(
-                role_id=volunteer.id, permission_id=perm.id
-            ).first()
-        ):
+        if perm and not RolePermission.query.filter_by(role_id=volunteer.id, permission_id=perm.id).first():
             rp = RolePermission(role_id=volunteer.id, permission_id=perm.id)
             db.session.add(rp)
 
@@ -208,10 +189,7 @@ def assign_permissions_to_roles(roles, permissions):
     viewer_perms = ["view_users", "view_volunteers", "view_reports", "view_organization_settings"]
     for perm_name in viewer_perms:
         perm = permissions.get(perm_name)
-        if (
-            perm
-            and not RolePermission.query.filter_by(role_id=viewer.id, permission_id=perm.id).first()
-        ):
+        if perm and not RolePermission.query.filter_by(role_id=viewer.id, permission_id=perm.id).first():
             rp = RolePermission(role_id=viewer.id, permission_id=perm.id)
             db.session.add(rp)
 
@@ -239,6 +217,7 @@ def create_default_organization():
         name="Default Organization",
         slug="default",
         description="Default organization created during database initialization",
+        organization_type=OrganizationType.OTHER,
         is_active=True,
     )
 
