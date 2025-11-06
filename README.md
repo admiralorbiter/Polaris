@@ -7,7 +7,7 @@ Make Volunteers your north Star
 1. Clone the repository:
    ```bash
    git clone <repository-url>
-   cd flask-login-starter
+   cd Polaris
    ```
 
 2. Create a virtual environment and activate it:

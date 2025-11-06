@@ -2,6 +2,9 @@
 
 from getpass import getpass
 import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from flask_app.models import db, User
 from werkzeug.security import generate_password_hash
 from app import app
