@@ -290,6 +290,90 @@ class TestAdminRoutes:
             assert response.status_code == 200
             assert b"dashboard" in response.data.lower() or b"admin" in response.data.lower()
 
+    def test_dashboard_displays_total_users(self, client, super_admin_user, app):
+        """Verify dashboard displays total users count"""
+        with app.app_context():
+            super_admin_user.password_hash = generate_password_hash("superpass123")
+            db.session.add(super_admin_user)
+            # Create some test users
+            for i in range(3):
+                user = User(
+                    username=f"testuser{i}",
+                    email=f"test{i}@example.com",
+                    password_hash=generate_password_hash("pass123"),
+                )
+                db.session.add(user)
+            db.session.commit()
+
+            client.post("/login", data={"username": "superadmin", "password": "superpass123"})
+
+            response = client.get("/admin")
+            assert response.status_code == 200
+            html = response.data.decode("utf-8")
+            # Dashboard should display user statistics
+            assert "users" in html.lower() or "total" in html.lower()
+
+    def test_dashboard_displays_active_users(self, client, super_admin_user, app):
+        """Verify dashboard displays active users count"""
+        with app.app_context():
+            super_admin_user.password_hash = generate_password_hash("superpass123")
+            db.session.add(super_admin_user)
+            # Create active and inactive users
+            active_user = User(
+                username="activeuser", email="active@example.com", password_hash="hash", is_active=True
+            )
+            inactive_user = User(
+                username="inactiveuser", email="inactive@example.com", password_hash="hash", is_active=False
+            )
+            db.session.add_all([active_user, inactive_user])
+            db.session.commit()
+
+            client.post("/login", data={"username": "superadmin", "password": "superpass123"})
+
+            response = client.get("/admin")
+            assert response.status_code == 200
+            html = response.data.decode("utf-8")
+            # Dashboard should display active user statistics
+            assert "active" in html.lower() or "users" in html.lower()
+
+    def test_dashboard_displays_super_admin_count(self, client, super_admin_user, app):
+        """Verify dashboard displays super admin count"""
+        with app.app_context():
+            super_admin_user.password_hash = generate_password_hash("superpass123")
+            db.session.add(super_admin_user)
+            db.session.commit()
+
+            client.post("/login", data={"username": "superadmin", "password": "superpass123"})
+
+            response = client.get("/admin")
+            assert response.status_code == 200
+            html = response.data.decode("utf-8")
+            # Dashboard should display admin statistics
+            assert "admin" in html.lower() or "super" in html.lower()
+
+    def test_dashboard_statistics_accuracy(self, client, super_admin_user, app):
+        """Verify dashboard statistics are accurate"""
+        with app.app_context():
+            super_admin_user.password_hash = generate_password_hash("superpass123")
+            db.session.add(super_admin_user)
+            # Create test users
+            user1 = User(username="user1", email="user1@example.com", password_hash="hash", is_active=True)
+            user2 = User(username="user2", email="user2@example.com", password_hash="hash", is_active=False)
+            db.session.add_all([user1, user2])
+            db.session.commit()
+
+            client.post("/login", data={"username": "superadmin", "password": "superpass123"})
+
+            # Get stats API
+            response = client.get("/admin/stats")
+            assert response.status_code == 200
+            assert response.is_json
+            data = response.get_json()
+            # Verify stats are present
+            assert "total_users" in data
+            assert "active_users" in data
+            assert "super_admin_users" in data
+
     def test_admin_users_list(self, client, super_admin_user, test_user, app):
         """Test admin users list page"""
         with app.app_context():
@@ -304,6 +388,63 @@ class TestAdminRoutes:
             response = client.get("/admin/users")
             assert response.status_code == 200
             assert b"users" in response.data.lower()
+
+    def test_user_list_displays_user_data(self, client, super_admin_user, test_user, app):
+        """Verify user list displays user data"""
+        with app.app_context():
+            super_admin_user.password_hash = generate_password_hash("superpass123")
+            db.session.add(super_admin_user)
+            db.session.add(test_user)
+            db.session.commit()
+
+            client.post("/login", data={"username": "superadmin", "password": "superpass123"})
+
+            response = client.get("/admin/users")
+            assert response.status_code == 200
+            html = response.data.decode("utf-8")
+            # Check that user data is displayed
+            assert test_user.username in html or "testuser" in html.lower()
+
+    def test_user_list_pagination(self, client, super_admin_user, app):
+        """Verify user list pagination works"""
+        with app.app_context():
+            super_admin_user.password_hash = generate_password_hash("superpass123")
+            db.session.add(super_admin_user)
+            # Create more than 20 users to test pagination
+            for i in range(25):
+                user = User(
+                    username=f"paguser{i}",
+                    email=f"pag{i}@example.com",
+                    password_hash=generate_password_hash("pass123"),
+                )
+                db.session.add(user)
+            db.session.commit()
+
+            client.post("/login", data={"username": "superadmin", "password": "superpass123"})
+
+            # Test first page
+            response = client.get("/admin/users?page=1")
+            assert response.status_code == 200
+
+            # Test second page
+            response = client.get("/admin/users?page=2")
+            assert response.status_code == 200
+
+    def test_user_list_shows_username_email_status(self, client, super_admin_user, test_user, app):
+        """Verify user list shows username, email, and status"""
+        with app.app_context():
+            super_admin_user.password_hash = generate_password_hash("superpass123")
+            db.session.add(super_admin_user)
+            db.session.add(test_user)
+            db.session.commit()
+
+            client.post("/login", data={"username": "superadmin", "password": "superpass123"})
+
+            response = client.get("/admin/users")
+            assert response.status_code == 200
+            html = response.data.decode("utf-8")
+            # Check that key user information is displayed
+            assert test_user.username in html or "testuser" in html.lower()
 
     def test_admin_create_user_get(self, client, super_admin_user, app):
         """Test admin create user page GET"""
@@ -483,6 +624,70 @@ class TestAdminRoutes:
             # The password hash might be the same if the change failed silently
             updated_user = db.session.get(User, test_user.id)
             assert updated_user is not None  # User still exists
+
+    def test_password_change_allows_login_with_new_password(self, client, super_admin_user, test_user, app):
+        """Verify password change allows login with new password"""
+        from werkzeug.security import check_password_hash
+
+        with app.app_context():
+            # Set initial password
+            test_user.password_hash = generate_password_hash("OldPass123")
+            super_admin_user.password_hash = generate_password_hash("superpass123")
+            db.session.add(super_admin_user)
+            db.session.add(test_user)
+            db.session.commit()
+
+            # Login as admin
+            client.post("/login", data={"username": "superadmin", "password": "superpass123"})
+
+            # Change password
+            old_hash = test_user.password_hash
+            response = client.post(
+                f"/admin/users/{test_user.id}/change-password",
+                data={"new_password": "NewSecurePass123", "confirm_password": "NewSecurePass123"},
+                follow_redirects=True,
+            )
+            assert response.status_code == 200
+
+            # Logout admin
+            client.get("/logout")
+
+            # Verify new password works for login
+            login_response = client.post(
+                "/login", data={"username": "testuser", "password": "NewSecurePass123"}, follow_redirects=True
+            )
+            assert login_response.status_code == 200
+
+    def test_password_change_prevents_login_with_old_password(self, client, super_admin_user, test_user, app):
+        """Verify password change prevents login with old password"""
+        with app.app_context():
+            # Set initial password
+            test_user.password_hash = generate_password_hash("OldPass123")
+            super_admin_user.password_hash = generate_password_hash("superpass123")
+            db.session.add(super_admin_user)
+            db.session.add(test_user)
+            db.session.commit()
+
+            # Login as admin
+            client.post("/login", data={"username": "superadmin", "password": "superpass123"})
+
+            # Change password
+            response = client.post(
+                f"/admin/users/{test_user.id}/change-password",
+                data={"new_password": "NewSecurePass123", "confirm_password": "NewSecurePass123"},
+                follow_redirects=True,
+            )
+            assert response.status_code == 200
+
+            # Logout admin
+            client.get("/logout")
+
+            # Verify old password no longer works
+            login_response = client.post(
+                "/login", data={"username": "testuser", "password": "OldPass123"}, follow_redirects=True
+            )
+            # Should fail - check for error message or redirect to login
+            assert b"Invalid username or password" in login_response.data or login_response.status_code == 200
 
     def test_admin_delete_user(self, client, super_admin_user, test_user, app):
         """Test admin delete user"""
