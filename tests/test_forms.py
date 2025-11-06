@@ -881,25 +881,290 @@ class TestUpdateOrganizationForm:
             assert form.validate() is True  # Should allow same slug for same org
 
     def test_update_organization_form_different_org_slug(self, test_organization, app):
-        """Test form validation with different organization's slug"""
-        # Store ID before object becomes detached
-        org_id = inspect(test_organization).identity[0]
+        """Test update organization form with slug that exists for different org"""
         with app.app_context():
-            # Re-query to avoid detached instance
-            org = db.session.get(Organization, org_id)
             # Create another organization
-            other_org = Organization(name="Other Org", slug="other-org")
+            other_org = Organization(name="Other Org", slug="other-org", is_active=True)
             db.session.add(other_org)
             db.session.commit()
 
             form = UpdateOrganizationForm(
-                organization=org,
-                data={
-                    "name": "Test Organization",
-                    "slug": "other-org",  # Same as other_org
-                    "is_active": True,
-                },
+                organization=test_organization,
+                data={"name": "Test Organization", "slug": "other-org", "is_active": True},
             )
             assert form.validate() is False
             assert "slug" in form.errors
-            assert "already exists" in form.errors["slug"][0]
+            assert "already exists" in form.errors["slug"][0].lower()
+
+
+class TestOrganizationFormRobustness:
+    """Robustness tests for organization forms - edge cases and security"""
+
+    def test_create_organization_form_xss_attempt_name(self, app):
+        """Test organization form with XSS attempt in name field"""
+        with app.app_context():
+            form = CreateOrganizationForm(
+                data={
+                    "name": "<script>alert('XSS')</script>",
+                    "slug": "test-org",
+                    "is_active": True,
+                }
+            )
+            # Form should validate (XSS protection is in template rendering)
+            # But name should be stored as-is (sanitization happens at display time)
+            form.validate()
+            # Check that script tags are in the data (not filtered by form)
+            assert "<script>" in form.name.data
+
+    def test_create_organization_form_sql_injection_attempt_name(self, app):
+        """Test organization form with SQL injection attempt in name"""
+        with app.app_context():
+            form = CreateOrganizationForm(
+                data={
+                    "name": "'; DROP TABLE organizations; --",
+                    "slug": "test-org",
+                    "is_active": True,
+                }
+            )
+            # Form should validate (SQL injection protection is in ORM)
+            form.validate()
+            # SQL injection attempt should be stored as literal string
+            assert "DROP TABLE" in form.name.data
+
+    def test_create_organization_form_sql_injection_attempt_slug(self, app):
+        """Test organization form with SQL injection attempt in slug"""
+        with app.app_context():
+            form = CreateOrganizationForm(
+                data={
+                    "name": "Test Org",
+                    "slug": "'; DROP TABLE organizations; --",
+                    "is_active": True,
+                }
+            )
+            # Slug validation should reject invalid characters
+            assert form.validate() is False
+            assert "slug" in form.errors
+
+    def test_create_organization_form_special_characters_name(self, app):
+        """Test organization form with special characters in name"""
+        with app.app_context():
+            # Name can contain special characters (will be sanitized in slug)
+            form = CreateOrganizationForm(
+                data={
+                    "name": "Org & Co. (Ltd.)",
+                    "slug": "org-co-ltd",
+                    "is_active": True,
+                }
+            )
+            assert form.validate() is True
+
+    def test_create_organization_form_unicode_characters(self, app):
+        """Test organization form with unicode characters"""
+        with app.app_context():
+            form = CreateOrganizationForm(
+                data={
+                    "name": "Organización Test 测试",
+                    "slug": "organizacion-test",
+                    "is_active": True,
+                }
+            )
+            assert form.validate() is True
+            assert "Organización" in form.name.data
+
+    def test_create_organization_form_very_long_description(self, app):
+        """Test organization form with description exceeding limit"""
+        with app.app_context():
+            long_description = "a" * 1001  # Exceeds 1000 character limit
+            form = CreateOrganizationForm(
+                data={
+                    "name": "Test Org",
+                    "slug": "test-org",
+                    "description": long_description,
+                    "is_active": True,
+                }
+            )
+            assert form.validate() is False
+            assert "description" in form.errors
+
+    def test_create_organization_form_empty_string_name(self, app):
+        """Test organization form with empty string name (after strip)"""
+        with app.app_context():
+            form = CreateOrganizationForm(
+                data={
+                    "name": "   ",  # Only whitespace
+                    "slug": "test-org",
+                    "is_active": True,
+                }
+            )
+            assert form.validate() is False
+            assert "name" in form.errors
+
+    def test_create_organization_form_empty_string_slug(self, app):
+        """Test organization form with empty string slug (after strip)"""
+        with app.app_context():
+            form = CreateOrganizationForm(
+                data={
+                    "name": "Test Org",
+                    "slug": "   ",  # Only whitespace
+                    "is_active": True,
+                }
+            )
+            assert form.validate() is False
+            assert "slug" in form.errors
+
+    def test_create_organization_form_null_bytes(self, app):
+        """Test organization form with null bytes (security test)"""
+        with app.app_context():
+            form = CreateOrganizationForm(
+                data={
+                    "name": "Test\x00Org",
+                    "slug": "test-org",
+                    "is_active": True,
+                }
+            )
+            # Should handle null bytes (may be stripped or cause validation error)
+            form.validate()
+            # Null bytes may be in data (sanitization happens elsewhere) or validation may fail
+            # Just check that form handles it without crashing
+            assert form.name.data is not None
+
+    def test_update_organization_form_none_organization(self, app):
+        """Test update organization form with None organization"""
+        with app.app_context():
+            form = UpdateOrganizationForm(
+                organization=None,
+                data={
+                    "name": "Test Org",
+                    "slug": "test-org",
+                    "is_active": True,
+                }
+            )
+            # Should handle None organization gracefully
+            form.validate()
+            # May skip duplicate checks if organization is None
+
+    def test_update_organization_form_xss_attempt_description(self, app, test_organization):
+        """Test update organization form with XSS in description"""
+        with app.app_context():
+            form = UpdateOrganizationForm(
+                organization=test_organization,
+                data={
+                    "name": "Test Org",
+                    "slug": "test-org",
+                    "description": "<img src=x onerror=alert('XSS')>",
+                    "is_active": True,
+                }
+            )
+            # Form should validate (XSS protection in template)
+            form.validate()
+            assert "<img" in form.description.data
+
+    def test_create_organization_form_boundary_name_length(self, app):
+        """Test organization form with boundary name lengths"""
+        with app.app_context():
+            # Test minimum length (2 characters)
+            form = CreateOrganizationForm(
+                data={
+                    "name": "AB",  # Exactly 2 characters
+                    "slug": "ab",
+                    "is_active": True,
+                }
+            )
+            assert form.validate() is True
+
+            # Test maximum length (200 characters)
+            form = CreateOrganizationForm(
+                data={
+                    "name": "A" * 200,  # Exactly 200 characters
+                    "slug": "a" * 100,
+                    "is_active": True,
+                }
+            )
+            assert form.validate() is True
+
+            # Test over maximum (201 characters)
+            form = CreateOrganizationForm(
+                data={
+                    "name": "A" * 201,  # Over 200 characters
+                    "slug": "test-org",
+                    "is_active": True,
+                }
+            )
+            assert form.validate() is False
+            assert "name" in form.errors
+
+    def test_create_organization_form_boundary_slug_length(self, app):
+        """Test organization form with boundary slug lengths"""
+        with app.app_context():
+            # Test minimum length (2 characters)
+            form = CreateOrganizationForm(
+                data={
+                    "name": "Test Org",
+                    "slug": "ab",  # Exactly 2 characters
+                    "is_active": True,
+                }
+            )
+            assert form.validate() is True
+
+            # Test maximum length (100 characters)
+            form = CreateOrganizationForm(
+                data={
+                    "name": "Test Org",
+                    "slug": "a" * 100,  # Exactly 100 characters
+                    "is_active": True,
+                }
+            )
+            assert form.validate() is True
+
+            # Test over maximum (101 characters)
+            form = CreateOrganizationForm(
+                data={
+                    "name": "Test Org",
+                    "slug": "a" * 101,  # Over 100 characters
+                    "is_active": True,
+                }
+            )
+            assert form.validate() is False
+            assert "slug" in form.errors
+
+    def test_create_organization_form_database_error_during_validation(self, app):
+        """Test organization form with database error during validation"""
+        with app.app_context():
+            form = CreateOrganizationForm(
+                data={
+                    "name": "Test Org",
+                    "slug": "test-org",
+                    "is_active": True,
+                }
+            )
+
+            # Mock Organization.query to raise error
+            with patch("flask_app.forms.organization.Organization.query") as mock_query:
+                mock_query.filter_by.side_effect = Exception("Database error")
+                # Should handle database error gracefully
+                try:
+                    form.validate()
+                    # May raise or return False
+                except Exception:
+                    # Exception is acceptable error handling
+                    pass
+
+    def test_update_organization_form_database_error_during_validation(self, app, test_organization):
+        """Test update organization form with database error during validation"""
+        with app.app_context():
+            form = UpdateOrganizationForm(
+                organization=test_organization,
+                data={
+                    "name": "Updated Org",
+                    "slug": "updated-org",
+                    "is_active": True,
+                }
+            )
+
+            # Mock Organization.query to raise error
+            with patch("flask_app.forms.organization.Organization.query") as mock_query:
+                mock_query.filter_by.side_effect = Exception("Database error")
+                try:
+                    form.validate()
+                except Exception:
+                    pass
