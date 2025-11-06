@@ -34,9 +34,15 @@
 
 /* Admin Container */
 .admin-container {
-    max-width: 1200px;
+    max-width: 95%;
     margin: 0 auto;
-    padding: var(--spacing-xl) var(--spacing-md);
+    padding: var(--spacing-xl) var(--spacing-sm);
+}
+
+/* Reduce main padding for admin pages to maximize table space */
+main:has(.admin-container) {
+    padding: var(--spacing-xl) var(--spacing-sm);
+    max-width: 100%;
 }
 
 /* Admin Header */
