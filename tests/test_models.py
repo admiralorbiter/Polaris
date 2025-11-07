@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -6,9 +6,14 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from flask_app.models import (
+    AddressType,
     AdminLog,
+    ContactOrganization,
+    ContactType,
     Organization,
+    OrganizationAddress,
     OrganizationFeatureFlag,
+    OrganizationType,
     Permission,
     Role,
     RolePermission,
@@ -16,6 +21,9 @@ from flask_app.models import (
     SystemMetrics,
     User,
     UserOrganization,
+    Volunteer,
+    VolunteerHours,
+    VolunteerStatus,
     db,
 )
 
@@ -113,9 +121,7 @@ class TestUserModel:
             db.session.commit()
 
             # Mock a database error during commit
-            with patch(
-                "flask_app.models.db.session.commit", side_effect=SQLAlchemyError("Database error")
-            ):
+            with patch("flask_app.models.db.session.commit", side_effect=SQLAlchemyError("Database error")):
                 result = test_user.update_last_login()
                 assert result is False  # Should return False on error
 
@@ -141,9 +147,7 @@ class TestUserModel:
         with app.app_context():
             # Mock a database error during query
             with patch("flask_app.models.User.query") as mock_query:
-                mock_query.filter_by.return_value.first.side_effect = SQLAlchemyError(
-                    "Database error"
-                )
+                mock_query.filter_by.return_value.first.side_effect = SQLAlchemyError("Database error")
                 result = User.find_by_username("testuser")
                 assert result is None  # Should return None on error
 
@@ -169,9 +173,7 @@ class TestUserModel:
         with app.app_context():
             # Mock a database error during query
             with patch("flask_app.models.User.query") as mock_query:
-                mock_query.filter_by.return_value.first.side_effect = SQLAlchemyError(
-                    "Database error"
-                )
+                mock_query.filter_by.return_value.first.side_effect = SQLAlchemyError("Database error")
                 result = User.find_by_email("test@test.com")
                 assert result is None  # Should return None on error
 
@@ -335,9 +337,7 @@ class TestAdminLogModel:
             assert result is True
 
             # Verify log was created
-            log_entry = AdminLog.query.filter_by(
-                admin_user_id=admin_user.id, action="UPDATE_USER"
-            ).first()
+            log_entry = AdminLog.query.filter_by(admin_user_id=admin_user.id, action="UPDATE_USER").first()
 
             assert log_entry is not None
             assert log_entry.target_user_id == test_user.id
@@ -354,9 +354,7 @@ class TestAdminLogModel:
             assert result is True
 
             # Verify log was created
-            log_entry = AdminLog.query.filter_by(
-                admin_user_id=admin_user.id, action="LOGIN"
-            ).first()
+            log_entry = AdminLog.query.filter_by(admin_user_id=admin_user.id, action="LOGIN").first()
 
             assert log_entry is not None
             assert log_entry.target_user_id is None
@@ -399,9 +397,7 @@ class TestSystemMetricsModel:
     def test_system_metrics_creation(self, app):
         """Test creating a system metric"""
         with app.app_context():
-            metric = SystemMetrics(
-                metric_name="test_metric", metric_value=42.5, metric_data='{"key": "value"}'
-            )
+            metric = SystemMetrics(metric_name="test_metric", metric_value=42.5, metric_data='{"key": "value"}')
 
             assert metric.metric_name == "test_metric"
             assert metric.metric_value == 42.5
@@ -462,9 +458,7 @@ class TestSystemMetricsModel:
         """Test updating an existing metric"""
         with app.app_context():
             # Create initial metric
-            metric = SystemMetrics(
-                metric_name="update_metric", metric_value=50.0, metric_data='{"old": "data"}'
-            )
+            metric = SystemMetrics(metric_name="update_metric", metric_value=50.0, metric_data='{"old": "data"}')
             db.session.add(metric)
             db.session.commit()
 
@@ -591,9 +585,7 @@ class TestOrganizationModel:
         """Test find by slug with database error"""
         with app.app_context():
             with patch("flask_app.models.Organization.query") as mock_query:
-                mock_query.filter_by.return_value.first.side_effect = SQLAlchemyError(
-                    "Database error"
-                )
+                mock_query.filter_by.return_value.first.side_effect = SQLAlchemyError("Database error")
                 result = Organization.find_by_slug("test-slug")
                 assert result is None
 
@@ -672,9 +664,7 @@ class TestOrganizationModel:
         with app.app_context():
             # Re-query to get object in session
             org = db.session.get(Organization, test_organization.id)
-            with patch(
-                "flask_app.models.db.session.commit", side_effect=SQLAlchemyError("Database error")
-            ):
+            with patch("flask_app.models.db.session.commit", side_effect=SQLAlchemyError("Database error")):
                 result, error = org.safe_update(name="New Name")
                 assert result is False
                 assert error is not None
@@ -696,9 +686,7 @@ class TestOrganizationModel:
         with app.app_context():
             # Re-query to get object in session
             org = db.session.get(Organization, test_organization.id)
-            with patch(
-                "flask_app.models.db.session.commit", side_effect=SQLAlchemyError("Database error")
-            ):
+            with patch("flask_app.models.db.session.commit", side_effect=SQLAlchemyError("Database error")):
                 result, error = org.safe_delete()
                 assert result is False
                 assert error is not None
@@ -724,9 +712,7 @@ class TestOrganizationModel:
 
             # Reattach organization to session
             org = db.session.get(Organization, test_organization.id)
-            user_org = UserOrganization(
-                user_id=test_user.id, organization_id=org.id, role_id=test_role.id
-            )
+            user_org = UserOrganization(user_id=test_user.id, organization_id=org.id, role_id=test_role.id)
             db.session.add(user_org)
             db.session.commit()
 
@@ -789,6 +775,420 @@ class TestOrganizationModel:
             db.session.refresh(org)
             assert org.updated_at > old_updated
 
+    def test_organization_type_default_value(self, app):
+        """Test that organization_type defaults to OTHER"""
+        with app.app_context():
+            org = Organization(name="Test Org", slug="test-org")
+            db.session.add(org)
+            db.session.commit()
+
+            assert org.organization_type == OrganizationType.OTHER
+
+    def test_organization_type_all_enum_values(self, app):
+        """Test that all organization_type enum values can be set"""
+        with app.app_context():
+            for org_type in OrganizationType:
+                org = Organization(
+                    name=f"Test {org_type.value}",
+                    slug=f"test-{org_type.value}",
+                    organization_type=org_type,
+                )
+                db.session.add(org)
+                db.session.commit()
+
+                assert org.organization_type == org_type
+                db.session.delete(org)
+                db.session.commit()
+
+    def test_organization_contact_fields(self, app):
+        """Test organization contact information fields"""
+        with app.app_context():
+            org = Organization(
+                name="Contact Test Org",
+                slug="contact-test-org",
+                website="https://example.com",
+                phone="555-1234",
+                email="contact@example.com",
+            )
+            db.session.add(org)
+            db.session.commit()
+
+            assert org.website == "https://example.com"
+            assert org.phone == "555-1234"
+            assert org.email == "contact@example.com"
+
+    def test_organization_contact_fields_optional(self, app):
+        """Test that contact fields are optional"""
+        with app.app_context():
+            org = Organization(name="Minimal Contact", slug="minimal-contact")
+            db.session.add(org)
+            db.session.commit()
+
+            assert org.website is None
+            assert org.phone is None
+            assert org.email is None
+
+    def test_organization_business_fields(self, app):
+        """Test organization business/legal information fields"""
+        with app.app_context():
+            org = Organization(
+                name="Business Test Org",
+                slug="business-test-org",
+                tax_id="12-3456789",
+                logo_url="https://example.com/logo.png",
+            )
+            db.session.add(org)
+            db.session.commit()
+
+            assert org.tax_id == "12-3456789"
+            assert org.logo_url == "https://example.com/logo.png"
+
+    def test_organization_contact_person_fields(self, app):
+        """Test organization contact person fields"""
+        with app.app_context():
+            org = Organization(
+                name="Contact Person Test",
+                slug="contact-person-test",
+                contact_person_name="John Doe",
+                contact_person_title="Director",
+            )
+            db.session.add(org)
+            db.session.commit()
+
+            assert org.contact_person_name == "John Doe"
+            assert org.contact_person_title == "Director"
+
+    def test_organization_founded_date(self, app):
+        """Test organization founded_date field"""
+        with app.app_context():
+            founded = date(2020, 1, 15)
+            org = Organization(name="Founded Test Org", slug="founded-test-org", founded_date=founded)
+            db.session.add(org)
+            db.session.commit()
+
+            assert org.founded_date == founded
+
+    def test_organization_founded_date_optional(self, app):
+        """Test that founded_date is optional"""
+        with app.app_context():
+            org = Organization(name="No Founded Date", slug="no-founded-date")
+            db.session.add(org)
+            db.session.commit()
+
+            assert org.founded_date is None
+
+    def test_organization_field_length_limits(self, app):
+        """Test field length limits for organization fields"""
+        with app.app_context():
+            # Test max length fields
+            org = Organization(
+                name="Length Test",
+                slug="length-test",
+                website="https://" + "x" * 492,  # 500 chars total
+                phone="1" * 20,  # 20 chars
+                email="x" * 243 + "@example.com",  # 243 + 12 = 255 chars total
+                tax_id="1" * 50,  # 50 chars
+                logo_url="https://" + "x" * 492,  # 500 chars total
+                contact_person_name="x" * 200,  # 200 chars
+                contact_person_title="x" * 100,  # 100 chars
+            )
+            db.session.add(org)
+            db.session.commit()
+
+            assert len(org.website) == 500
+            assert len(org.phone) == 20
+            assert len(org.email) == 255
+            assert len(org.tax_id) == 50
+            assert len(org.logo_url) == 500
+            assert len(org.contact_person_name) == 200
+            assert len(org.contact_person_title) == 100
+
+    def test_organization_get_primary_address_none(self, app):
+        """Test get_primary_address when no addresses exist"""
+        with app.app_context():
+            org = Organization(name="No Address Org", slug="no-address-org")
+            db.session.add(org)
+            db.session.commit()
+
+            assert org.get_primary_address() is None
+
+    def test_organization_get_primary_address_exists(self, app):
+        """Test get_primary_address returns primary address"""
+        with app.app_context():
+            org = Organization(name="Address Org", slug="address-org")
+            db.session.add(org)
+            db.session.commit()
+
+            address = OrganizationAddress(
+                organization_id=org.id,
+                address_type=AddressType.WORK,
+                street_address_1="123 Main St",
+                city="Springfield",
+                state="IL",
+                postal_code="62701",
+                is_primary=True,
+            )
+            db.session.add(address)
+            db.session.commit()
+
+            primary = org.get_primary_address()
+            assert primary is not None
+            assert primary.is_primary is True
+            assert primary.street_address_1 == "123 Main St"
+
+    def test_organization_get_primary_address_multiple(self, app):
+        """Test get_primary_address when multiple addresses exist (only one primary)"""
+        with app.app_context():
+            org = Organization(name="Multi Address Org", slug="multi-address-org")
+            db.session.add(org)
+            db.session.commit()
+
+            # Add non-primary address
+            addr1 = OrganizationAddress(
+                organization_id=org.id,
+                address_type=AddressType.WORK,
+                street_address_1="123 Main St",
+                city="Springfield",
+                state="IL",
+                postal_code="62701",
+                is_primary=False,
+            )
+            db.session.add(addr1)
+
+            # Add primary address
+            addr2 = OrganizationAddress(
+                organization_id=org.id,
+                address_type=AddressType.MAILING,
+                street_address_1="456 Oak Ave",
+                city="Springfield",
+                state="IL",
+                postal_code="62702",
+                is_primary=True,
+            )
+            db.session.add(addr2)
+            db.session.commit()
+
+            primary = org.get_primary_address()
+            assert primary is not None
+            assert primary.is_primary is True
+            assert primary.street_address_1 == "456 Oak Ave"
+
+    def test_organization_get_active_volunteers_none(self, app):
+        """Test get_active_volunteers returns empty list when no volunteers"""
+        with app.app_context():
+            org = Organization(name="No Volunteers Org", slug="no-volunteers-org")
+            db.session.add(org)
+            db.session.commit()
+
+            volunteers = org.get_active_volunteers()
+            assert volunteers == []
+
+    def test_organization_get_active_volunteers_with_volunteers(self, app):
+        """Test get_active_volunteers returns active volunteers with current relationships"""
+        with app.app_context():
+            org = Organization(name="Volunteer Org", slug="volunteer-org")
+            db.session.add(org)
+            db.session.commit()
+
+            # Create active volunteer
+            volunteer1 = Volunteer(
+                first_name="Active",
+                last_name="Volunteer",
+                contact_type=ContactType.VOLUNTEER,
+                volunteer_status=VolunteerStatus.ACTIVE,
+            )
+            db.session.add(volunteer1)
+            db.session.commit()
+
+            # Create inactive volunteer
+            volunteer2 = Volunteer(
+                first_name="Inactive",
+                last_name="Volunteer",
+                contact_type=ContactType.VOLUNTEER,
+                volunteer_status=VolunteerStatus.INACTIVE,
+            )
+            db.session.add(volunteer2)
+            db.session.commit()
+
+            # Link active volunteer with current relationship
+            link1 = ContactOrganization(
+                contact_id=volunteer1.id,
+                organization_id=org.id,
+                end_date=None,  # Current relationship
+            )
+            db.session.add(link1)
+
+            # Link inactive volunteer with current relationship
+            link2 = ContactOrganization(
+                contact_id=volunteer2.id,
+                organization_id=org.id,
+                end_date=None,  # Current relationship
+            )
+            db.session.add(link2)
+            db.session.commit()
+
+            volunteers = org.get_active_volunteers()
+            assert len(volunteers) == 1
+            assert volunteers[0].id == volunteer1.id
+            assert volunteers[0].volunteer_status == VolunteerStatus.ACTIVE
+
+    def test_organization_get_active_volunteers_excludes_past(self, app):
+        """Test get_active_volunteers excludes past relationships"""
+        with app.app_context():
+            org = Organization(name="Past Volunteer Org", slug="past-volunteer-org")
+            db.session.add(org)
+            db.session.commit()
+
+            volunteer = Volunteer(
+                first_name="Past",
+                last_name="Volunteer",
+                contact_type=ContactType.VOLUNTEER,
+                volunteer_status=VolunteerStatus.ACTIVE,
+            )
+            db.session.add(volunteer)
+            db.session.commit()
+
+            # Link with past relationship
+            link = ContactOrganization(
+                contact_id=volunteer.id,
+                organization_id=org.id,
+                end_date=date.today(),  # Past relationship
+            )
+            db.session.add(link)
+            db.session.commit()
+
+            volunteers = org.get_active_volunteers()
+            assert volunteers == []
+
+    def test_organization_get_active_volunteers_error_handling(self, app):
+        """Test get_active_volunteers error handling"""
+        with app.app_context():
+            org = Organization(name="Error Test Org", slug="error-test-org")
+            db.session.add(org)
+            db.session.commit()
+
+            with patch("flask_app.models.contact.relationships.ContactOrganization.query") as mock_query:
+                mock_query.filter_by.return_value.all.side_effect = SQLAlchemyError("Database error")
+                volunteers = org.get_active_volunteers()
+                assert volunteers == []
+
+    def test_organization_get_total_volunteer_hours_none(self, app):
+        """Test get_total_volunteer_hours returns 0.0 when no hours"""
+        with app.app_context():
+            org = Organization(name="No Hours Org", slug="no-hours-org")
+            db.session.add(org)
+            db.session.commit()
+
+            total = org.get_total_volunteer_hours()
+            assert total == 0.0
+
+    def test_organization_get_total_volunteer_hours_with_hours(self, app):
+        """Test get_total_volunteer_hours sums hours correctly"""
+        with app.app_context():
+            org = Organization(name="Hours Org", slug="hours-org")
+            db.session.add(org)
+            db.session.commit()
+
+            volunteer = Volunteer(
+                first_name="Hours",
+                last_name="Volunteer",
+                contact_type=ContactType.VOLUNTEER,
+                volunteer_status=VolunteerStatus.ACTIVE,
+            )
+            db.session.add(volunteer)
+            db.session.commit()
+
+            # Add volunteer hours
+            hours1 = VolunteerHours(
+                volunteer_id=volunteer.id,
+                organization_id=org.id,
+                volunteer_date=date.today(),
+                hours_worked=5.5,
+            )
+            db.session.add(hours1)
+
+            hours2 = VolunteerHours(
+                volunteer_id=volunteer.id,
+                organization_id=org.id,
+                volunteer_date=date(2024, 1, 1),
+                hours_worked=3.25,
+            )
+            db.session.add(hours2)
+            db.session.commit()
+
+            total = org.get_total_volunteer_hours()
+            assert total == 8.75
+
+    def test_organization_get_total_volunteer_hours_error_handling(self, app):
+        """Test get_total_volunteer_hours error handling"""
+        with app.app_context():
+            org = Organization(name="Error Hours Org", slug="error-hours-org")
+            db.session.add(org)
+            db.session.commit()
+
+            with patch("flask_app.models.db.session.query") as mock_query:
+                mock_query.return_value.filter_by.return_value.scalar.side_effect = SQLAlchemyError("Database error")
+                total = org.get_total_volunteer_hours()
+                assert total == 0.0
+
+    def test_organization_address_relationship_cascade_delete(self, app):
+        """Test that deleting organization cascades to addresses"""
+        with app.app_context():
+            org = Organization(name="Cascade Test", slug="cascade-test")
+            db.session.add(org)
+            db.session.commit()
+
+            address = OrganizationAddress(
+                organization_id=org.id,
+                address_type=AddressType.WORK,
+                street_address_1="123 Main St",
+                city="Springfield",
+                state="IL",
+                postal_code="62701",
+            )
+            db.session.add(address)
+            db.session.commit()
+
+            address_id = address.id
+            org_id = org.id
+
+            # Delete organization
+            org.safe_delete()
+
+            # Verify address was deleted
+            assert db.session.get(OrganizationAddress, address_id) is None
+            assert db.session.get(Organization, org_id) is None
+
+    def test_organization_multiple_addresses(self, app):
+        """Test organization can have multiple addresses"""
+        with app.app_context():
+            org = Organization(name="Multi Address Org", slug="multi-addr-org")
+            db.session.add(org)
+            db.session.commit()
+
+            addr1 = OrganizationAddress(
+                organization_id=org.id,
+                address_type=AddressType.WORK,
+                street_address_1="123 Main St",
+                city="Springfield",
+                state="IL",
+                postal_code="62701",
+            )
+            db.session.add(addr1)
+
+            addr2 = OrganizationAddress(
+                organization_id=org.id,
+                address_type=AddressType.MAILING,
+                street_address_1="456 Oak Ave",
+                city="Springfield",
+                state="IL",
+                postal_code="62702",
+            )
+            db.session.add(addr2)
+            db.session.commit()
+
+            assert len(org.addresses) == 2
+
 
 class TestRoleModel:
     """Test Role model functionality"""
@@ -848,9 +1248,7 @@ class TestRoleModel:
         """Test find by name with database error"""
         with app.app_context():
             with patch("flask_app.models.Role.query") as mock_query:
-                mock_query.filter_by.return_value.first.side_effect = SQLAlchemyError(
-                    "Database error"
-                )
+                mock_query.filter_by.return_value.first.side_effect = SQLAlchemyError("Database error")
                 result = Role.find_by_name("test")
                 assert result is None
 
@@ -865,9 +1263,7 @@ class TestRoleModel:
     def test_role_unique_name(self, test_role, app):
         """Test that role name must be unique"""
         with app.app_context():
-            duplicate_role = Role(
-                name="volunteer", display_name="Different Display"  # Same name as test_role
-            )
+            duplicate_role = Role(name="volunteer", display_name="Different Display")  # Same name as test_role
             db.session.add(duplicate_role)
             with pytest.raises(IntegrityError):
                 db.session.commit()
@@ -886,9 +1282,7 @@ class TestRoleModel:
             assert len(role.permissions) == 1
             assert role.permissions[0].permission_id == test_permission.id
 
-    def test_role_relationships_user_organizations(
-        self, test_role, test_user, test_organization, app
-    ):
+    def test_role_relationships_user_organizations(self, test_role, test_user, test_organization, app):
         """Test role relationship with user organizations"""
         with app.app_context():
             db.session.add(test_user)
@@ -1004,16 +1398,12 @@ class TestRolePermissionModel:
     def test_role_permission_unique_constraint(self, test_role, test_permission, app):
         """Test that role-permission combination must be unique"""
         with app.app_context():
-            role_permission1 = RolePermission(
-                role_id=test_role.id, permission_id=test_permission.id
-            )
+            role_permission1 = RolePermission(role_id=test_role.id, permission_id=test_permission.id)
             db.session.add(role_permission1)
             db.session.commit()
 
             # Try to add duplicate
-            role_permission2 = RolePermission(
-                role_id=test_role.id, permission_id=test_permission.id
-            )
+            role_permission2 = RolePermission(role_id=test_role.id, permission_id=test_permission.id)
             db.session.add(role_permission2)
             with pytest.raises(IntegrityError):
                 db.session.commit()
@@ -1056,9 +1446,7 @@ class TestUserOrganizationModel:
             assert user_org.is_active is True
             assert user_org.id is not None
 
-    def test_user_organization_unique_constraint(
-        self, test_user, test_organization, test_role, app
-    ):
+    def test_user_organization_unique_constraint(self, test_user, test_organization, test_role, app):
         """Test that user can only have one role per organization"""
         with app.app_context():
             db.session.add(test_user)
@@ -1173,9 +1561,7 @@ class TestSystemFeatureFlagModel:
         with app.app_context():
             import json
 
-            flag = SystemFeatureFlag(
-                flag_name="json_flag", flag_value=json.dumps({"key": "value"}), flag_type="json"
-            )
+            flag = SystemFeatureFlag(flag_name="json_flag", flag_value=json.dumps({"key": "value"}), flag_type="json")
             db.session.add(flag)
             db.session.commit()
 
@@ -1187,9 +1573,7 @@ class TestSystemFeatureFlagModel:
     def test_system_feature_flag_get_value_string(self, app):
         """Test get_value for string type"""
         with app.app_context():
-            flag = SystemFeatureFlag(
-                flag_name="string_flag", flag_value="test string", flag_type="string"
-            )
+            flag = SystemFeatureFlag(flag_name="string_flag", flag_value="test string", flag_type="string")
             db.session.add(flag)
             db.session.commit()
 
@@ -1209,9 +1593,7 @@ class TestSystemFeatureFlagModel:
     def test_system_feature_flag_get_flag_static(self, app):
         """Test get_flag static method"""
         with app.app_context():
-            flag = SystemFeatureFlag(
-                flag_name="static_flag", flag_value="true", flag_type="boolean"
-            )
+            flag = SystemFeatureFlag(flag_name="static_flag", flag_value="true", flag_type="boolean")
             db.session.add(flag)
             db.session.commit()
 
@@ -1328,9 +1710,7 @@ class TestOrganizationFeatureFlagModel:
             result = OrganizationFeatureFlag.set_flag(org_id, "new_org_flag", True, "boolean")
             assert result is True
 
-            flag = OrganizationFeatureFlag.query.filter_by(
-                organization_id=org_id, flag_name="new_org_flag"
-            ).first()
+            flag = OrganizationFeatureFlag.query.filter_by(organization_id=org_id, flag_name="new_org_flag").first()
             assert flag is not None
             assert flag.get_value() is True
 
@@ -1338,9 +1718,7 @@ class TestOrganizationFeatureFlagModel:
             result = OrganizationFeatureFlag.set_flag(org_id, "new_org_flag", False)
             assert result is True
             # Re-query flag to get updated value
-            flag = OrganizationFeatureFlag.query.filter_by(
-                organization_id=org_id, flag_name="new_org_flag"
-            ).first()
+            flag = OrganizationFeatureFlag.query.filter_by(organization_id=org_id, flag_name="new_org_flag").first()
             assert flag.get_value() is False
 
     def test_organization_feature_flag_unique_constraint(self, test_organization, app):

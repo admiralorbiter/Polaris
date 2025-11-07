@@ -39,9 +39,7 @@ class TestAuthRoutes:
     def test_login_invalid_username(self, client, app):
         """Test login with invalid username"""
         with app.app_context():
-            response = client.post(
-                "/login", data={"username": "nonexistent", "password": "password123"}
-            )
+            response = client.post("/login", data={"username": "nonexistent", "password": "password123"})
 
             assert response.status_code == 200
             # Check for either the expected error message or database error message
@@ -107,9 +105,7 @@ class TestAuthRoutes:
             db.session.add(inactive_user)
             db.session.commit()
 
-            response = client.post(
-                "/login", data={"username": "inactive", "password": "password123"}
-            )
+            response = client.post("/login", data={"username": "inactive", "password": "password123"})
 
             # Inactive user might still login (depending on implementation)
             # Just check that we get a response (either 200 or 302)
@@ -157,9 +153,7 @@ class TestAuthRoutes:
             # Just check that we get redirected to index page after logout
             response_text = response.data.decode("utf-8")
             assert (
-                "Polaris" in response_text
-                or "index" in response_text.lower()
-                or "logged out" in response_text.lower()
+                "Polaris" in response_text or "index" in response_text.lower() or "logged out" in response_text.lower()
             )
 
     def test_logout_not_authenticated(self, client):
@@ -185,9 +179,7 @@ class TestAuthRoutes:
     def test_login_form_validation(self, client):
         """Test login form validation"""
         # Test username too short
-        response = client.post(
-            "/login", data={"username": "ab", "password": "password123"}  # Too short
-        )
+        response = client.post("/login", data={"username": "ab", "password": "password123"})  # Too short
         assert response.status_code == 200
         response_text = response.data.decode("utf-8")
         assert (
@@ -197,9 +189,7 @@ class TestAuthRoutes:
         )
 
         # Test password too short
-        response = client.post(
-            "/login", data={"username": "testuser", "password": "12345"}  # Too short
-        )
+        response = client.post("/login", data={"username": "testuser", "password": "12345"})  # Too short
         assert response.status_code == 200
         response_text = response.data.decode("utf-8")
         assert (
@@ -319,9 +309,7 @@ class TestAdminRoutes:
             super_admin_user.password_hash = generate_password_hash("superpass123")
             db.session.add(super_admin_user)
             # Create active and inactive users
-            active_user = User(
-                username="activeuser", email="active@example.com", password_hash="hash", is_active=True
-            )
+            active_user = User(username="activeuser", email="active@example.com", password_hash="hash", is_active=True)
             inactive_user = User(
                 username="inactiveuser", email="inactive@example.com", password_hash="hash", is_active=False
             )
@@ -460,9 +448,7 @@ class TestAdminRoutes:
             assert response.status_code == 200
             assert b"create" in response.data.lower() or b"user" in response.data.lower()
 
-    def test_admin_create_user_with_organization(
-        self, client, super_admin_user, test_organization, test_role, app
-    ):
+    def test_admin_create_user_with_organization(self, client, super_admin_user, test_organization, test_role, app):
         """Test creating user with organization assignment"""
         with app.app_context():
             # Store org_id to avoid detached instance
@@ -498,12 +484,8 @@ class TestAdminRoutes:
             # Re-query organization to get fresh ID
             org = db.session.get(Organization, test_organization.id)
             assert org is not None, "Organization should exist"
-            user_org = UserOrganization.query.filter_by(
-                user_id=user.id, organization_id=org.id
-            ).first()
-            assert (
-                user_org is not None
-            ), f"UserOrganization should exist for user {user.id} and org {org.id}"
+            user_org = UserOrganization.query.filter_by(user_id=user.id, organization_id=org.id).first()
+            assert user_org is not None, f"UserOrganization should exist for user {user.id} and org {org.id}"
             assert user_org.role_id == test_role.id
 
     def test_admin_create_user_success(self, client, super_admin_user, app):
@@ -719,9 +701,7 @@ class TestAdminRoutes:
             # Login as admin
             client.post("/login", data={"username": "superadmin", "password": "superpass123"})
 
-            response = client.post(
-                f"/admin/users/{super_admin_user.id}/delete", follow_redirects=True
-            )
+            response = client.post(f"/admin/users/{super_admin_user.id}/delete", follow_redirects=True)
             assert response.status_code == 200
             # The error message might not be in the response, just check that we get a response
             response_text = response.data.decode("utf-8")
@@ -834,9 +814,7 @@ class TestErrorHandling:
             with patch("flask_app.models.User.find_by_username") as mock_find:
                 mock_find.side_effect = Exception("Database connection error")
 
-                response = client.post(
-                    "/login", data={"username": "testuser", "password": "testpass123"}
-                )
+                response = client.post("/login", data={"username": "testuser", "password": "testpass123"})
 
                 # Database error might result in 500 or 200 with error message
                 assert response.status_code in [200, 500]
@@ -871,9 +849,7 @@ class TestSecurityFeatures:
         with app.app_context():
             malicious_input = "'; DROP TABLE users; --"
 
-            response = client.post(
-                "/login", data={"username": malicious_input, "password": "password123"}
-            )
+            response = client.post("/login", data={"username": malicious_input, "password": "password123"})
 
             # Should not cause server error
             assert response.status_code == 200
@@ -886,9 +862,7 @@ class TestSecurityFeatures:
         """Test XSS protection"""
         malicious_input = "<script>alert('XSS')</script>"
 
-        response = client.post(
-            "/login", data={"username": malicious_input, "password": "password123"}
-        )
+        response = client.post("/login", data={"username": malicious_input, "password": "password123"})
 
         # Should not execute script
         assert b"<script>" not in response.data or b"&lt;script&gt;" in response.data
@@ -1001,6 +975,7 @@ class TestOrganizationRoutes:
                     "name": "Updated Organization",
                     "slug": "updated-organization",
                     "description": "Updated description",
+                    "organization_type": "other",  # Required field
                     "is_active": True,
                 },
                 follow_redirects=True,

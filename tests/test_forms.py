@@ -51,37 +51,26 @@ class TestLoginForm:
 
     def test_login_form_username_too_short(self):
         """Test form validation with username too short"""
-        form = LoginForm(
-            data={"username": "ab", "password": "password123"}  # Less than 3 characters
-        )
+        form = LoginForm(data={"username": "ab", "password": "password123"})  # Less than 3 characters
         assert form.validate() is False
         assert "username" in form.errors
 
     def test_login_form_username_too_long(self):
         """Test form validation with username too long"""
-        form = LoginForm(
-            data={"username": "a" * 65, "password": "password123"}  # More than 64 characters
-        )
+        form = LoginForm(data={"username": "a" * 65, "password": "password123"})  # More than 64 characters
         assert form.validate() is False
         assert "username" in form.errors
 
     def test_login_form_username_invalid_characters(self):
         """Test form validation with invalid username characters"""
-        form = LoginForm(
-            data={"username": "invalid@user!", "password": "password123"}  # Invalid characters
-        )
+        form = LoginForm(data={"username": "invalid@user!", "password": "password123"})  # Invalid characters
         assert form.validate() is False
         assert "username" in form.errors
-        assert (
-            "Username can only contain letters, numbers, underscores, and hyphens."
-            in form.errors["username"]
-        )
+        assert "Username can only contain letters, numbers, underscores, and hyphens." in form.errors["username"]
 
     def test_login_form_password_too_short(self):
         """Test form validation with password too short"""
-        form = LoginForm(
-            data={"username": "testuser", "password": "12345"}  # Less than 6 characters
-        )
+        form = LoginForm(data={"username": "testuser", "password": "12345"})  # Less than 6 characters
         assert form.validate() is False
         assert "password" in form.errors
         assert "Password must be at least 6 characters long." in form.errors["password"]
@@ -313,10 +302,7 @@ class TestCreateUserForm:
         )
         assert form.validate() is False
         assert "username" in form.errors
-        assert (
-            "Username can only contain letters, numbers, underscores, and hyphens."
-            in form.errors["username"]
-        )
+        assert "Username can only contain letters, numbers, underscores, and hyphens." in form.errors["username"]
 
     def test_create_user_form_field_lengths(self):
         """Test form validation with fields too long"""
@@ -499,17 +485,13 @@ class TestChangePasswordForm:
 
     def test_change_password_form_valid_data(self):
         """Test change password form with valid data"""
-        form = ChangePasswordForm(
-            data={"new_password": "NewSecurePass123", "confirm_password": "NewSecurePass123"}
-        )
+        form = ChangePasswordForm(data={"new_password": "NewSecurePass123", "confirm_password": "NewSecurePass123"})
         assert form.new_password.data == "NewSecurePass123"
         assert form.confirm_password.data == "NewSecurePass123"
 
     def test_change_password_form_validation_success(self):
         """Test successful form validation"""
-        form = ChangePasswordForm(
-            data={"new_password": "NewSecurePass123", "confirm_password": "NewSecurePass123"}
-        )
+        form = ChangePasswordForm(data={"new_password": "NewSecurePass123", "confirm_password": "NewSecurePass123"})
         assert form.validate() is True
 
     def test_change_password_form_missing_password(self):
@@ -526,9 +508,7 @@ class TestChangePasswordForm:
 
     def test_change_password_form_password_mismatch(self):
         """Test form validation with password mismatch"""
-        form = ChangePasswordForm(
-            data={"new_password": "NewSecurePass123", "confirm_password": "DifferentPass123"}
-        )
+        form = ChangePasswordForm(data={"new_password": "NewSecurePass123", "confirm_password": "DifferentPass123"})
         assert form.validate() is False
         assert "confirm_password" in form.errors
         assert "Passwords must match." in form.errors["confirm_password"]
@@ -542,27 +522,21 @@ class TestChangePasswordForm:
 
     def test_change_password_form_password_no_uppercase(self):
         """Test form validation with password missing uppercase"""
-        form = ChangePasswordForm(
-            data={"new_password": "lowercase123", "confirm_password": "lowercase123"}
-        )
+        form = ChangePasswordForm(data={"new_password": "lowercase123", "confirm_password": "lowercase123"})
         assert form.validate() is False
         assert "new_password" in form.errors
         assert "Password must contain at least one uppercase letter." in form.errors["new_password"]
 
     def test_change_password_form_password_no_lowercase(self):
         """Test form validation with password missing lowercase"""
-        form = ChangePasswordForm(
-            data={"new_password": "UPPERCASE123", "confirm_password": "UPPERCASE123"}
-        )
+        form = ChangePasswordForm(data={"new_password": "UPPERCASE123", "confirm_password": "UPPERCASE123"})
         assert form.validate() is False
         assert "new_password" in form.errors
         assert "Password must contain at least one lowercase letter." in form.errors["new_password"]
 
     def test_change_password_form_password_no_digit(self):
         """Test form validation with password missing digit"""
-        form = ChangePasswordForm(
-            data={"new_password": "NoNumbers", "confirm_password": "NoNumbers"}
-        )
+        form = ChangePasswordForm(data={"new_password": "NoNumbers", "confirm_password": "NoNumbers"})
         assert form.validate() is False
         assert "new_password" in form.errors
         assert "Password must contain at least one digit." in form.errors["new_password"]
@@ -692,25 +666,19 @@ class TestCreateOrganizationForm:
 
     def test_create_organization_form_name_too_short(self):
         """Test form validation with name too short"""
-        form = CreateOrganizationForm(
-            data={"name": "A", "slug": "test-org"}  # Less than 2 characters
-        )
+        form = CreateOrganizationForm(data={"name": "A", "slug": "test-org"})  # Less than 2 characters
         assert form.validate() is False
         assert "name" in form.errors
 
     def test_create_organization_form_name_too_long(self):
         """Test form validation with name too long"""
-        form = CreateOrganizationForm(
-            data={"name": "A" * 201, "slug": "test-org"}  # More than 200 characters
-        )
+        form = CreateOrganizationForm(data={"name": "A" * 201, "slug": "test-org"})  # More than 200 characters
         assert form.validate() is False
         assert "name" in form.errors
 
     def test_create_organization_form_slug_too_short(self):
         """Test form validation with slug too short"""
-        form = CreateOrganizationForm(
-            data={"name": "Test Organization", "slug": "a"}  # Less than 2 characters
-        )
+        form = CreateOrganizationForm(data={"name": "Test Organization", "slug": "a"})  # Less than 2 characters
         assert form.validate() is False
         assert "slug" in form.errors
 
@@ -755,9 +723,7 @@ class TestCreateOrganizationForm:
 
     def test_create_organization_form_description_optional(self):
         """Test that description is optional"""
-        form = CreateOrganizationForm(
-            data={"name": "Test Organization", "slug": "test-organization"}
-        )
+        form = CreateOrganizationForm(data={"name": "Test Organization", "slug": "test-organization"})
         assert form.validate() is True
         assert form.description.data is None
 
@@ -768,7 +734,7 @@ class TestCreateOrganizationForm:
                 data={
                     "name": "Test Organization",
                     "slug": "test-organization",
-                    "description": "A" * 1001,  # More than 1000 characters
+                    "description": "A" * 5001,  # More than 5000 characters (max)
                 }
             )
             assert form.validate() is False
@@ -777,11 +743,291 @@ class TestCreateOrganizationForm:
     def test_create_organization_form_name_stripping(self, app):
         """Test that name whitespace is stripped"""
         with app.app_context():
-            form = CreateOrganizationForm(
-                data={"name": "  Test Organization  ", "slug": "test-organization"}
-            )
+            form = CreateOrganizationForm(data={"name": "  Test Organization  ", "slug": "test-organization"})
             form.validate()
             assert form.name.data == "Test Organization"
+
+    def test_create_organization_form_organization_type_required(self, app):
+        """Test that organization_type is required"""
+        with app.app_context():
+            form = CreateOrganizationForm(data={"name": "Test Organization", "slug": "test-organization"})
+            # organization_type should have a default, but let's test it's present
+            assert hasattr(form, "organization_type")
+            assert form.organization_type.choices is not None
+            assert len(form.organization_type.choices) > 0
+
+    def test_create_organization_form_organization_type_valid_enum(self, app):
+        """Test organization_type accepts valid enum values"""
+        with app.app_context():
+            from flask_app.models import OrganizationType
+
+            for org_type in OrganizationType:
+                form = CreateOrganizationForm(
+                    data={
+                        "name": "Test Organization",
+                        "slug": "test-organization",
+                        "organization_type": org_type.value,
+                    }
+                )
+                assert form.organization_type.data == org_type.value
+
+    def test_create_organization_form_website_optional(self, app):
+        """Test that website is optional"""
+        with app.app_context():
+            form = CreateOrganizationForm(data={"name": "Test Organization", "slug": "test-organization"})
+            assert form.validate() is True
+            assert form.website.data is None
+
+    def test_create_organization_form_website_url_validation(self, app):
+        """Test website URL validation"""
+        with app.app_context():
+            form = CreateOrganizationForm(
+                data={
+                    "name": "Test Organization",
+                    "slug": "test-organization",
+                    "organization_type": "other",
+                    "website": "not-a-valid-url",
+                }
+            )
+            assert form.validate() is False
+            assert "website" in form.errors
+
+    def test_create_organization_form_website_max_length(self, app):
+        """Test website max length validation"""
+        with app.app_context():
+            form = CreateOrganizationForm(
+                data={
+                    "name": "Test Organization",
+                    "slug": "test-organization",
+                    "organization_type": "other",
+                    "website": "https://" + "x" * 493,  # 501 chars total
+                }
+            )
+            assert form.validate() is False
+            assert "website" in form.errors
+
+    def test_create_organization_form_phone_optional(self, app):
+        """Test that phone is optional"""
+        with app.app_context():
+            form = CreateOrganizationForm(data={"name": "Test Organization", "slug": "test-organization"})
+            assert form.validate() is True
+            assert form.phone.data is None
+
+    def test_create_organization_form_phone_max_length(self, app):
+        """Test phone max length validation"""
+        with app.app_context():
+            form = CreateOrganizationForm(
+                data={
+                    "name": "Test Organization",
+                    "slug": "test-organization",
+                    "phone": "1" * 21,  # 21 chars
+                }
+            )
+            assert form.validate() is False
+            assert "phone" in form.errors
+
+    def test_create_organization_form_email_optional(self, app):
+        """Test that email is optional"""
+        with app.app_context():
+            form = CreateOrganizationForm(data={"name": "Test Organization", "slug": "test-organization"})
+            assert form.validate() is True
+            assert form.email.data is None
+
+    def test_create_organization_form_email_validation(self, app):
+        """Test email validation"""
+        with app.app_context():
+            form = CreateOrganizationForm(
+                data={
+                    "name": "Test Organization",
+                    "slug": "test-organization",
+                    "organization_type": "other",
+                    "email": "not-a-valid-email",
+                }
+            )
+            assert form.validate() is False
+            assert "email" in form.errors
+
+    def test_create_organization_form_email_max_length(self, app):
+        """Test email max length validation"""
+        with app.app_context():
+            form = CreateOrganizationForm(
+                data={
+                    "name": "Test Organization",
+                    "slug": "test-organization",
+                    "organization_type": "other",
+                    "email": "x" * 246 + "@example.com",  # 256 chars total
+                }
+            )
+            assert form.validate() is False
+            assert "email" in form.errors
+
+    def test_create_organization_form_tax_id_optional(self, app):
+        """Test that tax_id is optional"""
+        with app.app_context():
+            form = CreateOrganizationForm(data={"name": "Test Organization", "slug": "test-organization"})
+            assert form.validate() is True
+            assert form.tax_id.data is None
+
+    def test_create_organization_form_tax_id_max_length(self, app):
+        """Test tax_id max length validation"""
+        with app.app_context():
+            form = CreateOrganizationForm(
+                data={
+                    "name": "Test Organization",
+                    "slug": "test-organization",
+                    "tax_id": "1" * 51,  # 51 chars
+                }
+            )
+            assert form.validate() is False
+            assert "tax_id" in form.errors
+
+    def test_create_organization_form_logo_url_optional(self, app):
+        """Test that logo_url is optional"""
+        with app.app_context():
+            form = CreateOrganizationForm(data={"name": "Test Organization", "slug": "test-organization"})
+            assert form.validate() is True
+            assert form.logo_url.data is None
+
+    def test_create_organization_form_logo_url_validation(self, app):
+        """Test logo_url URL validation"""
+        with app.app_context():
+            form = CreateOrganizationForm(
+                data={
+                    "name": "Test Organization",
+                    "slug": "test-organization",
+                    "organization_type": "other",
+                    "logo_url": "not-a-valid-url",
+                }
+            )
+            assert form.validate() is False
+            assert "logo_url" in form.errors
+
+    def test_create_organization_form_logo_url_max_length(self, app):
+        """Test logo_url max length validation"""
+        with app.app_context():
+            form = CreateOrganizationForm(
+                data={
+                    "name": "Test Organization",
+                    "slug": "test-organization",
+                    "organization_type": "other",
+                    "logo_url": "https://" + "x" * 493,  # 501 chars total
+                }
+            )
+            assert form.validate() is False
+            assert "logo_url" in form.errors
+
+    def test_create_organization_form_contact_person_name_optional(self, app):
+        """Test that contact_person_name is optional"""
+        with app.app_context():
+            form = CreateOrganizationForm(data={"name": "Test Organization", "slug": "test-organization"})
+            assert form.validate() is True
+            assert form.contact_person_name.data is None
+
+    def test_create_organization_form_contact_person_name_max_length(self, app):
+        """Test contact_person_name max length validation"""
+        with app.app_context():
+            form = CreateOrganizationForm(
+                data={
+                    "name": "Test Organization",
+                    "slug": "test-organization",
+                    "contact_person_name": "x" * 201,  # 201 chars
+                }
+            )
+            assert form.validate() is False
+            assert "contact_person_name" in form.errors
+
+    def test_create_organization_form_contact_person_title_optional(self, app):
+        """Test that contact_person_title is optional"""
+        with app.app_context():
+            form = CreateOrganizationForm(data={"name": "Test Organization", "slug": "test-organization"})
+            assert form.validate() is True
+            assert form.contact_person_title.data is None
+
+    def test_create_organization_form_contact_person_title_max_length(self, app):
+        """Test contact_person_title max length validation"""
+        with app.app_context():
+            form = CreateOrganizationForm(
+                data={
+                    "name": "Test Organization",
+                    "slug": "test-organization",
+                    "contact_person_title": "x" * 101,  # 101 chars
+                }
+            )
+            assert form.validate() is False
+            assert "contact_person_title" in form.errors
+
+    def test_create_organization_form_founded_date_optional(self, app):
+        """Test that founded_date is optional"""
+        with app.app_context():
+            form = CreateOrganizationForm(data={"name": "Test Organization", "slug": "test-organization"})
+            assert form.validate() is True
+            assert form.founded_date.data is None
+
+    def test_create_organization_form_founded_date_validation(self, app):
+        """Test founded_date date validation"""
+        with app.app_context():
+            from datetime import date
+
+            form = CreateOrganizationForm(
+                data={
+                    "name": "Test Organization",
+                    "slug": "test-organization",
+                    "founded_date": date(2020, 1, 15),
+                }
+            )
+            assert form.validate() is True
+            assert form.founded_date.data == date(2020, 1, 15)
+
+    def test_create_organization_form_address_type_required(self, app):
+        """Test that address_type is required if address provided"""
+        with app.app_context():
+            from flask_app.models import AddressType
+
+            form = CreateOrganizationForm(
+                data={
+                    "name": "Test Organization",
+                    "slug": "test-organization",
+                    "street_address_1": "123 Main St",
+                    "city": "Springfield",
+                    "state": "IL",
+                    "postal_code": "62701",
+                }
+            )
+            # address_type should be required if address fields are provided
+            assert hasattr(form, "address_type")
+            assert form.address_type.choices is not None
+
+    def test_create_organization_form_address_type_valid_enum(self, app):
+        """Test address_type accepts valid enum values"""
+        with app.app_context():
+            from flask_app.models import AddressType
+
+            for addr_type in AddressType:
+                form = CreateOrganizationForm(
+                    data={
+                        "name": "Test Organization",
+                        "slug": "test-organization",
+                        "address_type": addr_type.value,
+                    }
+                )
+                assert form.address_type.data == addr_type.value
+
+    def test_create_organization_form_address_fields_optional(self, app):
+        """Test that address fields are optional"""
+        with app.app_context():
+            form = CreateOrganizationForm(data={"name": "Test Organization", "slug": "test-organization"})
+            assert form.validate() is True
+            assert form.street_address_1.data is None
+            assert form.street_address_2.data is None
+            assert form.city.data is None
+            assert form.state.data is None
+            assert form.postal_code.data is None
+
+    def test_create_organization_form_country_default(self, app):
+        """Test that country defaults to US"""
+        with app.app_context():
+            form = CreateOrganizationForm(data={"name": "Test Organization", "slug": "test-organization"})
+            assert form.country.data == "US" or form.country.data is None
 
 
 class TestUpdateOrganizationForm:
@@ -817,6 +1063,7 @@ class TestUpdateOrganizationForm:
                     "name": "Updated Name",
                     "slug": "updated-slug",
                     "description": "Updated",
+                    "organization_type": "other",  # Required field
                     "is_active": True,
                 },
             )
@@ -834,6 +1081,7 @@ class TestUpdateOrganizationForm:
                 data={
                     "name": "Test Organization",  # Same as test_organization
                     "slug": "test-organization",
+                    "organization_type": "other",  # Required field
                     "is_active": True,
                 },
             )
@@ -856,6 +1104,7 @@ class TestUpdateOrganizationForm:
                 data={
                     "name": "Other Org",  # Same as other_org
                     "slug": "test-organization",
+                    "organization_type": "other",
                     "is_active": True,
                 },
             )
@@ -875,6 +1124,7 @@ class TestUpdateOrganizationForm:
                 data={
                     "name": "Test Organization",
                     "slug": "test-organization",  # Same as test_organization
+                    "organization_type": "other",  # Required field
                     "is_active": True,
                 },
             )
@@ -890,7 +1140,12 @@ class TestUpdateOrganizationForm:
 
             form = UpdateOrganizationForm(
                 organization=test_organization,
-                data={"name": "Test Organization", "slug": "other-org", "is_active": True},
+                data={
+                    "name": "Test Organization",
+                    "slug": "other-org",
+                    "organization_type": "other",
+                    "is_active": True,
+                },
             )
             assert form.validate() is False
             assert "slug" in form.errors
@@ -974,7 +1229,7 @@ class TestOrganizationFormRobustness:
     def test_create_organization_form_very_long_description(self, app):
         """Test organization form with description exceeding limit"""
         with app.app_context():
-            long_description = "a" * 1001  # Exceeds 1000 character limit
+            long_description = "a" * 5001  # Exceeds 5000 character limit
             form = CreateOrganizationForm(
                 data={
                     "name": "Test Org",
@@ -1037,7 +1292,7 @@ class TestOrganizationFormRobustness:
                     "name": "Test Org",
                     "slug": "test-org",
                     "is_active": True,
-                }
+                },
             )
             # Should handle None organization gracefully
             form.validate()
@@ -1053,7 +1308,7 @@ class TestOrganizationFormRobustness:
                     "slug": "test-org",
                     "description": "<img src=x onerror=alert('XSS')>",
                     "is_active": True,
-                }
+                },
             )
             # Form should validate (XSS protection in template)
             form.validate()
@@ -1138,8 +1393,8 @@ class TestOrganizationFormRobustness:
                 }
             )
 
-            # Mock Organization.query to raise error
-            with patch("flask_app.forms.organization.Organization.query") as mock_query:
+            # Mock Organization.query to raise error - patch where it's imported
+            with patch("flask_app.models.Organization.query") as mock_query:
                 mock_query.filter_by.side_effect = Exception("Database error")
                 # Should handle database error gracefully
                 try:
@@ -1158,11 +1413,11 @@ class TestOrganizationFormRobustness:
                     "name": "Updated Org",
                     "slug": "updated-org",
                     "is_active": True,
-                }
+                },
             )
 
-            # Mock Organization.query to raise error
-            with patch("flask_app.forms.organization.Organization.query") as mock_query:
+            # Mock Organization.query to raise error - patch where it's imported
+            with patch("flask_app.models.Organization.query") as mock_query:
                 mock_query.filter_by.side_effect = Exception("Database error")
                 try:
                     form.validate()

@@ -209,9 +209,7 @@ class TestContactModel:
     def test_get_display_name_with_preferred(self, app):
         """Test get_display_name returns preferred_name when available"""
         with app.app_context():
-            contact = Contact(
-                first_name="John", last_name="Doe", preferred_name="Johnny"
-            )
+            contact = Contact(first_name="John", last_name="Doe", preferred_name="Johnny")
             assert contact.get_display_name() == "Johnny"
 
     def test_get_display_name_without_preferred(self, app):
@@ -309,9 +307,7 @@ class TestContactModel:
     def test_can_contact_do_not_contact(self, app):
         """Test can_contact when do_not_contact is True"""
         with app.app_context():
-            contact = Contact(
-                first_name="Test", last_name="Contact", do_not_contact=True
-            )
+            contact = Contact(first_name="Test", last_name="Contact", do_not_contact=True)
             assert contact.can_contact() is False
             assert contact.can_contact("call") is False
             assert contact.can_contact("email") is False
@@ -319,9 +315,7 @@ class TestContactModel:
     def test_can_contact_do_not_call(self, app):
         """Test can_contact when do_not_call is True"""
         with app.app_context():
-            contact = Contact(
-                first_name="Test", last_name="Contact", do_not_call=True
-            )
+            contact = Contact(first_name="Test", last_name="Contact", do_not_call=True)
             assert contact.can_contact() is True
             assert contact.can_contact("call") is False
             assert contact.can_contact("email") is True
@@ -329,9 +323,7 @@ class TestContactModel:
     def test_can_contact_do_not_email(self, app):
         """Test can_contact when do_not_email is True"""
         with app.app_context():
-            contact = Contact(
-                first_name="Test", last_name="Contact", do_not_email=True
-            )
+            contact = Contact(first_name="Test", last_name="Contact", do_not_email=True)
             assert contact.can_contact() is True
             assert contact.can_contact("call") is True
             assert contact.can_contact("email") is False
@@ -881,9 +873,7 @@ class TestVolunteerEnhanced:
     def test_volunteer_add_skill(self, test_volunteer, app):
         """Test add_skill helper method"""
         with app.app_context():
-            skill, error = test_volunteer.add_skill(
-                "JavaScript", "Technical", "Intermediate", verified=False
-            )
+            skill, error = test_volunteer.add_skill("JavaScript", "Technical", "Intermediate", verified=False)
             assert skill is not None
             assert error is None
             assert skill.skill_name == "JavaScript"
@@ -952,9 +942,7 @@ class TestVolunteerEnhanced:
         with app.app_context():
             from datetime import time
 
-            avail, error = test_volunteer.add_availability(
-                1, time(10, 0), time(14, 0), is_recurring=True
-            )
+            avail, error = test_volunteer.add_availability(1, time(10, 0), time(14, 0), is_recurring=True)
             assert avail is not None
             assert error is None
             assert avail.day_of_week == 1
@@ -1035,9 +1023,7 @@ class TestVolunteerEnhanced:
             hours = test_volunteer.get_hours_by_date_range(date(2024, 1, 1), date(2024, 1, 31))
             assert len(hours) == 2
 
-    def test_volunteer_get_hours_by_organization(
-        self, test_volunteer, test_organization, app
-    ):
+    def test_volunteer_get_hours_by_organization(self, test_volunteer, test_organization, app):
         """Test get_hours_by_organization helper method"""
         with app.app_context():
             from datetime import date
@@ -1057,15 +1043,11 @@ class TestVolunteerEnhanced:
     def test_volunteer_skill_unique_constraint(self, test_volunteer, app):
         """Test that skill must be unique per volunteer"""
         with app.app_context():
-            skill1 = VolunteerSkill(
-                volunteer_id=test_volunteer.id, skill_name="Python", skill_category="Technical"
-            )
+            skill1 = VolunteerSkill(volunteer_id=test_volunteer.id, skill_name="Python", skill_category="Technical")
             db.session.add(skill1)
             db.session.commit()
 
-            skill2 = VolunteerSkill(
-                volunteer_id=test_volunteer.id, skill_name="Python", skill_category="Language"
-            )
+            skill2 = VolunteerSkill(volunteer_id=test_volunteer.id, skill_name="Python", skill_category="Language")
             db.session.add(skill2)
             with pytest.raises(IntegrityError):
                 db.session.commit()
@@ -1073,15 +1055,11 @@ class TestVolunteerEnhanced:
     def test_volunteer_interest_unique_constraint(self, test_volunteer, app):
         """Test that interest must be unique per volunteer"""
         with app.app_context():
-            interest1 = VolunteerInterest(
-                volunteer_id=test_volunteer.id, interest_name="Education"
-            )
+            interest1 = VolunteerInterest(volunteer_id=test_volunteer.id, interest_name="Education")
             db.session.add(interest1)
             db.session.commit()
 
-            interest2 = VolunteerInterest(
-                volunteer_id=test_volunteer.id, interest_name="Education"
-            )
+            interest2 = VolunteerInterest(volunteer_id=test_volunteer.id, interest_name="Education")
             db.session.add(interest2)
             with pytest.raises(IntegrityError):
                 db.session.commit()
@@ -1116,6 +1094,307 @@ class TestVolunteerEnhanced:
             with pytest.raises(Exception):  # Should raise constraint error
                 db.session.commit()
 
+    def test_volunteer_get_organizations_current(self, test_volunteer, test_organization, app):
+        """Test get_organizations returns only organizations with end_date=None"""
+        with app.app_context():
+            # Create another organization
+            org2 = Organization(name="Org 2", slug="org-2")
+            db.session.add(org2)
+            db.session.commit()
+
+            # Create current relationship
+            link1 = ContactOrganization(
+                contact_id=test_volunteer.id,
+                organization_id=test_organization.id,
+                end_date=None,  # Current
+            )
+            db.session.add(link1)
+
+            # Create past relationship
+            link2 = ContactOrganization(
+                contact_id=test_volunteer.id,
+                organization_id=org2.id,
+                end_date=date.today(),  # Past
+            )
+            db.session.add(link2)
+            db.session.commit()
+
+            current_orgs = test_volunteer.get_organizations(status="current")
+            assert len(current_orgs) == 1
+            assert current_orgs[0].organization_id == test_organization.id
+            assert current_orgs[0].is_current() is True
+
+    def test_volunteer_get_organizations_past(self, test_volunteer, test_organization, app):
+        """Test get_organizations returns only organizations with end_date set"""
+        with app.app_context():
+            # Create another organization
+            org2 = Organization(name="Org 2", slug="org-2")
+            db.session.add(org2)
+            db.session.commit()
+
+            # Create current relationship
+            link1 = ContactOrganization(
+                contact_id=test_volunteer.id,
+                organization_id=test_organization.id,
+                end_date=None,  # Current
+            )
+            db.session.add(link1)
+
+            # Create past relationship
+            link2 = ContactOrganization(
+                contact_id=test_volunteer.id,
+                organization_id=org2.id,
+                end_date=date(2023, 12, 31),  # Past
+            )
+            db.session.add(link2)
+            db.session.commit()
+
+            past_orgs = test_volunteer.get_organizations(status="past")
+            assert len(past_orgs) == 1
+            assert past_orgs[0].organization_id == org2.id
+            assert past_orgs[0].is_current() is False
+
+    def test_volunteer_get_organizations_all(self, test_volunteer, test_organization, app):
+        """Test get_organizations returns all organizations regardless of end_date"""
+        with app.app_context():
+            # Create another organization
+            org2 = Organization(name="Org 2", slug="org-2")
+            db.session.add(org2)
+            db.session.commit()
+
+            # Create current relationship
+            link1 = ContactOrganization(
+                contact_id=test_volunteer.id,
+                organization_id=test_organization.id,
+                end_date=None,  # Current
+            )
+            db.session.add(link1)
+
+            # Create past relationship
+            link2 = ContactOrganization(
+                contact_id=test_volunteer.id,
+                organization_id=org2.id,
+                end_date=date(2023, 12, 31),  # Past
+            )
+            db.session.add(link2)
+            db.session.commit()
+
+            all_orgs = test_volunteer.get_organizations(status="all")
+            assert len(all_orgs) == 2
+
+    def test_volunteer_get_organizations_no_current(self, test_volunteer, test_organization, app):
+        """Test get_organizations returns empty list when no current organizations"""
+        with app.app_context():
+            # Create only past relationship
+            link = ContactOrganization(
+                contact_id=test_volunteer.id,
+                organization_id=test_organization.id,
+                end_date=date(2023, 12, 31),  # Past
+            )
+            db.session.add(link)
+            db.session.commit()
+
+            current_orgs = test_volunteer.get_organizations(status="current")
+            assert current_orgs == []
+
+    def test_volunteer_get_organizations_no_past(self, test_volunteer, test_organization, app):
+        """Test get_organizations returns empty list when no past organizations"""
+        with app.app_context():
+            # Create only current relationship
+            link = ContactOrganization(
+                contact_id=test_volunteer.id,
+                organization_id=test_organization.id,
+                end_date=None,  # Current
+            )
+            db.session.add(link)
+            db.session.commit()
+
+            past_orgs = test_volunteer.get_organizations(status="past")
+            assert past_orgs == []
+
+    def test_volunteer_get_current_organizations(self, test_volunteer, test_organization, app):
+        """Test get_current_organizations shortcut method"""
+        with app.app_context():
+            # Create another organization
+            org2 = Organization(name="Org 2", slug="org-2")
+            db.session.add(org2)
+            db.session.commit()
+
+            # Create current relationship
+            link1 = ContactOrganization(
+                contact_id=test_volunteer.id,
+                organization_id=test_organization.id,
+                end_date=None,  # Current
+            )
+            db.session.add(link1)
+
+            # Create past relationship
+            link2 = ContactOrganization(
+                contact_id=test_volunteer.id,
+                organization_id=org2.id,
+                end_date=date.today(),  # Past
+            )
+            db.session.add(link2)
+            db.session.commit()
+
+            current_orgs = test_volunteer.get_current_organizations()
+            assert len(current_orgs) == 1
+            assert current_orgs[0].organization_id == test_organization.id
+
+            # Should be same as get_organizations(status='current')
+            current_orgs_via_method = test_volunteer.get_organizations(status="current")
+            assert len(current_orgs) == len(current_orgs_via_method)
+            assert current_orgs[0].id == current_orgs_via_method[0].id
+
+    def test_volunteer_get_total_hours_by_organization(self, test_volunteer, test_organization, app):
+        """Test get_total_hours_by_organization sums hours correctly for specific organization"""
+        with app.app_context():
+            # Create another organization
+            org2 = Organization(name="Org 2", slug="org-2")
+            db.session.add(org2)
+            db.session.commit()
+
+            # Add hours for first organization
+            hours1 = VolunteerHours(
+                volunteer_id=test_volunteer.id,
+                organization_id=test_organization.id,
+                volunteer_date=date(2024, 1, 1),
+                hours_worked=5.5,
+            )
+            db.session.add(hours1)
+
+            hours2 = VolunteerHours(
+                volunteer_id=test_volunteer.id,
+                organization_id=test_organization.id,
+                volunteer_date=date(2024, 1, 2),
+                hours_worked=3.25,
+            )
+            db.session.add(hours2)
+
+            # Add hours for second organization
+            hours3 = VolunteerHours(
+                volunteer_id=test_volunteer.id,
+                organization_id=org2.id,
+                volunteer_date=date(2024, 1, 3),
+                hours_worked=2.0,
+            )
+            db.session.add(hours3)
+            db.session.commit()
+
+            total = test_volunteer.get_total_hours_by_organization(test_organization.id)
+            assert total == 8.75
+
+            total2 = test_volunteer.get_total_hours_by_organization(org2.id)
+            assert total2 == 2.0
+
+    def test_volunteer_get_total_hours_by_organization_none(self, test_volunteer, test_organization, app):
+        """Test get_total_hours_by_organization returns 0.0 when no hours for organization"""
+        with app.app_context():
+            total = test_volunteer.get_total_hours_by_organization(test_organization.id)
+            assert total == 0.0
+
+    def test_volunteer_get_total_hours_by_organization_nonexistent(self, test_volunteer, app):
+        """Test get_total_hours_by_organization returns 0.0 when organization_id doesn't exist"""
+        with app.app_context():
+            total = test_volunteer.get_total_hours_by_organization(99999)
+            assert total == 0.0
+
+    def test_volunteer_get_total_hours_by_organization_multiple_records(self, test_volunteer, test_organization, app):
+        """Test get_total_hours_by_organization handles multiple volunteer hours records"""
+        with app.app_context():
+            # Add multiple hours records
+            for i in range(5):
+                hours = VolunteerHours(
+                    volunteer_id=test_volunteer.id,
+                    organization_id=test_organization.id,
+                    volunteer_date=date(2024, 1, i + 1),
+                    hours_worked=float(i + 1),
+                )
+                db.session.add(hours)
+            db.session.commit()
+
+            total = test_volunteer.get_total_hours_by_organization(test_organization.id)
+            assert total == 15.0  # 1 + 2 + 3 + 4 + 5
+
+    def test_volunteer_no_organization_relationships(self, test_volunteer, app):
+        """Test volunteer with no organization relationships"""
+        with app.app_context():
+            current_orgs = test_volunteer.get_organizations(status="current")
+            assert current_orgs == []
+
+            past_orgs = test_volunteer.get_organizations(status="past")
+            assert past_orgs == []
+
+            all_orgs = test_volunteer.get_organizations(status="all")
+            assert all_orgs == []
+
+    def test_volunteer_both_current_and_past_organizations(self, test_volunteer, test_organization, app):
+        """Test volunteer with both current and past organizations"""
+        with app.app_context():
+            # Create another organization
+            org2 = Organization(name="Org 2", slug="org-2")
+            db.session.add(org2)
+            db.session.commit()
+
+            # Create current relationship
+            link1 = ContactOrganization(
+                contact_id=test_volunteer.id,
+                organization_id=test_organization.id,
+                end_date=None,  # Current
+            )
+            db.session.add(link1)
+
+            # Create past relationship
+            link2 = ContactOrganization(
+                contact_id=test_volunteer.id,
+                organization_id=org2.id,
+                end_date=date(2023, 12, 31),  # Past
+            )
+            db.session.add(link2)
+            db.session.commit()
+
+            current_orgs = test_volunteer.get_organizations(status="current")
+            assert len(current_orgs) == 1
+
+            past_orgs = test_volunteer.get_organizations(status="past")
+            assert len(past_orgs) == 1
+
+            all_orgs = test_volunteer.get_organizations(status="all")
+            assert len(all_orgs) == 2
+
+    def test_volunteer_hours_in_multiple_organizations(self, test_volunteer, test_organization, app):
+        """Test volunteer with hours in multiple organizations"""
+        with app.app_context():
+            # Create another organization
+            org2 = Organization(name="Org 2", slug="org-2")
+            db.session.add(org2)
+            db.session.commit()
+
+            # Add hours for first organization
+            hours1 = VolunteerHours(
+                volunteer_id=test_volunteer.id,
+                organization_id=test_organization.id,
+                volunteer_date=date(2024, 1, 1),
+                hours_worked=10.0,
+            )
+            db.session.add(hours1)
+
+            # Add hours for second organization
+            hours2 = VolunteerHours(
+                volunteer_id=test_volunteer.id,
+                organization_id=org2.id,
+                volunteer_date=date(2024, 1, 2),
+                hours_worked=5.0,
+            )
+            db.session.add(hours2)
+            db.session.commit()
+
+            total1 = test_volunteer.get_total_hours_by_organization(test_organization.id)
+            assert total1 == 10.0
+
+            total2 = test_volunteer.get_total_hours_by_organization(org2.id)
+            assert total2 == 5.0
+
 
 class TestContactOrganization:
     """Test ContactOrganization junction table"""
@@ -1136,9 +1415,7 @@ class TestContactOrganization:
             assert link.organization_id == test_organization.id
             assert link.is_primary is True
 
-    def test_contact_organization_unique_constraint(
-        self, test_contact, test_organization, app
-    ):
+    def test_contact_organization_unique_constraint(self, test_contact, test_organization, app):
         """Test unique constraint on contact-organization"""
         with app.app_context():
             link1 = ContactOrganization(
@@ -1155,6 +1432,169 @@ class TestContactOrganization:
             db.session.add(link2)
             with pytest.raises(IntegrityError):
                 db.session.commit()
+
+    def test_contact_organization_is_current_true(self, test_contact, test_organization, app):
+        """Test is_current returns True when end_date is None"""
+        with app.app_context():
+            link = ContactOrganization(
+                contact_id=test_contact.id,
+                organization_id=test_organization.id,
+                end_date=None,  # Current relationship
+            )
+            db.session.add(link)
+            db.session.commit()
+
+            assert link.is_current() is True
+
+    def test_contact_organization_is_current_false(self, test_contact, test_organization, app):
+        """Test is_current returns False when end_date is set"""
+        with app.app_context():
+            link = ContactOrganization(
+                contact_id=test_contact.id,
+                organization_id=test_organization.id,
+                end_date=date.today(),  # Past relationship
+            )
+            db.session.add(link)
+            db.session.commit()
+
+            assert link.is_current() is False
+
+    def test_contact_organization_is_current_past_date(self, test_contact, test_organization, app):
+        """Test is_current returns False when end_date is in the past"""
+        with app.app_context():
+            past_date = date(2020, 1, 1)
+            link = ContactOrganization(
+                contact_id=test_contact.id,
+                organization_id=test_organization.id,
+                end_date=past_date,  # Past relationship
+            )
+            db.session.add(link)
+            db.session.commit()
+
+            assert link.is_current() is False
+
+    def test_contact_organization_get_status_current(self, test_contact, test_organization, app):
+        """Test get_status returns CURRENT when end_date is None"""
+        with app.app_context():
+            from flask_app.models import VolunteerOrganizationStatus
+
+            link = ContactOrganization(
+                contact_id=test_contact.id,
+                organization_id=test_organization.id,
+                end_date=None,  # Current relationship
+            )
+            db.session.add(link)
+            db.session.commit()
+
+            assert link.get_status() == VolunteerOrganizationStatus.CURRENT
+
+    def test_contact_organization_get_status_past(self, test_contact, test_organization, app):
+        """Test get_status returns PAST when end_date is set"""
+        with app.app_context():
+            from flask_app.models import VolunteerOrganizationStatus
+
+            link = ContactOrganization(
+                contact_id=test_contact.id,
+                organization_id=test_organization.id,
+                end_date=date.today(),  # Past relationship
+            )
+            db.session.add(link)
+            db.session.commit()
+
+            assert link.get_status() == VolunteerOrganizationStatus.PAST
+
+    def test_contact_organization_deactivate_sets_today(self, test_contact, test_organization, app):
+        """Test deactivate sets end_date to today() when None provided"""
+        with app.app_context():
+            link = ContactOrganization(
+                contact_id=test_contact.id,
+                organization_id=test_organization.id,
+                end_date=None,  # Current relationship
+            )
+            db.session.add(link)
+            db.session.commit()
+
+            result = link.deactivate()
+            assert result is True
+            assert link.end_date == date.today()
+
+    def test_contact_organization_deactivate_sets_provided_date(self, test_contact, test_organization, app):
+        """Test deactivate sets end_date to provided date"""
+        with app.app_context():
+            link = ContactOrganization(
+                contact_id=test_contact.id,
+                organization_id=test_organization.id,
+                end_date=None,  # Current relationship
+            )
+            db.session.add(link)
+            db.session.commit()
+
+            deactivate_date = date(2023, 12, 31)
+            result = link.deactivate(end_date=deactivate_date)
+            assert result is True
+            assert link.end_date == deactivate_date
+
+    def test_contact_organization_deactivate_commits(self, test_contact, test_organization, app):
+        """Test deactivate commits changes successfully"""
+        with app.app_context():
+            link = ContactOrganization(
+                contact_id=test_contact.id,
+                organization_id=test_organization.id,
+                end_date=None,  # Current relationship
+            )
+            db.session.add(link)
+            db.session.commit()
+
+            link_id = link.id
+            result = link.deactivate()
+            assert result is True
+
+            # Verify changes persisted
+            db.session.refresh(link)
+            assert link.end_date is not None
+
+    def test_contact_organization_deactivate_error_handling(self, test_contact, test_organization, app):
+        """Test deactivate error handling (database error, rollback)"""
+        with app.app_context():
+            link = ContactOrganization(
+                contact_id=test_contact.id,
+                organization_id=test_organization.id,
+                end_date=None,  # Current relationship
+            )
+            db.session.add(link)
+            db.session.commit()
+
+            with patch("flask_app.models.db.session.commit", side_effect=SQLAlchemyError("Database error")):
+                result = link.deactivate()
+                assert result is False
+
+    def test_contact_organization_repr_current(self, test_contact, test_organization, app):
+        """Test __repr__ shows 'current' status when end_date is None"""
+        with app.app_context():
+            link = ContactOrganization(
+                contact_id=test_contact.id,
+                organization_id=test_organization.id,
+                end_date=None,  # Current relationship
+            )
+            db.session.add(link)
+            db.session.commit()
+
+            repr_str = repr(link)
+            assert "current" in repr_str.lower()
+
+    def test_contact_organization_repr_past(self, test_contact, test_organization, app):
+        """Test __repr__ shows 'past' status when end_date is set"""
+        with app.app_context():
+            link = ContactOrganization(
+                contact_id=test_contact.id,
+                organization_id=test_organization.id,
+                end_date=date.today(),  # Past relationship
+            )
+            db.session.add(link)
+            db.session.commit()
+
+            repr_str = repr(link)
+            assert "past" in repr_str.lower()
 
 
 class TestContactTag:
@@ -1449,9 +1889,7 @@ class TestContactEdgeCases:
             from datetime import time
 
             test_date = date(2024, 6, 10)  # Monday
-            test_volunteer.add_availability(
-                0, time(9, 0), time(17, 0), is_recurring=True, start_date=test_date
-            )
+            test_volunteer.add_availability(0, time(9, 0), time(17, 0), is_recurring=True, start_date=test_date)
 
             assert test_volunteer.is_available_on_day(0, date=test_date) is True
             assert test_volunteer.is_available_on_day(1, date=test_date) is False
@@ -1484,9 +1922,7 @@ class TestContactEdgeCases:
             # Mock database error
             with patch("flask_app.models.contact.volunteer.db.session.commit") as mock_commit:
                 mock_commit.side_effect = SQLAlchemyError("Database error")
-                avail, error = test_volunteer.add_availability(
-                    0, time(9, 0), time(17, 0), is_recurring=True
-                )
+                avail, error = test_volunteer.add_availability(0, time(9, 0), time(17, 0), is_recurring=True)
                 assert avail is None
                 assert error is not None
 
@@ -1624,4 +2060,3 @@ class TestContactEdgeCases:
             # Refresh and check
             db.session.refresh(address2)
             assert address2.is_primary is False
-

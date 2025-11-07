@@ -3,9 +3,11 @@
 Forms for organization management
 """
 
+import re
+
 from flask_wtf import FlaskForm
 from wtforms import BooleanField, DateField, SelectField, StringField, SubmitField, TextAreaField
-from wtforms.validators import URL, DataRequired, Email, Length, Optional
+from wtforms.validators import DataRequired, Length, Optional, ValidationError
 
 
 def format_enum_display(enum_value):
@@ -49,11 +51,7 @@ class CreateOrganizationForm(FlaskForm):
     # Contact information
     website = StringField(
         "Website",
-        validators=[
-            Optional(),
-            URL(message="Please enter a valid URL."),
-            Length(max=500, message="Website URL must be less than 500 characters."),
-        ],
+        validators=[],  # Validation handled in validate_website()
         render_kw={"placeholder": "https://example.com"},
     )
     phone = StringField(
@@ -63,11 +61,7 @@ class CreateOrganizationForm(FlaskForm):
     )
     email = StringField(
         "Email",
-        validators=[
-            Optional(),
-            Email(message="Invalid email address."),
-            Length(max=255, message="Email must be less than 255 characters."),
-        ],
+        validators=[],  # Validation handled in validate_email()
         render_kw={"placeholder": "Enter email address"},
     )
 
@@ -81,11 +75,7 @@ class CreateOrganizationForm(FlaskForm):
     # Visual/branding
     logo_url = StringField(
         "Logo URL",
-        validators=[
-            Optional(),
-            URL(message="Please enter a valid URL."),
-            Length(max=500, message="Logo URL must be less than 500 characters."),
-        ],
+        validators=[],  # Validation handled in validate_logo_url()
         render_kw={"placeholder": "https://example.com/logo.png"},
     )
 
@@ -179,6 +169,98 @@ class CreateOrganizationForm(FlaskForm):
             (addr_type.value, format_enum_display(addr_type.value)) for addr_type in AddressType
         ]
 
+    def validate_name(self, field):
+        """Custom validation for organization name"""
+        if field.data:
+            # Strip whitespace
+            field.data = field.data.strip()
+
+            # Check minimum length
+            if len(field.data) < 2:
+                raise ValidationError("Organization name must be at least 2 characters long.")
+
+            # Check for duplicate names
+            from flask_app.models import Organization
+
+            existing = Organization.query.filter_by(name=field.data).first()
+            if existing:
+                raise ValidationError("An organization with this name already exists.")
+
+    def validate_slug(self, field):
+        """Custom validation for slug"""
+        if field.data:
+            # Strip whitespace
+            field.data = field.data.strip()
+
+            # Check minimum length
+            if len(field.data) < 2:
+                raise ValidationError("Slug must be at least 2 characters long.")
+
+            # Check format (lowercase alphanumeric with hyphens)
+            if not re.match(r"^[a-z0-9-]+$", field.data):
+                raise ValidationError("Slug must contain only lowercase letters, numbers, and hyphens.")
+
+            # Check for duplicate slugs
+            from flask_app.models import Organization
+
+            existing = Organization.query.filter_by(slug=field.data).first()
+            if existing:
+                raise ValidationError("An organization with this slug already exists.")
+
+    def validate_website(self, field):
+        """Custom validation for website URL"""
+        # Custom validators are always called if field has data
+        # Optional() only stops validation if field is empty/None
+        if field.data:
+            field.data = field.data.strip()
+            if not field.data:  # If empty after strip, skip validation
+                return
+            # Check max length (500 characters)
+            if len(field.data) > 500:
+                raise ValidationError("Website URL must be less than 500 characters.")
+            # Validate URL format
+            from urllib.parse import urlparse
+
+            result = urlparse(field.data)
+            if not all([result.scheme, result.netloc]):
+                raise ValidationError("Please enter a valid URL.")
+
+    def validate_logo_url(self, field):
+        """Custom validation for logo URL"""
+        # Custom validators are always called if field has data
+        # Optional() only stops validation if field is empty/None
+        if field.data:
+            field.data = field.data.strip()
+            if not field.data:  # If empty after strip, skip validation
+                return
+            # Check max length (500 characters)
+            if len(field.data) > 500:
+                raise ValidationError("Logo URL must be less than 500 characters.")
+            # Validate URL format
+            from urllib.parse import urlparse
+
+            result = urlparse(field.data)
+            if not all([result.scheme, result.netloc]):
+                raise ValidationError("Please enter a valid URL.")
+
+    def validate_email(self, field):
+        """Custom validation for email"""
+        # Custom validators are always called if field has data
+        # Optional() only stops validation if field is empty/None
+        if field.data:
+            field.data = field.data.strip()
+            if not field.data:  # If empty after strip, skip validation
+                return
+            # Check max length (255 characters)
+            if len(field.data) > 255:
+                raise ValidationError("Email must be less than 255 characters.")
+            # Email format validation - check basic email format
+            import re
+
+            email_pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
+            if not re.match(email_pattern, field.data):
+                raise ValidationError("Invalid email address.")
+
 
 class UpdateOrganizationForm(FlaskForm):
     """Form for updating existing organizations"""
@@ -188,7 +270,7 @@ class UpdateOrganizationForm(FlaskForm):
         "Organization Name",
         validators=[
             DataRequired(message="Organization name is required."),
-            Length(max=200, message="Organization name must be less than 200 characters."),
+            Length(min=2, max=200, message="Organization name must be between 2 and 200 characters."),
         ],
         render_kw={"placeholder": "Enter organization name"},
     )
@@ -196,7 +278,7 @@ class UpdateOrganizationForm(FlaskForm):
         "Slug",
         validators=[
             DataRequired(message="Slug is required."),
-            Length(max=100, message="Slug must be less than 100 characters."),
+            Length(min=2, max=100, message="Slug must be between 2 and 100 characters."),
         ],
         render_kw={"placeholder": "organization-slug"},
     )
@@ -215,11 +297,7 @@ class UpdateOrganizationForm(FlaskForm):
     # Contact information
     website = StringField(
         "Website",
-        validators=[
-            Optional(),
-            URL(message="Please enter a valid URL."),
-            Length(max=500, message="Website URL must be less than 500 characters."),
-        ],
+        validators=[],  # Validation handled in validate_website()
         render_kw={"placeholder": "https://example.com"},
     )
     phone = StringField(
@@ -229,11 +307,7 @@ class UpdateOrganizationForm(FlaskForm):
     )
     email = StringField(
         "Email",
-        validators=[
-            Optional(),
-            Email(message="Invalid email address."),
-            Length(max=255, message="Email must be less than 255 characters."),
-        ],
+        validators=[],  # Validation handled in validate_email()
         render_kw={"placeholder": "Enter email address"},
     )
 
@@ -247,11 +321,7 @@ class UpdateOrganizationForm(FlaskForm):
     # Visual/branding
     logo_url = StringField(
         "Logo URL",
-        validators=[
-            Optional(),
-            URL(message="Please enter a valid URL."),
-            Length(max=500, message="Logo URL must be less than 500 characters."),
-        ],
+        validators=[],  # Validation handled in validate_logo_url()
         render_kw={"placeholder": "https://example.com/logo.png"},
     )
 
@@ -330,6 +400,8 @@ class UpdateOrganizationForm(FlaskForm):
     submit = SubmitField("Save Changes")
 
     def __init__(self, *args, **kwargs):
+        # Extract organization from kwargs before calling super
+        self.organization = kwargs.pop("organization", None)
         super(UpdateOrganizationForm, self).__init__(*args, **kwargs)
         # Import here to avoid circular imports
         from flask_app.models import AddressType, OrganizationType
@@ -343,3 +415,112 @@ class UpdateOrganizationForm(FlaskForm):
         self.address_type.choices = [
             (addr_type.value, format_enum_display(addr_type.value)) for addr_type in AddressType
         ]
+
+    def validate_name(self, field):
+        """Custom validation for organization name"""
+        if field.data:
+            # Strip whitespace
+            field.data = field.data.strip()
+
+            # Check minimum length
+            if len(field.data) < 2:
+                raise ValidationError("Organization name must be at least 2 characters long.")
+
+            # Check for duplicate names (excluding current organization)
+            try:
+                from flask_app.models import Organization
+
+                existing = Organization.query.filter_by(name=field.data).first()
+                if existing and (not self.organization or existing.id != self.organization.id):
+                    raise ValidationError("An organization with this name already exists.")
+            except ValidationError:
+                # Re-raise ValidationError so it's properly caught by form validation
+                raise
+            except Exception:
+                # If database query fails, let it pass (will be caught by route handler)
+                pass
+
+    def validate_slug(self, field):
+        """Custom validation for slug"""
+        if field.data:
+            # Strip whitespace
+            field.data = field.data.strip()
+
+            # Check minimum length
+            if len(field.data) < 2:
+                raise ValidationError("Slug must be at least 2 characters long.")
+
+            # Check format (lowercase alphanumeric with hyphens)
+            if not re.match(r"^[a-z0-9-]+$", field.data):
+                raise ValidationError("Slug must contain only lowercase letters, numbers, and hyphens.")
+
+            # Check for duplicate slugs (excluding current organization)
+            try:
+                from flask_app.models import Organization
+
+                existing = Organization.query.filter_by(slug=field.data).first()
+                if existing and (not self.organization or existing.id != self.organization.id):
+                    raise ValidationError("An organization with this slug already exists.")
+            except ValidationError:
+                # Re-raise ValidationError so it's properly caught by form validation
+                raise
+            except Exception:
+                # If database query fails, let it pass (will be caught by route handler)
+                pass
+
+    def validate_website(self, field):
+        """Custom validation for website URL"""
+        if field.data:
+            field.data = field.data.strip()
+            if not field.data:  # If empty after strip, skip validation
+                return
+            # Check max length (500 characters)
+            if len(field.data) > 500:
+                raise ValidationError("Website URL must be less than 500 characters.")
+            # Validate URL format
+            try:
+                from urllib.parse import urlparse
+
+                result = urlparse(field.data)
+                if not all([result.scheme, result.netloc]):
+                    raise ValidationError("Please enter a valid URL.")
+            except ValidationError:
+                raise
+            except Exception:
+                raise ValidationError("Please enter a valid URL.")
+
+    def validate_logo_url(self, field):
+        """Custom validation for logo URL"""
+        # Custom validators are always called if field has data
+        # Optional() only stops validation if field is empty/None
+        if field.data:
+            field.data = field.data.strip()
+            if not field.data:  # If empty after strip, skip validation
+                return
+            # Check max length (500 characters)
+            if len(field.data) > 500:
+                raise ValidationError("Logo URL must be less than 500 characters.")
+            # Validate URL format
+            from urllib.parse import urlparse
+
+            result = urlparse(field.data)
+            if not all([result.scheme, result.netloc]):
+                raise ValidationError("Please enter a valid URL.")
+
+    def validate_email(self, field):
+        """Custom validation for email"""
+        # Custom validators are always called if field has data
+        # Optional() only stops validation if field is empty/None
+        if field.data:
+            field.data = field.data.strip()
+            if not field.data:  # If empty after strip, skip validation
+                return
+            # Check max length (255 characters)
+            if len(field.data) > 255:
+                raise ValidationError("Email must be less than 255 characters.")
+            # Email format validation - check basic email format
+            import re
+
+            email_pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
+            if not re.match(email_pattern, field.data):
+                raise ValidationError("Invalid email address.")
