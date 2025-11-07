@@ -38,6 +38,17 @@ from .contact import (
     VolunteerSkill,
     VolunteerStatus,
 )
+from .event import (
+    CancellationReason,
+    Event,
+    EventFormat,
+    EventOrganization,
+    EventStatus,
+    EventType,
+    EventVolunteer,
+    EventVolunteerRole,
+    RegistrationStatus,
+)
 from .feature_flag import OrganizationFeatureFlag, SystemFeatureFlag
 from .organization import Organization, OrganizationAddress
 from .role import Permission, Role, RolePermission, UserOrganization
@@ -57,6 +68,17 @@ __all__ = [
     "UserOrganization",
     "OrganizationFeatureFlag",
     "SystemFeatureFlag",
+    # Event models
+    "Event",
+    "EventOrganization",
+    "EventVolunteer",
+    # Event enums
+    "EventType",
+    "EventStatus",
+    "EventFormat",
+    "CancellationReason",
+    "EventVolunteerRole",
+    "RegistrationStatus",
     # Contact models
     "Contact",
     "ContactEmail",

@@ -24,10 +24,18 @@ from flask_app.models import (
     ContactStatus,
     ContactType,
     EmailType,
+    Event,
+    EventFormat,
+    EventOrganization,
+    EventStatus,
+    EventType,
+    EventVolunteer,
+    EventVolunteerRole,
     Organization,
     OrganizationAddress,
     OrganizationType,
     PhoneType,
+    RegistrationStatus,
     Role,
     RoleType,
     Student,
@@ -52,6 +60,7 @@ stats = {
     "volunteers": 0,
     "students": 0,
     "teachers": 0,
+    "events": 0,
     "errors": [],
 }
 
@@ -62,6 +71,9 @@ def clear_database():
     with app.app_context():
         try:
             # Delete in reverse order of dependencies
+            EventVolunteer.query.delete()
+            EventOrganization.query.delete()
+            Event.query.delete()
             VolunteerHours.query.delete()
             VolunteerAvailability.query.delete()
             VolunteerInterest.query.delete()
@@ -882,6 +894,392 @@ def seed_teachers(organizations, dry_run=False):
     return created_teachers
 
 
+def seed_events(organizations, users, volunteers, dry_run=False):
+    """Create sample events with variety of types, statuses, formats, and dates"""
+    print("\n📝 Seeding events...")
+
+    from datetime import datetime, timedelta, timezone
+
+    from flask_app.models.event.enums import CancellationReason
+
+    now = datetime.now(timezone.utc)
+
+    # Get first admin user for created_by_user_id
+    admin_user = User.query.filter_by(is_super_admin=True).first() if not dry_run else None
+    created_by_user_id = admin_user.id if admin_user else None
+
+    events_data = [
+        # Past completed events
+        {
+            "title": "Community Volunteer Training Workshop",
+            "slug": "volunteer-training-workshop",
+            "description": (
+                "Comprehensive training session for new volunteers covering safety protocols, "
+                "organization policies, and best practices."
+            ),
+            "event_type": EventType.TRAINING,
+            "event_status": EventStatus.COMPLETED,
+            "event_format": EventFormat.IN_PERSON,
+            "start_date": now - timedelta(days=30),
+            "duration": 180,  # 3 hours
+            "location_name": "Community Center Main Hall",
+            "location_address": "123 Main Street, Springfield, IL 62701",
+            "capacity": 50,
+            "cost": 0.00,
+            "org_slug": "community-center",
+            "volunteers": [
+                {
+                    "contact_index": 0,
+                    "role": EventVolunteerRole.ORGANIZER,
+                    "status": RegistrationStatus.CONFIRMED,
+                    "attended": True,
+                },
+                {
+                    "contact_index": 1,
+                    "role": EventVolunteerRole.ATTENDEE,
+                    "status": RegistrationStatus.CONFIRMED,
+                    "attended": True,
+                },
+                {
+                    "contact_index": 2,
+                    "role": EventVolunteerRole.ATTENDEE,
+                    "status": RegistrationStatus.CONFIRMED,
+                    "attended": True,
+                },
+            ],
+        },
+        {
+            "title": "Monthly Volunteer Meeting",
+            "slug": "monthly-volunteer-meeting",
+            "description": "Regular monthly meeting to discuss upcoming events and volunteer opportunities.",
+            "event_type": EventType.MEETING,
+            "event_status": EventStatus.COMPLETED,
+            "event_format": EventFormat.VIRTUAL,
+            "start_date": now - timedelta(days=14),
+            "duration": 60,
+            "virtual_link": "https://zoom.us/j/123456789",
+            "capacity": 100,
+            "org_slug": "local-school",
+            "volunteers": [
+                {
+                    "contact_index": 0,
+                    "role": EventVolunteerRole.ORGANIZER,
+                    "status": RegistrationStatus.CONFIRMED,
+                    "attended": True,
+                },
+            ],
+        },
+        {
+            "title": "Spring Fundraiser Gala",
+            "slug": "spring-fundraiser-gala",
+            "description": "Annual fundraising event with dinner, entertainment, and silent auction.",
+            "event_type": EventType.FUNDRAISER,
+            "event_status": EventStatus.COMPLETED,
+            "event_format": EventFormat.IN_PERSON,
+            "start_date": now - timedelta(days=60),
+            "duration": 240,  # 4 hours
+            "location_name": "Grand Ballroom",
+            "location_address": "456 Education Avenue, Springfield, IL 62702",
+            "capacity": 200,
+            "cost": 75.00,
+            "org_slug": "nonprofit-org",
+            "volunteers": [
+                {
+                    "contact_index": 3,
+                    "role": EventVolunteerRole.ORGANIZER,
+                    "status": RegistrationStatus.CONFIRMED,
+                    "attended": True,
+                },
+                {
+                    "contact_index": 4,
+                    "role": EventVolunteerRole.STAFF,
+                    "status": RegistrationStatus.CONFIRMED,
+                    "attended": True,
+                },
+            ],
+        },
+        # Upcoming confirmed events
+        {
+            "title": "Summer Volunteer Orientation",
+            "slug": "summer-volunteer-orientation",
+            "description": (
+                "Orientation session for summer volunteer program. "
+                "Learn about available opportunities and requirements."
+            ),
+            "event_type": EventType.WORKSHOP,
+            "event_status": EventStatus.CONFIRMED,
+            "event_format": EventFormat.HYBRID,
+            "start_date": now + timedelta(days=14),
+            "duration": 120,
+            "registration_deadline": now + timedelta(days=10),
+            "location_name": "Community Center Conference Room",
+            "location_address": "123 Main Street, Springfield, IL 62701",
+            "virtual_link": "https://zoom.us/j/987654321",
+            "capacity": 40,
+            "cost": 0.00,
+            "org_slug": "community-center",
+            "volunteers": [
+                {"contact_index": 0, "role": EventVolunteerRole.ORGANIZER, "status": RegistrationStatus.CONFIRMED},
+                {"contact_index": 1, "role": EventVolunteerRole.ATTENDEE, "status": RegistrationStatus.CONFIRMED},
+                {"contact_index": 2, "role": EventVolunteerRole.ATTENDEE, "status": RegistrationStatus.PENDING},
+            ],
+        },
+        {
+            "title": "Tech Skills Workshop for Students",
+            "slug": "tech-skills-workshop",
+            "description": (
+                "Hands-on workshop teaching basic programming and web development skills " "to high school students."
+            ),
+            "event_type": EventType.WORKSHOP,
+            "event_status": EventStatus.CONFIRMED,
+            "event_format": EventFormat.IN_PERSON,
+            "start_date": now + timedelta(days=21),
+            "duration": 180,
+            "registration_deadline": now + timedelta(days=18),
+            "location_name": "Local School Computer Lab",
+            "location_address": "456 Education Avenue, Springfield, IL 62702",
+            "capacity": 25,
+            "cost": 0.00,
+            "org_slug": "local-school",
+            "volunteers": [
+                {"contact_index": 0, "role": EventVolunteerRole.SPEAKER, "status": RegistrationStatus.CONFIRMED},
+                {"contact_index": 1, "role": EventVolunteerRole.VOLUNTEER, "status": RegistrationStatus.CONFIRMED},
+            ],
+        },
+        {
+            "title": "Community Health Fair",
+            "slug": "community-health-fair",
+            "description": "Free health screenings, wellness information, and community resources.",
+            "event_type": EventType.COMMUNITY_EVENT,
+            "event_status": EventStatus.CONFIRMED,
+            "event_format": EventFormat.IN_PERSON,
+            "start_date": now + timedelta(days=35),
+            "duration": 300,  # 5 hours
+            "registration_deadline": now + timedelta(days=30),
+            "location_name": "Community Park",
+            "location_address": "789 Charity Boulevard, Springfield, IL 62703",
+            "capacity": 500,
+            "cost": 0.00,
+            "org_slug": "nonprofit-org",
+            "volunteers": [
+                {"contact_index": 3, "role": EventVolunteerRole.ORGANIZER, "status": RegistrationStatus.CONFIRMED},
+                {"contact_index": 4, "role": EventVolunteerRole.VOLUNTEER, "status": RegistrationStatus.CONFIRMED},
+            ],
+        },
+        # Today's events
+        {
+            "title": "Volunteer Appreciation Lunch",
+            "slug": "volunteer-appreciation-lunch",
+            "description": "Thank you lunch for all our dedicated volunteers.",
+            "event_type": EventType.COMMUNITY_EVENT,
+            "event_status": EventStatus.CONFIRMED,
+            "event_format": EventFormat.IN_PERSON,
+            "start_date": now.replace(hour=12, minute=0, second=0, microsecond=0),
+            "duration": 90,
+            "location_name": "Community Center Dining Hall",
+            "location_address": "123 Main Street, Springfield, IL 62701",
+            "capacity": 80,
+            "cost": 0.00,
+            "org_slug": "community-center",
+            "volunteers": [
+                {"contact_index": 0, "role": EventVolunteerRole.ATTENDEE, "status": RegistrationStatus.CONFIRMED},
+                {"contact_index": 1, "role": EventVolunteerRole.ATTENDEE, "status": RegistrationStatus.CONFIRMED},
+            ],
+        },
+        # Draft events
+        {
+            "title": "Fall Festival Planning Meeting",
+            "slug": "fall-festival-planning",
+            "description": "Initial planning meeting for the annual fall festival.",
+            "event_type": EventType.MEETING,
+            "event_status": EventStatus.DRAFT,
+            "event_format": EventFormat.VIRTUAL,
+            "start_date": now + timedelta(days=45),
+            "duration": 60,
+            "virtual_link": "https://zoom.us/j/555555555",
+            "capacity": 20,
+            "org_slug": "community-center",
+        },
+        {
+            "title": "Winter Holiday Fundraiser",
+            "slug": "winter-holiday-fundraiser",
+            "description": "Holiday-themed fundraiser with crafts, food, and entertainment.",
+            "event_type": EventType.FUNDRAISER,
+            "event_status": EventStatus.DRAFT,
+            "event_format": EventFormat.IN_PERSON,
+            "start_date": now + timedelta(days=90),
+            "duration": 240,
+            "location_name": "Community Center Main Hall",
+            "location_address": "123 Main Street, Springfield, IL 62701",
+            "capacity": 150,
+            "cost": 25.00,
+            "org_slug": "nonprofit-org",
+        },
+        # Requested events
+        {
+            "title": "Parent-Teacher Conference Support",
+            "slug": "parent-teacher-conference-support",
+            "description": "Volunteers needed to help with setup and logistics for parent-teacher conferences.",
+            "event_type": EventType.OTHER,
+            "event_status": EventStatus.REQUESTED,
+            "event_format": EventFormat.IN_PERSON,
+            "start_date": now + timedelta(days=28),
+            "duration": 120,
+            "location_name": "Local School",
+            "location_address": "456 Education Avenue, Springfield, IL 62702",
+            "capacity": 15,
+            "org_slug": "local-school",
+        },
+        # Cancelled events
+        {
+            "title": "Outdoor Community Picnic",
+            "slug": "outdoor-community-picnic",
+            "description": "Cancelled due to weather. Rescheduled for next month.",
+            "event_type": EventType.COMMUNITY_EVENT,
+            "event_status": EventStatus.CANCELLED,
+            "event_format": EventFormat.IN_PERSON,
+            "start_date": now - timedelta(days=7),
+            "duration": 180,
+            "location_name": "Community Park",
+            "location_address": "789 Charity Boulevard, Springfield, IL 62703",
+            "capacity": 100,
+            "cancellation_reason": CancellationReason.WEATHER,
+            "org_slug": "nonprofit-org",
+        },
+        {
+            "title": "Evening Volunteer Training",
+            "slug": "evening-volunteer-training",
+            "description": "Cancelled due to low registration.",
+            "event_type": EventType.TRAINING,
+            "event_status": EventStatus.CANCELLED,
+            "event_format": EventFormat.VIRTUAL,
+            "start_date": now - timedelta(days=3),
+            "duration": 90,
+            "virtual_link": "https://zoom.us/j/111111111",
+            "capacity": 30,
+            "cancellation_reason": CancellationReason.LOW_ATTENDANCE,
+            "org_slug": "community-center",
+        },
+    ]
+
+    created_events = []
+
+    for event_data in events_data:
+        if dry_run:
+            print(f"  [DRY RUN] Would create event: {event_data['title']}")
+            created_events.append(event_data)
+            continue
+
+        with app.app_context():
+            existing = Event.query.filter_by(slug=event_data["slug"]).first()
+            if existing:
+                print(f"  ⏭️  Event '{event_data['title']}' already exists, skipping")
+                created_events.append(existing)
+                continue
+
+            # Find organization by slug
+            org_slug = event_data["org_slug"]
+            org = Organization.query.filter_by(slug=org_slug).first()
+            if not org:
+                stats["errors"].append(f"Event {event_data['title']}: Organization '{org_slug}' not found")
+                print(f"  ❌ Organization '{org_slug}' not found for event {event_data['title']}")
+                continue
+
+            # Create event
+            event = Event(
+                title=event_data["title"],
+                slug=event_data["slug"],
+                description=event_data.get("description"),
+                event_type=event_data["event_type"],
+                event_status=event_data["event_status"],
+                event_format=event_data["event_format"],
+                cancellation_reason=event_data.get("cancellation_reason"),
+                start_date=event_data["start_date"],
+                start_time=event_data.get("start_time"),
+                duration=event_data.get("duration"),
+                location_name=event_data.get("location_name"),
+                location_address=event_data.get("location_address"),
+                virtual_link=event_data.get("virtual_link"),
+                capacity=event_data.get("capacity"),
+                registration_deadline=event_data.get("registration_deadline"),
+                cost=event_data.get("cost"),
+                created_by_user_id=created_by_user_id,
+            )
+
+            # Calculate end_date if duration is provided
+            if event.duration and event.start_date:
+                event.end_date = event.start_date + timedelta(minutes=event.duration)
+
+            db.session.add(event)
+            db.session.flush()
+
+            # Link to organization
+            event_org = EventOrganization(
+                event_id=event.id,
+                organization_id=org.id,
+                is_primary=True,
+            )
+            db.session.add(event_org)
+
+            # Link volunteers if specified
+            volunteer_data_list = event_data.get("volunteers", [])
+            if volunteer_data_list:
+                from sqlalchemy import inspect as sqlalchemy_inspect
+
+                from flask_app.models import Contact
+
+                # Collect contact IDs safely (handling detached instances)
+                contact_ids = []
+                for vol_data in volunteer_data_list:
+                    contact_index = vol_data.get("contact_index")
+                    if contact_index is not None and contact_index < len(volunteers):
+                        volunteer = volunteers[contact_index]
+                        # If it's a dict, skip (dry run)
+                        if isinstance(volunteer, dict):
+                            continue
+
+                        # Safely get ID from potentially detached instance
+                        try:
+                            insp = sqlalchemy_inspect(volunteer)
+                            if insp.persistent or insp.pending:
+                                contact_ids.append((volunteer.id, vol_data))
+                            elif insp.detached and insp.identity:
+                                contact_ids.append((insp.identity[0], vol_data))
+                        except Exception:
+                            # Skip if we can't get the ID
+                            continue
+
+                # Query contacts within session context
+                if contact_ids:
+                    ids_only = [cid[0] for cid in contact_ids]
+                    contacts = Contact.query.filter(Contact.id.in_(ids_only)).all()
+                    contact_dict = {c.id: c for c in contacts}
+
+                    # Create event volunteer links
+                    for contact_id, vol_data in contact_ids:
+                        if contact_id in contact_dict:
+                            event_volunteer = EventVolunteer(
+                                event_id=event.id,
+                                contact_id=contact_id,
+                                role=vol_data.get("role", EventVolunteerRole.ATTENDEE),
+                                registration_status=vol_data.get("status", RegistrationStatus.PENDING),
+                                attended=vol_data.get("attended"),
+                            )
+                            db.session.add(event_volunteer)
+
+            try:
+                db.session.commit()
+                stats["events"] += 1
+                print(f"  ✅ Created event: {event_data['title']} ({event_data['event_status'].value})")
+                created_events.append(event)
+            except Exception as e:
+                db.session.rollback()
+                stats["errors"].append(f"Event {event_data['title']}: {str(e)}")
+                print(f"  ❌ Error creating event: {str(e)}")
+
+    return created_events
+
+
 def seed_contact_relationships(contacts, organizations, dry_run=False):
     """Link contacts to organizations and add roles"""
     print("\n📝 Seeding contact relationships...")
@@ -1005,7 +1403,7 @@ def seed_database(
         # Seed data
         seed_admin_user(admin_username, admin_email, admin_password, dry_run)
         organizations = seed_organizations(dry_run)
-        seed_users(organizations, roles_dict, dry_run)
+        users = seed_users(organizations, roles_dict, dry_run)
         volunteers = seed_volunteers(organizations, dry_run)
         students = seed_students(organizations, dry_run)
         teachers = seed_teachers(organizations, dry_run)
@@ -1013,6 +1411,9 @@ def seed_database(
         # Combine all contacts for relationships
         all_contacts = volunteers + students + teachers
         seed_contact_relationships(all_contacts, organizations, dry_run)
+
+        # Seed events (needs organizations, users, and volunteers)
+        seed_events(organizations, users, volunteers, dry_run)
 
         # Print summary
         print("\n" + "=" * 60)
@@ -1024,6 +1425,7 @@ def seed_database(
         print(f"Volunteers: {stats['volunteers']}")
         print(f"Students: {stats['students']}")
         print(f"Teachers: {stats['teachers']}")
+        print(f"Events: {stats['events']}")
 
         if stats["errors"]:
             print(f"\n⚠️  Errors encountered: {len(stats['errors'])}")

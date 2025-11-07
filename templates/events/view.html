@@ -1,0 +1,390 @@
+{% extends "base.html" %}
+
+{% block title %}Event Details - {{ event.title }}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="admin-container">
+    <div class="admin-header">
+        <h1>Event Details</h1>
+        <div class="header-actions">
+            <a href="{{ url_for('events_edit', event_id=event.id) }}" class="btn btn-primary">
+                <i class="fas fa-edit"></i> Edit Event
+            </a>
+            <a href="{{ url_for('events_list') }}" class="btn btn-secondary">
+                <i class="fas fa-arrow-left"></i> Back to Events
+            </a>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Basic Information -->
+        <div class="col-md-8">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Basic Information</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="info-item">
+                                <label>Event Title:</label>
+                                <span>{{ event.title }}</span>
+                            </div>
+                            <div class="info-item">
+                                <label>Event Type:</label>
+                                <span>
+                                    {% if event.event_type %}
+                                        <span class="badge bg-info">{{ event.event_type.value.replace('_', ' ').title() }}</span>
+                                    {% else %}
+                                        <span class="text-muted">—</span>
+                                    {% endif %}
+                                </span>
+                            </div>
+                            <div class="info-item">
+                                <label>Event Status:</label>
+                                <span>
+                                    {% if event.event_status.value == 'completed' %}
+                                        <span class="badge bg-success">Completed</span>
+                                    {% elif event.event_status.value == 'confirmed' %}
+                                        <span class="badge bg-primary">Confirmed</span>
+                                    {% elif event.event_status.value == 'cancelled' %}
+                                        <span class="badge bg-danger">Cancelled</span>
+                                    {% elif event.event_status.value == 'requested' %}
+                                        <span class="badge bg-warning">Requested</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">Draft</span>
+                                    {% endif %}
+                                </span>
+                            </div>
+                            <div class="info-item">
+                                <label>Event Format:</label>
+                                <span>
+                                    {% if event.event_format.value == 'in_person' %}
+                                        <i class="fas fa-map-marker-alt text-primary"></i> In Person
+                                    {% elif event.event_format.value == 'virtual' %}
+                                        <i class="fas fa-video text-info"></i> Virtual
+                                    {% elif event.event_format.value == 'hybrid' %}
+                                        <i class="fas fa-laptop-house text-success"></i> Hybrid
+                                    {% else %}
+                                        <span class="text-muted">—</span>
+                                    {% endif %}
+                                </span>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="info-item">
+                                <label>Slug:</label>
+                                <span class="text-muted">{{ event.slug }}</span>
+                            </div>
+                            {% if event.cancellation_reason %}
+                            <div class="info-item">
+                                <label>Cancellation Reason:</label>
+                                <span class="badge bg-warning">{{ event.cancellation_reason.value.replace('_', ' ').title() }}</span>
+                            </div>
+                            {% endif %}
+                            {% if event.cost %}
+                            <div class="info-item">
+                                <label>Cost:</label>
+                                <span>${{ "%.2f"|format(event.cost) }}</span>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% if event.description %}
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <div class="info-item">
+                                <label>Description:</label>
+                                <p>{{ event.description }}</p>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Date & Time Information -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Date & Time</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="info-item">
+                                <label>Start Date & Time:</label>
+                                <span>
+                                    {% if event.start_date %}
+                                        {{ event.start_date.strftime('%Y-%m-%d %H:%M') }}
+                                    {% else %}
+                                        <span class="text-muted">—</span>
+                                    {% endif %}
+                                </span>
+                            </div>
+                            {% if event.end_date or event.duration %}
+                            <div class="info-item">
+                                <label>End Date & Time:</label>
+                                <span>
+                                    {% if event.end_date %}
+                                        {{ event.end_date.strftime('%Y-%m-%d %H:%M') }}
+                                    {% elif event.duration %}
+                                        {% set end_time = event.get_end_datetime() %}
+                                        {% if end_time %}
+                                            {{ end_time.strftime('%Y-%m-%d %H:%M') }}
+                                        {% else %}
+                                            <span class="text-muted">—</span>
+                                        {% endif %}
+                                    {% else %}
+                                        <span class="text-muted">—</span>
+                                    {% endif %}
+                                </span>
+                            </div>
+                            {% endif %}
+                        </div>
+                        <div class="col-md-6">
+                            {% if event.duration %}
+                            <div class="info-item">
+                                <label>Duration:</label>
+                                <span>
+                                    {% set hours = event.duration // 60 %}
+                                    {% set minutes = event.duration % 60 %}
+                                    {% if hours > 0 %}
+                                        {{ hours }} hour{{ 's' if hours != 1 else '' }}{% if minutes > 0 %}, {{ minutes }} minute{{ 's' if minutes != 1 else '' }}{% endif %}
+                                    {% else %}
+                                        {{ minutes }} minute{{ 's' if minutes != 1 else '' }}
+                                    {% endif %}
+                                </span>
+                            </div>
+                            {% endif %}
+                            {% if event.registration_deadline %}
+                            <div class="info-item">
+                                <label>Registration Deadline:</label>
+                                <span>
+                                    {{ event.registration_deadline.strftime('%Y-%m-%d %H:%M') }}
+                                    {% if event.can_register() %}
+                                        <span class="badge bg-success ms-2">Open</span>
+                                    {% else %}
+                                        <span class="badge bg-danger ms-2">Closed</span>
+                                    {% endif %}
+                                </span>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Location Information -->
+            {% if event.location_name or event.location_address or event.virtual_link %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Location</h5>
+                </div>
+                <div class="card-body">
+                    {% if event.location_name %}
+                    <div class="info-item">
+                        <label>Location Name:</label>
+                        <span>{{ event.location_name }}</span>
+                    </div>
+                    {% endif %}
+                    {% if event.location_address %}
+                    <div class="info-item">
+                        <label>Address:</label>
+                        <p>{{ event.location_address }}</p>
+                    </div>
+                    {% endif %}
+                    {% if event.virtual_link %}
+                    <div class="info-item">
+                        <label>Virtual Link:</label>
+                        <span>
+                            <a href="{{ event.virtual_link }}" target="_blank" rel="noopener noreferrer">
+                                {{ event.virtual_link }} <i class="fas fa-external-link-alt"></i>
+                            </a>
+                        </span>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Organizations -->
+            {% if event.organizations %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Organizations</h5>
+                </div>
+                <div class="card-body">
+                    <ul class="list-group">
+                        {% for event_org in event.organizations %}
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            <a href="{{ url_for('organizations_view', org_id=event_org.organization.id) }}">
+                                {{ event_org.organization.name }}
+                            </a>
+                            {% if event_org.is_primary %}
+                                <span class="badge bg-primary">Primary</span>
+                            {% endif %}
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Volunteers -->
+            {% if event.volunteers %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Volunteers & Attendees</h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Role</th>
+                                    <th>Registration Status</th>
+                                    <th>Attended</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for event_volunteer in event.volunteers %}
+                                <tr>
+                                    <td>
+                                        {% if event_volunteer.contact %}
+                                            <a href="{{ url_for('volunteers_view', volunteer_id=event_volunteer.contact.id) }}">
+                                                {{ event_volunteer.contact.get_full_name() }}
+                                            </a>
+                                        {% else %}
+                                            <span class="text-muted">Unknown</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-secondary">{{ event_volunteer.role.value.replace('_', ' ').title() }}</span>
+                                    </td>
+                                    <td>
+                                        {% if event_volunteer.registration_status.value == 'confirmed' %}
+                                            <span class="badge bg-success">Confirmed</span>
+                                        {% elif event_volunteer.registration_status.value == 'pending' %}
+                                            <span class="badge bg-warning">Pending</span>
+                                        {% elif event_volunteer.registration_status.value == 'waitlisted' %}
+                                            <span class="badge bg-info">Waitlisted</span>
+                                        {% elif event_volunteer.registration_status.value == 'cancelled' %}
+                                            <span class="badge bg-danger">Cancelled</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">{{ event_volunteer.registration_status.value }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if event_volunteer.attended is none %}
+                                            <span class="text-muted">—</span>
+                                        {% elif event_volunteer.attended %}
+                                            <span class="badge bg-success">Yes</span>
+                                        {% else %}
+                                            <span class="badge bg-danger">No</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Sidebar -->
+        <div class="col-md-4">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Quick Actions</h5>
+                </div>
+                <div class="card-body">
+                    <div class="d-grid gap-2">
+                        <a href="{{ url_for('events_edit', event_id=event.id) }}" class="btn btn-outline-primary">
+                            <i class="fas fa-edit"></i> Edit Event
+                        </a>
+                        <a href="{{ url_for('events_list') }}" class="btn btn-outline-secondary">
+                            <i class="fas fa-arrow-left"></i> Back to List
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Statistics -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Statistics</h5>
+                </div>
+                <div class="card-body">
+                    <div class="info-item">
+                        <label>Confirmed Attendees:</label>
+                        <span class="badge bg-primary">{{ stats.attendance_count }}</span>
+                    </div>
+                    {% if stats.capacity_usage %}
+                    <div class="info-item mt-3">
+                        <label>Capacity:</label>
+                        <div class="progress mt-2" style="height: 20px;">
+                            <div class="progress-bar" role="progressbar"
+                                 style="width: {{ stats.capacity_usage.percentage }}%"
+                                 aria-valuenow="{{ stats.capacity_usage.current }}"
+                                 aria-valuemin="0"
+                                 aria-valuemax="{{ stats.capacity_usage.max }}">
+                                {{ stats.capacity_usage.current }} / {{ stats.capacity_usage.max }}
+                            </div>
+                        </div>
+                        <small class="text-muted">{{ stats.capacity_usage.percentage }}% full</small>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Event Status Info -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Event Status</h5>
+                </div>
+                <div class="card-body">
+                    {% if event.is_past() %}
+                        <span class="badge bg-secondary">Past Event</span>
+                    {% elif event.is_upcoming() %}
+                        <span class="badge bg-primary">Upcoming</span>
+                    {% elif event.is_today() %}
+                        <span class="badge bg-success">Today</span>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Metadata -->
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Metadata</h5>
+                </div>
+                <div class="card-body">
+                    {% if event.created_by_user %}
+                    <div class="info-item">
+                        <label>Created By:</label>
+                        <span>{{ event.created_by_user.get_full_name() }}</span>
+                    </div>
+                    {% endif %}
+                    <div class="info-item">
+                        <label>Created:</label>
+                        <span>{{ event.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</span>
+                    </div>
+                    {% if event.updated_at %}
+                    <div class="info-item">
+                        <label>Last Updated:</label>
+                        <span>{{ event.updated_at.strftime('%Y-%m-%d %H:%M:%S') }}</span>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

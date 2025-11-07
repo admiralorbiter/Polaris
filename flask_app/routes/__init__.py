@@ -6,6 +6,7 @@ Application routes package
 from .admin import register_admin_routes
 from .api import register_api_routes
 from .auth import register_auth_routes
+from .event import register_event_routes
 from .main import register_main_routes
 from .organization import register_organization_routes
 from .volunteer import register_volunteer_routes
@@ -18,4 +19,5 @@ def init_routes(app):
     register_admin_routes(app)
     register_organization_routes(app)
     register_volunteer_routes(app)
+    register_event_routes(app)
     register_api_routes(app)
