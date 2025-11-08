@@ -3,6 +3,41 @@ import os
 from datetime import timedelta
 
 
+def _coerce_bool(value, default=False):
+    """Convert environment-style truthy/falsey values to bool."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    value_str = str(value).strip().lower()
+    if value_str in {"1", "true", "yes", "on"}:
+        return True
+    if value_str in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _parse_adapter_list(value):
+    """
+    Parse a comma-separated adapter list while keeping order and removing duplicates.
+
+    Returns:
+        tuple[str, ...]: Normalized adapter identifiers.
+    """
+    if not value:
+        return ()
+
+    seen = set()
+    adapters = []
+    for raw_item in value.split(","):
+        item = raw_item.strip().lower()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        adapters.append(item)
+    return tuple(adapters)
+
+
 class Config:
     # SECRET_KEY must be set via environment variable for security
     # Generate with: python -c "import secrets; print(secrets.token_hex(32))"
@@ -39,6 +74,17 @@ class Config:
         SECRET_KEY = "test-secret-key-placeholder"
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+    # Importer configuration
+    _raw_importer_enabled = os.environ.get("IMPORTER_ENABLED")
+    IMPORTER_ENABLED = _coerce_bool(_raw_importer_enabled, default=False)
+    IMPORTER_ADAPTERS = _parse_adapter_list(os.environ.get("IMPORTER_ADAPTERS", ""))
+
+    if IMPORTER_ENABLED and not IMPORTER_ADAPTERS:
+        raise ValueError(
+            "IMPORTER_ENABLED is true but IMPORTER_ADAPTERS is empty. "
+            "Provide at least one adapter name."
+        )
 
     # Session configuration
     PERMANENT_SESSION_LIFETIME = timedelta(days=7)  # Reduced from 31 days for better security

@@ -21,3 +21,7 @@ def init_routes(app):
     register_volunteer_routes(app)
     register_event_routes(app)
     register_api_routes(app)
+    # Optional / feature-flagged packages
+    from flask_app.importer import init_importer
+
+    init_importer(app)
