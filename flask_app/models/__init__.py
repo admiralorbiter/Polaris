@@ -53,6 +53,20 @@ from .feature_flag import OrganizationFeatureFlag, SystemFeatureFlag
 from .organization import Organization, OrganizationAddress
 from .role import Permission, Role, RolePermission, UserOrganization
 from .user import User
+from .importer import (
+    ChangeLogEntry,
+    DataQualitySeverity,
+    DataQualityStatus,
+    DedupeDecision,
+    DedupeSuggestion,
+    ExternalIdMap,
+    ImportRun,
+    ImportRunStatus,
+    MergeLog,
+    StagingRecordStatus,
+    StagingVolunteer,
+    DataQualityViolation,
+)
 
 __all__ = [
     "db",
@@ -113,4 +127,17 @@ __all__ = [
     "VolunteerAvailability",
     "VolunteerHours",
     "VolunteerStatus",
+    # Importer models
+    "ImportRun",
+    "ImportRunStatus",
+    "StagingVolunteer",
+    "StagingRecordStatus",
+    "DataQualityViolation",
+    "DataQualitySeverity",
+    "DataQualityStatus",
+    "DedupeSuggestion",
+    "DedupeDecision",
+    "ExternalIdMap",
+    "MergeLog",
+    "ChangeLogEntry",
 ]

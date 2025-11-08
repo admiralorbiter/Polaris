@@ -260,6 +260,7 @@ def init_database():
     with app.app_context():
         print("Creating database tables...")
         db.create_all()
+        print("Importer tables (import_runs, staging_*, etc.) created alongside core schema.")
         print("Database tables created")
 
         print("Creating default roles...")

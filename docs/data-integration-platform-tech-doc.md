@@ -76,6 +76,14 @@
 - Migrations idempotent; rollback verified.  
 **Dependencies**: IMP-1.  
 **Notes**: Namespaced `import_*`/`staging_*` to isolate from core.
+- Schema snapshot (v1):
+  - `import_runs`: status enum, adapter/source metadata, counters JSON, anomaly flags, start/finish timestamps, FK `triggered_by_user_id`.
+  - `staging_volunteers`: raw + normalized payload JSON, checksum, status enum, FK `run_id`, `(external_system, external_id)` index, unique `(run_id, sequence_number)`.
+  - `dq_violations`: FK `run_id` + `staging_volunteer_id`, enums for severity/status, remediation audit columns, rule code index.
+  - `dedupe_suggestions`: FK `run_id`, optional staging row + contacts, score/features JSON, decision enum with FK `decided_by_user_id`.
+  - `external_id_map`: unique `(entity_type, external_system, external_id)`, timestamps for first/last seen, FK `run_id`.
+  - `merge_log`: FK `run_id`, contact/user relationships, before/after/undo JSON snapshots.
+  - `change_log`: FK `run_id`, entity + field metadata, audit FK `changed_by_user_id`, constraint `field_name` non-empty.
 
 ### IMP-3 — Worker process + queues _(5 pts)_
 **User story**: As an operator, long-running tasks run off the web thread.  

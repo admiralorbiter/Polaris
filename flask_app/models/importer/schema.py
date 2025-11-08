@@ -1,0 +1,418 @@
+"""
+SQLAlchemy models for the importer base schema (IMP-2).
+
+These tables remain lightweight until future importer work layers on
+additional behavior. They are created alongside the rest of the app so
+environments that choose to enable the importer have the schema ready.
+"""
+
+from __future__ import annotations
+
+import enum
+from datetime import datetime, timezone
+
+from sqlalchemy import CheckConstraint, Enum, ForeignKey, Index, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from ..base import BaseModel, db
+
+
+class ImportRunStatus(str, enum.Enum):
+    """Lifecycle states for an import run."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    PARTIALLY_FAILED = "partially_failed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class ImportRun(BaseModel):
+    """Metadata describing a single importer execution."""
+
+    __tablename__ = "import_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source: Mapped[str] = mapped_column(db.String(100), nullable=False, index=True)
+    adapter: Mapped[str | None] = mapped_column(db.String(100), nullable=True)
+    status: Mapped[ImportRunStatus] = mapped_column(
+        Enum(ImportRunStatus, name="import_run_status_enum"),
+        nullable=False,
+        default=ImportRunStatus.PENDING,
+        index=True,
+    )
+    dry_run: Mapped[bool] = mapped_column(db.Boolean, nullable=False, default=False)
+    started_at: Mapped[datetime | None] = mapped_column(db.DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(db.DateTime(timezone=True))
+    triggered_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    counts_json: Mapped[dict | None] = mapped_column(db.JSON, nullable=True)
+    metrics_json: Mapped[dict | None] = mapped_column(db.JSON, nullable=True)
+    anomaly_flags: Mapped[dict | None] = mapped_column(db.JSON, nullable=True)
+    error_summary: Mapped[str | None] = mapped_column(db.Text, nullable=True)
+    notes: Mapped[str | None] = mapped_column(db.Text, nullable=True)
+
+    triggered_by_user = relationship("User", foreign_keys=[triggered_by_user_id])
+    staging_rows = relationship(
+        "StagingVolunteer",
+        back_populates="import_run",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    dq_violations = relationship(
+        "DataQualityViolation",
+        back_populates="import_run",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    dedupe_suggestions = relationship(
+        "DedupeSuggestion",
+        back_populates="import_run",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    external_ids = relationship(
+        "ExternalIdMap",
+        back_populates="import_run",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    merge_events = relationship(
+        "MergeLog",
+        back_populates="import_run",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    change_events = relationship(
+        "ChangeLogEntry",
+        back_populates="import_run",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    __table_args__ = (
+        Index("idx_import_runs_source_status", "source", "status"),
+    )
+
+
+class StagingRecordStatus(str, enum.Enum):
+    """High-level processing state for a staging row."""
+
+    LANDED = "landed"
+    VALIDATED = "validated"
+    QUARANTINED = "quarantined"
+    LOADED = "loaded"
+
+
+class StagingVolunteer(BaseModel):
+    """
+    Raw volunteer payloads staged during an import run.
+
+    Rows contain both the original payload and optional normalized data. DQ
+    processing moves rows from `LANDED` to `VALIDATED`/`QUARANTINED`.
+    """
+
+    __tablename__ = "staging_volunteers"
+
+    id: Mapped[int] = mapped_column(db.Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("import_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    sequence_number: Mapped[int | None] = mapped_column(db.Integer, nullable=True)
+    source_record_id: Mapped[str | None] = mapped_column(db.String(255), nullable=True)
+    external_system: Mapped[str] = mapped_column(db.String(100), nullable=False)
+    external_id: Mapped[str | None] = mapped_column(db.String(255), nullable=True)
+    payload_json: Mapped[dict] = mapped_column(db.JSON, nullable=False)
+    normalized_json: Mapped[dict | None] = mapped_column(db.JSON, nullable=True)
+    checksum: Mapped[str | None] = mapped_column(db.String(64), nullable=True, index=True)
+    status: Mapped[StagingRecordStatus] = mapped_column(
+        Enum(StagingRecordStatus, name="staging_volunteer_status_enum"),
+        default=StagingRecordStatus.LANDED,
+        nullable=False,
+        index=True,
+    )
+    last_error: Mapped[str | None] = mapped_column(db.Text, nullable=True)
+    landed_at: Mapped[datetime] = mapped_column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    processed_at: Mapped[datetime | None] = mapped_column(db.DateTime(timezone=True))
+
+    import_run = relationship("ImportRun", back_populates="staging_rows")
+    dq_violations = relationship(
+        "DataQualityViolation",
+        back_populates="staging_row",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    dedupe_suggestions = relationship(
+        "DedupeSuggestion",
+        back_populates="staging_row",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    __table_args__ = (
+        Index(
+            "idx_staging_volunteers_external_key",
+            "external_system",
+            "external_id",
+        ),
+        UniqueConstraint(
+            "run_id",
+            "sequence_number",
+            name="uq_staging_volunteers_run_sequence",
+        ),
+    )
+
+
+class DataQualitySeverity(str, enum.Enum):
+    """Severity tier for data quality rules."""
+
+    ERROR = "error"
+    WARNING = "warning"
+    INFO = "info"
+
+
+class DataQualityStatus(str, enum.Enum):
+    """Resolution state for a DQ violation."""
+
+    OPEN = "open"
+    FIXED = "fixed"
+    SUPPRESSED = "suppressed"
+
+
+class DataQualityViolation(BaseModel):
+    """Quarantined issues that block or warn on data movement."""
+
+    __tablename__ = "dq_violations"
+
+    id: Mapped[int] = mapped_column(db.Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("import_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    staging_volunteer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("staging_volunteers.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    entity_type: Mapped[str] = mapped_column(db.String(50), nullable=False, default="volunteer")
+    record_key: Mapped[str | None] = mapped_column(db.String(255), nullable=True)
+    rule_code: Mapped[str] = mapped_column(db.String(50), nullable=False)
+    severity: Mapped[DataQualitySeverity] = mapped_column(
+        Enum(DataQualitySeverity, name="dq_violation_severity_enum"),
+        nullable=False,
+    )
+    status: Mapped[DataQualityStatus] = mapped_column(
+        Enum(DataQualityStatus, name="dq_violation_status_enum"),
+        nullable=False,
+        default=DataQualityStatus.OPEN,
+        index=True,
+    )
+    message: Mapped[str | None] = mapped_column(db.Text, nullable=True)
+    details_json: Mapped[dict | None] = mapped_column(db.JSON, nullable=True)
+    remediation_notes: Mapped[str | None] = mapped_column(db.Text, nullable=True)
+    remediated_at: Mapped[datetime | None] = mapped_column(db.DateTime(timezone=True))
+    remediated_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=True,
+    )
+
+    import_run = relationship("ImportRun", back_populates="dq_violations")
+    staging_row = relationship("StagingVolunteer", back_populates="dq_violations")
+    remediated_by_user = relationship("User", foreign_keys=[remediated_by_user_id])
+
+    __table_args__ = (
+        Index("idx_dq_violations_run_rule", "run_id", "rule_code"),
+    )
+
+
+class DedupeDecision(str, enum.Enum):
+    """Decision outcome for a dedupe suggestion."""
+
+    PENDING = "pending"
+    AUTO_MERGED = "auto_merged"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    DEFERRED = "deferred"
+
+
+class DedupeSuggestion(BaseModel):
+    """Candidate duplicate matches surfaced during imports."""
+
+    __tablename__ = "dedupe_suggestions"
+
+    id: Mapped[int] = mapped_column(db.Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("import_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    staging_volunteer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("staging_volunteers.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    primary_contact_id: Mapped[int | None] = mapped_column(
+        ForeignKey("contacts.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    candidate_contact_id: Mapped[int | None] = mapped_column(
+        ForeignKey("contacts.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    score: Mapped[float | None] = mapped_column(db.Numeric(5, 4), nullable=True)
+    features_json: Mapped[dict | None] = mapped_column(db.JSON, nullable=True)
+    decision: Mapped[DedupeDecision] = mapped_column(
+        Enum(DedupeDecision, name="dedupe_decision_enum"),
+        nullable=False,
+        default=DedupeDecision.PENDING,
+        index=True,
+    )
+    decision_notes: Mapped[str | None] = mapped_column(db.Text, nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(db.DateTime(timezone=True))
+    decided_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=True,
+    )
+
+    import_run = relationship("ImportRun", back_populates="dedupe_suggestions")
+    staging_row = relationship("StagingVolunteer", back_populates="dedupe_suggestions")
+    primary_contact = relationship("Contact", foreign_keys=[primary_contact_id])
+    candidate_contact = relationship("Contact", foreign_keys=[candidate_contact_id])
+    decided_by_user = relationship("User", foreign_keys=[decided_by_user_id])
+
+    __table_args__ = (
+        Index("idx_dedupe_suggestions_run_decision", "run_id", "decision"),
+        UniqueConstraint(
+            "run_id",
+            "primary_contact_id",
+            "candidate_contact_id",
+            name="uq_dedupe_suggestions_run_contact_pair",
+        ),
+    )
+
+
+class ExternalIdMap(BaseModel):
+    """Maps external IDs to internal entities to support idempotency."""
+
+    __tablename__ = "external_id_map"
+
+    id: Mapped[int] = mapped_column(db.Integer, primary_key=True, autoincrement=True)
+    entity_type: Mapped[str] = mapped_column(db.String(50), nullable=False, index=True)
+    entity_id: Mapped[int] = mapped_column(db.Integer, nullable=False)
+    external_system: Mapped[str] = mapped_column(db.String(100), nullable=False)
+    external_id: Mapped[str] = mapped_column(db.String(255), nullable=False)
+    run_id: Mapped[int | None] = mapped_column(ForeignKey("import_runs.id"), nullable=True)
+    first_seen_at: Mapped[datetime] = mapped_column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    is_active: Mapped[bool] = mapped_column(db.Boolean, nullable=False, default=True)
+    metadata_json: Mapped[dict | None] = mapped_column(db.JSON, nullable=True)
+
+    import_run = relationship("ImportRun", back_populates="external_ids")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "entity_type",
+            "external_system",
+            "external_id",
+            name="uq_external_id_map_entity",
+        ),
+        Index(
+            "idx_external_id_map_external_key",
+            "external_system",
+            "external_id",
+        ),
+    )
+
+
+class MergeLog(BaseModel):
+    """Auditable record of merge operations performed during imports."""
+
+    __tablename__ = "merge_log"
+
+    id: Mapped[int] = mapped_column(db.Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("import_runs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    primary_contact_id: Mapped[int] = mapped_column(
+        ForeignKey("contacts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    merged_contact_id: Mapped[int] = mapped_column(
+        ForeignKey("contacts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    performed_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=True,
+    )
+    decision_type: Mapped[str] = mapped_column(db.String(50), nullable=False, default="manual")
+    reason: Mapped[str | None] = mapped_column(db.Text, nullable=True)
+    snapshot_before: Mapped[dict | None] = mapped_column(db.JSON, nullable=True)
+    snapshot_after: Mapped[dict | None] = mapped_column(db.JSON, nullable=True)
+    undo_payload: Mapped[dict | None] = mapped_column(db.JSON, nullable=True)
+
+    import_run = relationship("ImportRun", back_populates="merge_events")
+    primary_contact = relationship("Contact", foreign_keys=[primary_contact_id])
+    merged_contact = relationship("Contact", foreign_keys=[merged_contact_id])
+    performed_by_user = relationship("User", foreign_keys=[performed_by_user_id])
+
+    __table_args__ = (
+        Index("idx_merge_log_primary_contact", "primary_contact_id"),
+        Index("idx_merge_log_run", "run_id"),
+    )
+
+
+class ChangeLogEntry(BaseModel):
+    """Field-level change history for importer-driven updates."""
+
+    __tablename__ = "change_log"
+
+    id: Mapped[int] = mapped_column(db.Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("import_runs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    entity_type: Mapped[str] = mapped_column(db.String(50), nullable=False, index=True)
+    entity_id: Mapped[int] = mapped_column(db.Integer, nullable=False, index=True)
+    field_name: Mapped[str] = mapped_column(db.String(100), nullable=False)
+    old_value: Mapped[str | None] = mapped_column(db.Text, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(db.Text, nullable=True)
+    change_source: Mapped[str] = mapped_column(db.String(50), nullable=False, default="importer")
+    changed_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=True,
+    )
+    metadata_json: Mapped[dict | None] = mapped_column(db.JSON, nullable=True)
+
+    import_run = relationship("ImportRun", back_populates="change_events")
+    changed_by_user = relationship("User", foreign_keys=[changed_by_user_id])
+
+    __table_args__ = (
+        Index("idx_change_log_entity", "entity_type", "entity_id"),
+        CheckConstraint("field_name <> ''", name="ck_change_log_field_non_empty"),
+    )
+
