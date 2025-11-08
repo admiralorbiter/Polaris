@@ -14,12 +14,13 @@ from flask import Flask
 from flask_app.utils.importer import get_importer_adapters, is_importer_enabled
 
 from .cli import get_disabled_importer_group, importer_cli
+from .celery_app import ensure_celery_app, get_celery_app
 from .registry import AdapterDescriptor, get_adapter_registry, resolve_adapters
 from .views import importer_blueprint
 
 IMPORTER_EXTENSION_KEY = "importer"
 
-__all__ = ["init_importer", "IMPORTER_EXTENSION_KEY"]
+__all__ = ["init_importer", "IMPORTER_EXTENSION_KEY", "get_celery_app"]
 
 
 def _ensure_extension_state(app: Flask) -> dict:
@@ -30,6 +31,8 @@ def _ensure_extension_state(app: Flask) -> dict:
             "configured_adapters": (),
             "active_adapters": (),
             "menu_items": (),
+            "worker_enabled": False,
+            "celery_app": None,
             "_context_registered": False,
         },
     )
@@ -75,7 +78,14 @@ def init_importer(app: Flask) -> None:
     configured_adapters: Tuple[str, ...] = get_importer_adapters(app)
 
     state = _ensure_extension_state(app)
-    state.update({"enabled": enabled, "configured_adapters": configured_adapters})
+    worker_enabled = bool(app.config.get("IMPORTER_WORKER_ENABLED", False))
+    state.update(
+        {
+            "enabled": enabled,
+            "configured_adapters": configured_adapters,
+            "worker_enabled": worker_enabled,
+        }
+    )
     _register_template_context(app, state)
 
     if not enabled:
@@ -94,6 +104,7 @@ def init_importer(app: Flask) -> None:
             "endpoint": "importer.importer_healthcheck",
         },
     )
+    ensure_celery_app(app, state)
 
     app.register_blueprint(importer_blueprint)
     _set_cli(app, enabled=True)

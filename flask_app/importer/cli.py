@@ -7,9 +7,15 @@ dependencies are not installed.
 
 from __future__ import annotations
 
+import json
+from typing import Optional
+
 import click
+from celery import Celery
+from celery.exceptions import TimeoutError as CeleryTimeoutError
 from flask.cli import ScriptInfo
 
+from flask_app.importer.celery_app import DEFAULT_QUEUE_NAME, get_celery_app
 from flask_app.utils.importer import get_importer_adapters, is_importer_enabled
 
 
@@ -50,4 +56,96 @@ def get_disabled_importer_group() -> click.Group:
         )
 
     return disabled_group
+
+
+def _resolve_celery(app) -> Optional[Celery]:
+    """
+    Retrieve the registered Celery instance, raising a helpful error if missing.
+    """
+    celery_app = get_celery_app(app)
+    if celery_app is None:
+        raise click.ClickException(
+            "Importer Celery app is unavailable. Ensure IMPORTER_ENABLED=true and the "
+            "importer package initialises before running worker commands."
+        )
+    return celery_app
+
+
+@importer_cli.group(name="worker")
+@click.pass_context
+def worker_group(ctx):
+    """Manage the importer background worker."""
+    info = ctx.ensure_object(ScriptInfo)
+    app = info.load_app()
+    state = app.extensions.get("importer", {})
+    if not state.get("worker_enabled") and not app.config.get("IMPORTER_WORKER_ENABLED"):
+        click.echo(
+            "Warning: IMPORTER_WORKER_ENABLED is false. Commands will still run, "
+            "but enable the flag to surface accurate health status.",
+            err=True,
+        )
+
+
+@worker_group.command("run")
+@click.option("--loglevel", default="info", show_default=True)
+@click.option("--concurrency", type=int, help="Number of worker processes/threads.")
+@click.option(
+    "--queues",
+    default=DEFAULT_QUEUE_NAME,
+    show_default=True,
+    help="Comma-separated queue list to consume.",
+)
+@click.pass_context
+def worker_run(ctx, loglevel: str, concurrency: Optional[int], queues: str):
+    """
+    Start the Celery worker in the current process.
+    """
+    info = ctx.ensure_object(ScriptInfo)
+    app = info.load_app()
+    celery_app = _resolve_celery(app)
+
+    state = app.extensions.get("importer", {})
+    if state is not None:
+        state["worker_enabled"] = True
+
+    argv = [
+        "worker",
+        "--loglevel",
+        loglevel,
+        "-Q",
+        queues,
+    ]
+    if concurrency:
+        argv.extend(["--concurrency", str(concurrency)])
+
+    click.echo(f"Starting importer worker (queues: {queues}, loglevel: {loglevel})")
+    try:
+        celery_app.worker_main(argv=argv)
+    except KeyboardInterrupt:
+        click.echo("Worker shutdown requested. Exiting...")
+
+
+@worker_group.command("ping")
+@click.option("--timeout", default=10.0, show_default=True, help="Seconds to wait for a response.")
+@click.pass_context
+def worker_ping(ctx, timeout: float):
+    """
+    Validate worker connectivity by executing the heartbeat task.
+    """
+    info = ctx.ensure_object(ScriptInfo)
+    app = info.load_app()
+    celery_app = _resolve_celery(app)
+    task = celery_app.tasks.get("importer.healthcheck")
+    if task is None:
+        raise click.ClickException("Heartbeat task 'importer.healthcheck' is not registered.")
+
+    result = task.apply_async()
+    try:
+        payload = result.get(timeout=timeout)
+    except CeleryTimeoutError as exc:
+        raise click.ClickException(f"Worker did not respond within {timeout}s") from exc
+    except Exception as exc:  # pragma: no cover - surfacing unexpected errors
+        raise click.ClickException(f"Worker ping failed: {exc}") from exc
+
+    click.echo(json.dumps(payload, indent=2))
 

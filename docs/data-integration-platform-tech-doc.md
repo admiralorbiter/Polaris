@@ -1,6 +1,6 @@
 # Volunteer Import Platform — Markdown Backlog
 
-**Project**: Optional Importer for Volunteer Management (Flask + Postgres + Redis + Celery/RQ)  
+**Project**: Optional Importer for Volunteer Management (Flask + Postgres + Celery — SQLite transport by default, Redis optional)  
 **Owner**: @jlane  
 **Date**: 2025-11-08  
 **Version**: v1.0 (Markdown planning artifact)  
@@ -88,10 +88,16 @@
 ### IMP-3 — Worker process + queues _(5 pts)_
 **User story**: As an operator, long-running tasks run off the web thread.  
 **Acceptance Criteria**
-- Celery/RQ worker connected to Redis; consumes `imports` queue.  
-- Health check shows worker up; graceful stop (SIGTERM).  
+- Celery worker consumes the `imports` queue using the SQLite/SQLAlchemy transport by default (no Redis required); configuration supports swapping to Redis/Postgres via env vars.  
+- Health check (`flask importer worker ping` or REST endpoint) round-trips a heartbeat task.  
+- Worker startup (`flask importer worker run`) and shutdown honour SIGTERM/SIGINT, draining in-flight tasks gracefully.  
 **Dependencies**: IMP-1.  
-**Notes**: Provide Procfile/compose entries.
+**Notes**: Document env vars (`IMPORTER_WORKER_ENABLED`, `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`), Procfile/compose snippets, and optional Redis upgrade path for higher throughput.  
+**Implementation outline**:
+- `flask importer worker run` wraps `celery worker -A flask_app.importer.tasks -Q imports`; honours `IMPORTER_WORKER_ENABLED`.
+- Health diagnostics: `flask importer worker ping` (CLI) and `/importer/worker_health` when importer enabled.
+- Default transport: SQLite file at `instance/celery.sqlite`; production override via `CELERY_BROKER_URL=redis://...` and matching result backend.
+- Provide Procfile entry (`worker: flask importer worker run`) and optional `docker-compose.worker.yml` snippet for Redis deployments.
 
 ### IMP-4 — DoR/DoD checklists & Golden Dataset scaffold _(3 pts)_
 **User story**: As QA/PM, I want shared criteria and seed test data.  

@@ -52,7 +52,7 @@
     - **Dedupe**: deterministic + fuzzy matching; merge decisions.
     - **Orchestrator**: job graph (extract → validate → dedupe → upsert → reconcile).
     - **Admin UI**: runs, DQ inbox, duplicates, reconciliation, mappings, controls.
-- **Worker process**: Celery/RQ/other queue, separate from the web server.
+- **Worker process**: Celery worker on the `imports` queue, defaulting to a SQLite-backed broker/result store so local development needs only Python; swap to Redis/Postgres for higher throughput deployments.
 - **Storage**: Postgres (recommended), Redis (queues), object storage (CSV uploads & exports).
 
 ### 2.2 Modular Monolith Today, Microservice Later
@@ -299,7 +299,8 @@ Each rule has: `rule_code`, `severity` (error/warn/info), remediation hints, and
 
 ## 14) Deployment & Ops
 
-- **Processes**: web (Flask) and worker (Celery/RQ) as separate processes/containers.
+- **Processes**: web (Flask) and worker (Celery) as separate processes/containers; locally, `flask importer worker run` uses the built-in SQLite transport so no Redis is required.
+- **Production tuning**: set `CELERY_BROKER_URL` / `CELERY_RESULT_BACKEND` to Redis or Postgres, adjust worker concurrency flags, and run `celery beat` (or cron) for scheduled nightly imports.
 - **Migrations**: add importer tables first; keep core untouched.
 - **Blue/Green or canary** for enabling new rules—start as **warn-only** before enforcing.
 - **Backfill runbook**:
@@ -377,11 +378,12 @@ Each rule has: `rule_code`, `severity` (error/warn/info), remediation hints, and
     - `/app/importer` — adapters, contracts, dq, dedupe, orchestrator, admin UI
 - **Config**
     - ENV vars: `IMPORTER_ENABLED`, `IMPORTER_ADAPTERS`, `IMPORTER_SCHEDULE`, `IMPORTER_RULES_MODE=warn|enforce`, thresholds.
+    - Worker flags: `IMPORTER_WORKER_ENABLED` (default false), `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`; leave unset to use the bundled SQLite transport (`celery.sqlite`) so no Redis is required locally.
     - YAML mapping files stored under `/app/importer/mappings/`.
 - **Processes**
     - Web: `gunicorn ...`
-    - Worker: `celery worker -Q imports` (or RQ/Dramatiq)
-    - Scheduler: `celery beat` or cron
+    - Worker: `flask importer worker run` (wraps Celery with the configured transport)
+    - Scheduler: `celery beat` or cron (reuses the same broker, still viable with SQLite for low-volume jobs)
 
 ## 20) Glossary
 

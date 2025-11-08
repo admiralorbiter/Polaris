@@ -86,6 +86,13 @@ class Config:
             "Provide at least one adapter name."
         )
 
+    _raw_worker_enabled = os.environ.get("IMPORTER_WORKER_ENABLED")
+    IMPORTER_WORKER_ENABLED = _coerce_bool(_raw_worker_enabled, default=False)
+    CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL")
+    CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND")
+    CELERY_SQLITE_PATH = os.environ.get("CELERY_SQLITE_PATH")
+    CELERY_CONFIG = os.environ.get("CELERY_CONFIG")
+
     # Session configuration
     PERMANENT_SESSION_LIFETIME = timedelta(days=7)  # Reduced from 31 days for better security
     SESSION_COOKIE_SECURE = False  # Set to True in production with HTTPS
