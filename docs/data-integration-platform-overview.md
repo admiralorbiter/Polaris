@@ -381,7 +381,16 @@ Each rule has: `rule_code`, `severity` (error/warn/info), remediation hints, and
     - Worker flags: `IMPORTER_WORKER_ENABLED` (default false), `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`; leave unset to use the bundled SQLite transport (`celery.sqlite`) so no Redis is required locally.
     - DoR/DoD checklists live in `docs/importer-dor.md` and `docs/importer-dod.md`; reference them from importer issues.
     - Golden dataset samples live under `ops/testdata/importer_golden_dataset_v0/`; update the README when new scenarios are added.
+    - Baseline metrics/logging: record staging rows landed, validation failures (`dq_violations` per rule), dedupe suggestions/decisions, load insert/update/skip counts, and confirm worker heartbeat via CLI/health endpoint.
     - YAML mapping files stored under `/app/importer/mappings/`.
+- **Local dev bootstrap** (add to `.env` for quick testing)
+    ```
+    IMPORTER_ENABLED=true
+    IMPORTER_ADAPTERS=csv
+    IMPORTER_WORKER_ENABLED=true
+    CELERY_CONFIG={"task_always_eager": true, "task_eager_propagates": true}
+    ```
+- **Processes**
 - **Processes**
     - Web: `gunicorn ...`
     - Worker: `flask importer worker run` (wraps Celery with the configured transport)

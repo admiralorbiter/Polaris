@@ -49,9 +49,11 @@
 
 **Definition of Ready (DoR)**  
 - Story written; AC clear; dependencies listed; flags/config keys named; test data identified.
+- Importer DoR checklist: see `docs/importer-dor.md` (link this document in Jira issues).
 
 **Definition of Done (DoD)**  
 - Feature behind flag (if applicable) • unit/functional tests • docs updated • counters/metrics visible in Runs • security reviewed • rollback strategy noted.
+- Importer DoD checklist: see `docs/importer-dod.md`; include the checklist when closing importer tickets.
 
 ---
 

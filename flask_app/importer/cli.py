@@ -149,3 +149,33 @@ def worker_ping(ctx, timeout: float):
 
     click.echo(json.dumps(payload, indent=2))
 
+
+@importer_cli.command("run")
+@click.option("--source", required=True, help="Logical source identifier (e.g., csv, salesforce).")
+@click.option("--file", "file_path", type=click.Path(exists=True, dir_okay=False), help="Path to input file (if applicable).")
+@click.option("--dry-run", is_flag=True, help="Prepare the run without committing writes.")
+@click.pass_context
+def importer_run(ctx, source: str, file_path: Optional[str], dry_run: bool):
+    """
+    Placeholder importer execution command.
+
+    Future work (IMP-10+) will route this into the real pipeline. For now we
+    simply log the provided parameters so upcoming stories have a consistent CLI
+    entry point.
+    """
+    info = ctx.ensure_object(ScriptInfo)
+    app = info.load_app()
+    if not is_importer_enabled(app):
+        raise click.ClickException(
+            "Importer is disabled; enable it via IMPORTER_ENABLED before running."
+        )
+
+    message = (
+        "Importer run CLI placeholder invoked.\n"
+        f"  source     : {source}\n"
+        f"  file       : {file_path or '(none)'}\n"
+        f"  dry_run    : {dry_run}\n"
+        "No actions were taken. Implement pipeline logic in future sprints."
+    )
+    click.echo(message)
+
