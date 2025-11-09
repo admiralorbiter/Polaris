@@ -3,6 +3,8 @@
 
   const bootstrapModal = window.bootstrap ? window.bootstrap.Modal : null;
   const bootstrapToast = window.bootstrap ? window.bootstrap.Toast : null;
+  const EMAIL_REGEX = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+  const PHONE_REGEX = /^\+[1-9]\d{7,14}$/;
 
   document.addEventListener("DOMContentLoaded", () => {
     const config = window.IMPORTER_DQ_CONFIG;
@@ -28,6 +30,15 @@
       modalLoader: document.getElementById("dq-detail-loader"),
       modalContent: document.getElementById("dq-detail-content"),
       modalUpdated: document.getElementById("dq-detail-updated"),
+      remediationStats: document.getElementById("dq-remediation-stats"),
+      remediateModal: document.getElementById("dq-remediate-modal"),
+      remediateForm: document.getElementById("dq-remediate-form"),
+      remediatePayload: document.getElementById("dq-remediate-payload"),
+      remediateNotes: document.getElementById("dq-remediate-notes"),
+      remediateErrors: document.getElementById("dq-remediate-errors"),
+      remediateSubmit: document.getElementById("dq-remediate-submit"),
+      remediateTitle: document.getElementById("dq-remediate-title"),
+      remediateUpdated: document.getElementById("dq-remediate-updated"),
     };
 
     const modalFields = elements.modalContent
@@ -53,6 +64,9 @@
       isLoading: false,
       lastResponse: null,
       modalInstance: bootstrapModal && elements.modalElement ? bootstrapModal.getOrCreateInstance(elements.modalElement) : null,
+      remediateModalInstance: bootstrapModal && elements.remediateModal ? bootstrapModal.getOrCreateInstance(elements.remediateModal) : null,
+      detailCache: new Map(),
+      activeRemediationId: null,
     };
 
     function withLoading(callback) {
@@ -165,6 +179,14 @@
       }
 
       violations.forEach((violation) => {
+        const actions = [
+          `<button type="button" class="btn btn-outline-primary dq-detail-link" data-violation-id="${violation.id}">View</button>`,
+        ];
+        if (violation.status === "open") {
+          actions.push(
+            `<button type="button" class="btn btn-primary dq-remediate-btn" data-violation-id="${violation.id}">Edit &amp; Requeue</button>`
+          );
+        }
         const row = document.createElement("tr");
         row.dataset.violationId = String(violation.id);
         row.innerHTML = `
@@ -176,7 +198,9 @@
           <td>${formatDateTime(violation.created_at)}</td>
           <td>${violation.preview ? escapeHtml(violation.preview) : "—"}</td>
           <td class="text-end">
-            <button type="button" class="btn btn-outline-primary btn-sm dq-detail-link" data-violation-id="${violation.id}">View</button>
+            <div class="btn-group btn-group-sm" role="group">
+              ${actions.join("")}
+            </div>
           </td>
         `;
         elements.tableBody.appendChild(row);
@@ -322,6 +346,7 @@
             });
             updateLastUpdated();
             loadStats(params);
+            loadRemediationStats();
           })
           .catch((error) => {
             console.error("Failed to load violations", error);
@@ -354,13 +379,48 @@
       }
     }
 
+    function buildDetailUrl(violationId) {
+      const template = config.api.detailTemplate;
+      if (!template) return "";
+      if (template.includes("/0/")) {
+        return template.replace("/0/", `/${violationId}/`);
+      }
+      if (template.endsWith("/0")) {
+        return `${template.slice(0, -2)}/${violationId}`;
+      }
+      return template.replace(/0$/, String(violationId));
+    }
+
+    function buildRemediateUrl(violationId) {
+      const template = config.api.remediateTemplate;
+      if (!template) return "";
+      if (template.includes("/0/")) {
+        return template.replace("/0/", `/${violationId}/`);
+      }
+      if (template.endsWith("/0")) {
+        return `${template.slice(0, -2)}/${violationId}`;
+      }
+      return template.replace(/0$/, String(violationId));
+    }
+
+    function fetchViolationDetail(violationId) {
+      if (state.detailCache.has(violationId)) {
+        return Promise.resolve(state.detailCache.get(violationId));
+      }
+      const url = buildDetailUrl(violationId);
+      return fetchJSON(url).then((detail) => {
+        state.detailCache.set(violationId, detail);
+        return detail;
+      });
+    }
+
     function openDetail(violationId) {
       if (!elements.modalElement || !elements.modalLoader || !elements.modalContent) return;
       elements.modalLoader.classList.remove("d-none");
       elements.modalContent.classList.add("d-none");
       if (state.modalInstance) state.modalInstance.show();
 
-      fetchJSON(`${config.api.detailBase}${violationId}`)
+      fetchViolationDetail(violationId)
         .then((detail) => {
           elements.modalLoader.classList.add("d-none");
           elements.modalContent.classList.remove("d-none");
@@ -374,6 +434,7 @@
 
     function updateModalFields(detail) {
       if (!elements.modalContent) return;
+      state.detailCache.set(detail.id, detail);
       if (elements.modalTitle) elements.modalTitle.textContent = `Violation ${detail.id}`;
       Object.entries(modalFields).forEach(([key, element]) => {
         if (!element) return;
@@ -396,6 +457,217 @@
       } catch (err) {
         return String(value);
       }
+    }
+
+    function stringifyJson(value) {
+      try {
+        return JSON.stringify(value ?? {}, null, 2);
+      } catch (err) {
+        return typeof value === "string" ? value : "{}";
+      }
+    }
+
+    function clearRemediationErrors() {
+      if (!elements.remediateErrors) return;
+      elements.remediateErrors.classList.add("d-none");
+      elements.remediateErrors.innerHTML = "";
+    }
+
+    function renderRemediationErrors(messages) {
+      if (!elements.remediateErrors) return;
+      const items = Array.isArray(messages) ? messages : [messages];
+      const filtered = items.filter(Boolean);
+      if (!filtered.length) {
+        clearRemediationErrors();
+        return;
+      }
+      elements.remediateErrors.innerHTML = `<ul class="mb-0">${filtered.map((msg) => `<li>${escapeHtml(String(msg))}</li>`).join("")}</ul>`;
+      elements.remediateErrors.classList.remove("d-none");
+    }
+
+    function setRemediationLoading(isLoading) {
+      if (!elements.remediateSubmit) return;
+      elements.remediateSubmit.disabled = isLoading;
+      elements.remediateSubmit.innerHTML = isLoading
+        ? `<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Submitting...`
+        : `<i class="fas fa-sync-alt me-1"></i>Validate &amp; Requeue`;
+    }
+
+    function populateRemediationForm(detail) {
+      if (!elements.remediateForm || !elements.remediatePayload) return;
+      state.activeRemediationId = detail.id;
+      elements.remediateForm.dataset.violationId = String(detail.id);
+      if (elements.remediateTitle) elements.remediateTitle.textContent = `Remediate Violation ${detail.id}`;
+      const preferredPayload =
+        (detail.edited_payload && Object.keys(detail.edited_payload).length ? detail.edited_payload : null) ||
+        detail.normalized_payload ||
+        detail.staging_payload ||
+        {};
+      elements.remediatePayload.value = stringifyJson(preferredPayload);
+      if (elements.remediateNotes) elements.remediateNotes.value = detail.remediation_notes || "";
+      clearRemediationErrors();
+      if (elements.remediateUpdated) {
+        elements.remediateUpdated.textContent = `Draft generated ${new Date().toLocaleTimeString()}`;
+      }
+    }
+
+    function validateRemediationPayload(payload) {
+      const errors = [];
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        errors.push("Payload must be a JSON object.");
+        return errors;
+      }
+      const firstName = (payload.first_name || "").toString().trim();
+      const lastName = (payload.last_name || "").toString().trim();
+      const email = (payload.email || payload.email_normalized || "").toString().trim();
+      const phone = (payload.phone_e164 || payload.phone || "").toString().trim();
+
+      if (!firstName) errors.push("First name is required.");
+      if (!lastName) errors.push("Last name is required.");
+      if (!email && !phone) {
+        errors.push("Provide at least one contact method (email or phone in E.164).");
+      }
+      if (email && !EMAIL_REGEX.test(email)) {
+        errors.push("Email format appears invalid.");
+      }
+      if (phone && !PHONE_REGEX.test(phone)) {
+        errors.push("Phone must be formatted in E.164 (e.g., +15551234567).");
+      }
+      return errors;
+    }
+
+    function openRemediationModal(violationId) {
+      if (!elements.remediateModal || !state.remediateModalInstance) return;
+      clearRemediationErrors();
+      const detail = state.detailCache.get(violationId);
+      const show = (violationDetail) => {
+        populateRemediationForm(violationDetail);
+        state.remediateModalInstance.show();
+      };
+      if (detail) {
+        show(detail);
+        return;
+      }
+      fetchViolationDetail(violationId)
+        .then((violationDetail) => show(violationDetail))
+        .catch((error) => {
+          showToast(error.message);
+        });
+    }
+
+    function postRemediation(violationId, payload, notes) {
+      const url = buildRemediateUrl(violationId);
+      return fetch(url, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ payload, notes }),
+      }).then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const error = new Error(data.error || "Remediation failed.");
+          error.status = response.status;
+          error.payload = data;
+          throw error;
+        }
+        return data;
+      });
+    }
+
+    function handleRemediationSubmit(event) {
+      event.preventDefault();
+      if (!elements.remediateForm || !elements.remediatePayload) return;
+      const violationId = Number(elements.remediateForm.dataset.violationId);
+      if (!violationId) {
+        renderRemediationErrors("Missing violation identifier.");
+        return;
+      }
+      let parsedPayload;
+      try {
+        parsedPayload = JSON.parse(elements.remediatePayload.value || "{}");
+      } catch (err) {
+        renderRemediationErrors("Payload is not valid JSON.");
+        return;
+      }
+      const validationErrors = validateRemediationPayload(parsedPayload);
+      if (validationErrors.length) {
+        renderRemediationErrors(validationErrors);
+        return;
+      }
+      setRemediationLoading(true);
+      const notes = elements.remediateNotes ? elements.remediateNotes.value : "";
+      postRemediation(violationId, parsedPayload, notes)
+        .then((response) => {
+          clearRemediationErrors();
+          showToast("Row fixed and queued for import.", "success");
+          if (state.remediateModalInstance) state.remediateModalInstance.hide();
+          state.detailCache.delete(violationId);
+          fetchViolationDetail(violationId).catch(() => {});
+          loadViolations();
+          loadRemediationStats();
+        })
+        .catch((error) => {
+          if (error.status === 422 && error.payload && Array.isArray(error.payload.errors)) {
+            const messages = error.payload.errors.map((item) => {
+              if (!item) return null;
+              const rule = item.rule_code ? `${item.rule_code}: ` : "";
+              return `${rule}${item.message || "Validation failed."}`;
+            });
+            renderRemediationErrors(messages);
+          } else if (error.payload && error.payload.error) {
+            renderRemediationErrors(error.payload.error);
+            showToast(error.payload.error);
+          } else {
+            const message = error.message || "Remediation failed.";
+            renderRemediationErrors(message);
+            showToast(message);
+          }
+        })
+        .finally(() => {
+          setRemediationLoading(false);
+        });
+    }
+
+    function renderRemediationStats(stats) {
+      if (!elements.remediationStats) return;
+      elements.remediationStats.innerHTML = "";
+      if (!stats || typeof stats.attempts !== "number") {
+        const empty = document.createElement("div");
+        empty.className = "col-12";
+        empty.innerHTML = `<div class="card shadow-sm h-100"><div class="card-body"><p class="mb-0 text-muted">Remediation stats unavailable.</p></div></div>`;
+        elements.remediationStats.appendChild(empty);
+        return;
+      }
+
+      const attemptsText = `<strong>${stats.attempts}</strong> attempts`;
+      const successesText = stats.successes
+        ? `<span class="d-block">Successes: <strong>${stats.successes}</strong></span><span class="d-block">Failures: <strong>${stats.failures}</strong></span>`
+        : "No successes yet.";
+      const successRatePercent = Math.round((stats.success_rate || 0) * 1000) / 10;
+      const successRateText = `${Number.isFinite(successRatePercent) ? successRatePercent.toFixed(1) : "0.0"}% success rate`;
+      const fieldsText = (stats.top_fields || []).length
+        ? stats.top_fields.map((item) => `<span class="d-block">${escapeHtml(item.field)}: <strong>${item.count}</strong></span>`).join("")
+        : "—";
+      const rulesText = (stats.top_rules || []).length
+        ? stats.top_rules.map((item) => `<span class="d-block">${escapeHtml(item.rule_code)}: <strong>${item.count}</strong></span>`).join("")
+        : "—";
+
+      elements.remediationStats.appendChild(createSummaryCard(`Remediations (last ${stats.days} days)`, attemptsText, true));
+      elements.remediationStats.appendChild(createSummaryCard("Success vs failure", successesText, true));
+      elements.remediationStats.appendChild(createSummaryCard("Success rate", `<strong>${successRateText}</strong>`, true));
+      elements.remediationStats.appendChild(createSummaryCard("Top fields edited", fieldsText, true));
+      elements.remediationStats.appendChild(createSummaryCard("Rules encountered", rulesText, true));
+    }
+
+    function loadRemediationStats() {
+      if (!elements.remediationStats || !config.api.remediationStats) return;
+      const params = new URLSearchParams({ days: "30" });
+      fetchJSON(config.api.remediationStats, params)
+        .then((stats) => renderRemediationStats(stats))
+        .catch((error) => console.error("Failed to load remediation stats", error));
     }
 
     function escapeHtml(value) {
@@ -497,9 +769,27 @@
           if (!(target instanceof HTMLElement)) return;
           const violationId = Number(target.dataset.violationId || target.closest("[data-violation-id]")?.dataset.violationId);
           if (!violationId) return;
+          if (target.classList.contains("dq-remediate-btn")) {
+            event.preventDefault();
+            openRemediationModal(violationId);
+            return;
+          }
           if (target.classList.contains("dq-detail-link")) {
             event.preventDefault();
             openDetail(violationId);
+          }
+        });
+      }
+
+      if (elements.remediateForm) {
+        elements.remediateForm.addEventListener("submit", handleRemediationSubmit);
+      }
+
+      if (elements.remediatePayload) {
+        elements.remediatePayload.addEventListener("input", () => {
+          clearRemediationErrors();
+          if (elements.remediateUpdated) {
+            elements.remediateUpdated.textContent = `Draft updated ${new Date().toLocaleTimeString()}`;
           }
         });
       }

@@ -5,8 +5,16 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from flask_app.importer import init_importer
-from flask_app.models import AdminLog, db
-from flask_app.models.importer.schema import ImportRun, ImportRunStatus
+from flask_app.models import AdminLog, ContactEmail, ContactPhone, Volunteer, db
+from flask_app.models.importer.schema import (
+    CleanVolunteer,
+    DataQualitySeverity,
+    DataQualityStatus,
+    DataQualityViolation,
+    ImportRun,
+    ImportRunStatus,
+    StagingVolunteer,
+)
 from flask_app.routes.admin_importer import register_importer_admin_routes
 
 
@@ -305,4 +313,179 @@ def test_importer_admin_retry_file_not_found(logged_in_admin, app, tmp_path):
     response = client.post(f"/admin/imports/{run.id}/retry")
     assert response.status_code == 400
     assert "file not found" in response.get_json()["error"]
+
+
+def _create_open_violation(admin_user):
+    run = ImportRun(
+        source="csv",
+        adapter="csv",
+        status=ImportRunStatus.FAILED,
+        triggered_by_user_id=admin_user.id,
+        notes="Original failed import",
+    )
+    db.session.add(run)
+    db.session.commit()
+
+    staging = StagingVolunteer(
+        run_id=run.id,
+        external_system="csv",
+        payload_json={
+            "first_name": "Alice",
+            "last_name": "Example",
+            "email": "alice@example.org",
+            "phone": "+15555550123",
+        },
+        normalized_json={
+            "first_name": "Alice",
+            "last_name": "Example",
+            "email": "alice@example.org",
+            "phone_e164": "+15555550123",
+        },
+    )
+    db.session.add(staging)
+    db.session.commit()
+
+    violation = DataQualityViolation(
+        run_id=run.id,
+        staging_volunteer_id=staging.id,
+        rule_code="VOL_EMAIL_INVALID",
+        severity=DataQualitySeverity.ERROR,
+        status=DataQualityStatus.OPEN,
+        message="Email invalid",
+        details_json={"field": "email"},
+    )
+    db.session.add(violation)
+    db.session.commit()
+    return run, staging, violation
+
+
+def _cleanup_remediation_artifacts(run_ids):
+    for run_id in run_ids:
+        remediation_run = db.session.get(ImportRun, run_id)
+        if remediation_run is None:
+            continue
+        clean_rows = CleanVolunteer.query.filter_by(run_id=run_id).all()
+        for clean_row in clean_rows:
+            volunteer = db.session.get(Volunteer, clean_row.core_volunteer_id)
+            if volunteer:
+                ContactEmail.query.filter_by(contact_id=volunteer.id).delete()
+                ContactPhone.query.filter_by(contact_id=volunteer.id).delete()
+                db.session.delete(volunteer)
+            db.session.delete(clean_row)
+        db.session.delete(remediation_run)
+    AdminLog.query.filter(AdminLog.action == "IMPORT_VIOLATION_REMEDIATED").delete()
+    db.session.commit()
+
+
+def test_importer_admin_remediate_violation_success(logged_in_admin, app, tmp_path):
+    client, admin_user = logged_in_admin
+    _enable_importer(app, tmp_path / "uploads")
+    original_run, staging, violation = _create_open_violation(admin_user)
+
+    response = client.post(
+        f"/admin/imports/violations/{violation.id}/remediate",
+        json={
+            "payload": {
+                "first_name": "Alice",
+                "last_name": "Example",
+                "email": "routefix@example.org",
+                "phone_e164": "+15555550123",
+            },
+            "notes": "Route-based remediation",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["status"] == "fixed"
+    db.session.refresh(violation)
+    assert violation.status == DataQualityStatus.FIXED
+
+    remediation_run_id = payload["remediation_run_id"]
+    remediation_run = db.session.get(ImportRun, remediation_run_id)
+    assert remediation_run is not None
+    assert remediation_run.status == ImportRunStatus.SUCCEEDED
+    clean_row = CleanVolunteer.query.filter_by(run_id=remediation_run_id).one()
+    assert clean_row.email == "routefix@example.org"
+
+    _cleanup_remediation_artifacts([remediation_run_id])
+    db.session.delete(violation)
+    db.session.delete(staging)
+    db.session.delete(original_run)
+    db.session.commit()
+
+
+def test_importer_admin_remediate_violation_validation_error(logged_in_admin, app, tmp_path):
+    client, admin_user = logged_in_admin
+    _enable_importer(app, tmp_path / "uploads")
+    original_run, staging, violation = _create_open_violation(admin_user)
+
+    response = client.post(
+        f"/admin/imports/violations/{violation.id}/remediate",
+        json={
+            "payload": {
+                "first_name": "Alice",
+                "last_name": "Example",
+                "email": "invalid",
+            },
+            "notes": "Invalid payload",
+        },
+    )
+    assert response.status_code == 422
+    data = response.get_json()
+    assert data["status"] == "validation_failed"
+    assert data["errors"]
+    db.session.refresh(violation)
+    assert violation.status == DataQualityStatus.OPEN
+
+    db.session.delete(violation)
+    db.session.delete(staging)
+    db.session.delete(original_run)
+    db.session.commit()
+
+
+def test_importer_admin_remediation_stats_endpoint(logged_in_admin, app, tmp_path):
+    client, admin_user = logged_in_admin
+    _enable_importer(app, tmp_path / "uploads")
+    original_run, staging, violation = _create_open_violation(admin_user)
+
+    success_response = client.post(
+        f"/admin/imports/violations/{violation.id}/remediate",
+        json={
+            "payload": {
+                "first_name": "Alice",
+                "last_name": "Example",
+                "email": "stats@example.org",
+                "phone_e164": "+15555550123",
+            },
+            "notes": "Stats success",
+        },
+    )
+    assert success_response.status_code == 200
+    remediation_run_id = success_response.get_json()["remediation_run_id"]
+
+    second_run, second_staging, second_violation = _create_open_violation(admin_user)
+    failure_response = client.post(
+        f"/admin/imports/violations/{second_violation.id}/remediate",
+        json={
+            "payload": {
+                "first_name": "Alice",
+                "last_name": "Example",
+                "email": "bad",
+            },
+            "notes": "Stats failure",
+        },
+    )
+    assert failure_response.status_code == 422
+
+    stats_response = client.get("/admin/imports/remediation/stats")
+    assert stats_response.status_code == 200
+    stats = stats_response.get_json()
+    assert stats["attempts"] >= 2
+    assert stats["successes"] >= 1
+    assert stats["failures"] >= 1
+
+    _cleanup_remediation_artifacts([remediation_run_id])
+    for obj in (violation, staging, original_run, second_violation, second_staging, second_run):
+        db.session.delete(obj)
+    db.session.commit()
 

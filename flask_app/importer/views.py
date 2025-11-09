@@ -449,6 +449,10 @@ def _serialize_violation_detail(violation):
         "normalized_payload": normalized,
         "violation_details": details,
         "remediation_hint": _remediation_hint(violation.rule_code),
+        "remediation_notes": violation.remediation_notes,
+        "edited_payload": violation.edited_payload_json or {},
+        "edited_fields": violation.edited_fields_json or {},
+        "remediation_audit": violation.remediation_audit_json or {},
     }
 
 

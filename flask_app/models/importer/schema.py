@@ -235,6 +235,9 @@ class DataQualityViolation(BaseModel):
     message: Mapped[str | None] = mapped_column(db.Text, nullable=True)
     details_json: Mapped[dict | None] = mapped_column(db.JSON, nullable=True)
     remediation_notes: Mapped[str | None] = mapped_column(db.Text, nullable=True)
+    edited_payload_json: Mapped[dict | None] = mapped_column(db.JSON, nullable=True)
+    edited_fields_json: Mapped[dict | None] = mapped_column(db.JSON, nullable=True)
+    remediation_audit_json: Mapped[dict | None] = mapped_column(db.JSON, nullable=True)
     remediated_at: Mapped[datetime | None] = mapped_column(db.DateTime(timezone=True))
     remediated_by_user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id"),

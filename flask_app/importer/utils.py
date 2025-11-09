@@ -4,8 +4,9 @@ Importer-specific utilities for handling uploaded files and cleanup.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 from uuid import uuid4
 
 from flask import current_app
@@ -81,4 +82,55 @@ def cleanup_upload(path: Path) -> None:
         path.unlink(missing_ok=True)
     except Exception as exc:  # pragma: no cover - defensive logging
         current_app.logger.warning("Failed to remove importer upload %s: %s", path, exc)
+
+
+def ensure_json_serializable(value: Any) -> Any:
+    """
+    Best-effort conversion of values to JSON-serializable representations.
+    """
+
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, Mapping):
+        return {str(key): ensure_json_serializable(inner) for key, inner in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [ensure_json_serializable(item) for item in value]
+    if isinstance(value, Path):
+        return str(value)
+    return str(value)
+
+
+def normalize_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]:
+    """
+    Return a shallow copy of ``payload`` with JSON-serializable values.
+    """
+
+    if not payload:
+        return {}
+    normalized: dict[str, Any] = {}
+    for key, value in payload.items():
+        normalized[str(key)] = ensure_json_serializable(value)
+    return normalized
+
+
+def diff_payload(
+    original: Mapping[str, Any] | None,
+    updated: Mapping[str, Any] | None,
+) -> dict[str, dict[str, Any]]:
+    """
+    Compute a simple field-level diff between two payloads.
+    """
+
+    original_normalized = normalize_payload(original)
+    updated_normalized = normalize_payload(updated)
+
+    diff: dict[str, dict[str, Any]] = {}
+    candidate_keys = set(original_normalized) | set(updated_normalized)
+    for key in sorted(candidate_keys):
+        before = original_normalized.get(key)
+        after = updated_normalized.get(key)
+        if before == after:
+            continue
+        diff[key] = {"before": before, "after": after}
+    return diff
 

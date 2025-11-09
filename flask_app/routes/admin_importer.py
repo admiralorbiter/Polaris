@@ -12,7 +12,12 @@ from flask import Blueprint, current_app, jsonify, render_template, request, sen
 from flask_login import current_user, login_required
 
 from flask_app.importer.celery_app import DEFAULT_QUEUE_NAME, get_celery_app
-from flask_app.importer.pipeline.dq_service import DataQualityViolationService
+from flask_app.importer.pipeline.dq_service import (
+    DataQualityViolationService,
+    RemediationConflict,
+    RemediationNotFound,
+    RemediationValidationError,
+)
 from flask_app.importer.pipeline.run_service import ImportRunService
 from flask_app.importer.utils import allowed_file, cleanup_upload, persist_upload, resolve_upload_directory
 from flask_app.models import AdminLog, db
@@ -185,6 +190,101 @@ def importer_dq_inbox_page():
         status_options=status_options,
         rule_code_options=rule_code_options,
     )
+
+
+@admin_importer_blueprint.post("/violations/<int:violation_id>/remediate")
+@login_required
+@permission_required("remediate_imports", org_context=False)
+def importer_remediate_violation(violation_id: int):
+    if not _ensure_importer_enabled():
+        return jsonify({"error": "Importer is disabled."}), HTTPStatus.NOT_FOUND
+
+    payload = request.get_json(silent=True) or {}
+    edited_payload = payload.get("payload")
+    notes = payload.get("notes")
+
+    if edited_payload is None:
+        return jsonify({"error": "Request body must include 'payload'."}), HTTPStatus.BAD_REQUEST
+
+    try:
+        result = _dq_service.remediate_violation(
+            violation_id,
+            edited_payload=edited_payload,
+            notes=notes,
+            user_id=current_user.id,
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get("User-Agent"),
+        )
+    except RemediationValidationError as exc:
+        return (
+            jsonify(
+                {
+                    "status": "validation_failed",
+                    "violation_id": violation_id,
+                    "errors": exc.errors,
+                }
+            ),
+            HTTPStatus.UNPROCESSABLE_ENTITY,
+        )
+    except RemediationConflict as exc:
+        return jsonify({"error": str(exc)}), HTTPStatus.CONFLICT
+    except RemediationNotFound:
+        return jsonify({"error": f"Violation {violation_id} not found."}), HTTPStatus.NOT_FOUND
+    except Exception as exc:  # pragma: no cover - defensive logging path
+        current_app.logger.exception(
+            "Importer remediation failed",
+            extra={"violation_id": violation_id, "user_id": current_user.id},
+            exc_info=exc,
+        )
+        return (
+            jsonify({"error": "Unexpected error during remediation; please retry later."}),
+            HTTPStatus.INTERNAL_SERVER_ERROR,
+        )
+
+    status_value = result.status.value if hasattr(result.status, "value") else str(result.status)
+    response = {
+        "violation_id": result.violation_id,
+        "status": status_value,
+        "remediation_run_id": result.remediation_run_id,
+        "edited_payload": dict(result.edited_payload),
+        "diff": dict(result.diff),
+        "clean_contact_id": result.clean_contact_id,
+        "clean_volunteer_id": result.clean_volunteer_id,
+    }
+
+    return jsonify(response), HTTPStatus.OK
+
+
+@admin_importer_blueprint.get("/remediation/stats")
+@login_required
+@permission_required("remediate_imports", org_context=False)
+def importer_remediation_stats():
+    if not _ensure_importer_enabled():
+        return jsonify({"error": "Importer is disabled."}), HTTPStatus.NOT_FOUND
+
+    days_raw = request.args.get("days", "30")
+    try:
+        days = int(days_raw)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Query parameter 'days' must be an integer."}), HTTPStatus.BAD_REQUEST
+
+    stats = _dq_service.get_remediation_stats(days=days)
+    success_rate = (stats.successes / stats.attempts) if stats.attempts else 0.0
+
+    top_fields = sorted(stats.field_counts.items(), key=lambda item: item[1], reverse=True)[:10]
+    top_rules = sorted(stats.rule_counts.items(), key=lambda item: item[1], reverse=True)[:10]
+
+    response = {
+        "since": stats.since.isoformat(),
+        "days": max(1, days),
+        "attempts": stats.attempts,
+        "successes": stats.successes,
+        "failures": stats.failures,
+        "success_rate": round(success_rate, 4),
+        "top_fields": [{"field": field, "count": count} for field, count in top_fields],
+        "top_rules": [{"rule_code": rule, "count": count} for rule, count in top_rules],
+    }
+    return jsonify(response)
 
 
 @admin_importer_blueprint.post("/upload")

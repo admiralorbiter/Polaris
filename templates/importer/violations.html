@@ -124,6 +124,9 @@
   <div class="row g-3 mb-4" id="dq-summary-cards" aria-live="polite">
     <!-- Populated via JS -->
   </div>
+  <div class="row g-3 mb-4" id="dq-remediation-stats" aria-live="polite">
+    <!-- Populated via JS -->
+  </div>
 
   <div class="card shadow-sm">
     <div class="card-header d-flex justify-content-between align-items-center">
@@ -221,14 +224,68 @@
   </div>
 </div>
 
+<div class="modal fade" id="dq-remediate-modal" tabindex="-1" aria-labelledby="dq-remediate-title" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <form id="dq-remediate-form" novalidate>
+        <div class="modal-header">
+          <h2 class="modal-title h5" id="dq-remediate-title">Remediate Violation</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div id="dq-remediate-errors" class="alert alert-danger d-none" role="alert"></div>
+          <input type="hidden" name="violation_id" id="dq-remediate-violation-id">
+          <div class="mb-3">
+            <label for="dq-remediate-payload" class="form-label">Edited payload (JSON)</label>
+            <textarea
+              class="form-control font-monospace"
+              id="dq-remediate-payload"
+              name="payload_json"
+              rows="12"
+              spellcheck="false"
+              aria-describedby="dq-remediate-payload-help"
+              required
+            ></textarea>
+            <div id="dq-remediate-payload-help" class="form-text">
+              Update the volunteer payload and ensure it is valid JSON. Key fields such as <code>first_name</code>, <code>last_name</code>, and a contact method must be provided.
+            </div>
+          </div>
+          <div class="mb-3">
+            <label for="dq-remediate-notes" class="form-label">Remediation notes (optional)</label>
+            <textarea
+              class="form-control"
+              id="dq-remediate-notes"
+              name="notes"
+              rows="3"
+              placeholder="Document context for this remediation"
+            ></textarea>
+          </div>
+        </div>
+        <div class="modal-footer justify-content-between">
+          <span class="text-muted small" id="dq-remediate-updated"></span>
+          <div class="d-flex gap-2">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="dq-remediate-submit">
+              <i class="fas fa-sync-alt me-1"></i>
+              Validate &amp; Requeue
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
 <script>
   window.IMPORTER_DQ_CONFIG = {
     api: {
       list: "{{ url_for('importer.importer_violations_list') }}",
-      detailBase: "{{ url_for('importer.importer_violation_detail', violation_id=0)[:-1] }}",
+      detailTemplate: "{{ url_for('importer.importer_violation_detail', violation_id=0) }}",
       stats: "{{ url_for('importer.importer_violations_stats') }}",
       export: "{{ url_for('importer.importer_violations_export') }}",
-      ruleCodes: "{{ url_for('importer.importer_violations_rule_codes') }}"
+      ruleCodes: "{{ url_for('importer.importer_violations_rule_codes') }}",
+      remediateTemplate: "{{ url_for('admin_importer.importer_remediate_violation', violation_id=0) }}",
+      remediationStats: "{{ url_for('admin_importer.importer_remediation_stats') }}"
     },
     options: {
       severity: {{ severity_options | tojson }},

@@ -8,23 +8,31 @@ logic to SQLAlchemy internals.
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 from io import StringIO
 from typing import Any, Iterable, Mapping, MutableMapping, Sequence
 
 import csv
 import json
+import hashlib
 
 from sqlalchemy import and_, func
 from sqlalchemy.orm import Session, joinedload
 
-from flask_app.models import db
+from flask_app.importer.pipeline.clean import promote_clean_volunteers
+from flask_app.importer.pipeline.dq import DQResult, evaluate_rules, run_minimal_dq
+from flask_app.importer.pipeline.load_core import load_core_volunteers
+from flask_app.importer.utils import diff_payload, normalize_payload
+from flask_app.models import AdminLog, db
 from flask_app.models.importer import (
     DataQualitySeverity,
     DataQualityStatus,
     DataQualityViolation,
+    ImportRunStatus,
     ImportRun,
+    StagingRecordStatus,
     StagingVolunteer,
 )
 
@@ -132,6 +140,48 @@ class ViolationStats:
     by_status: Mapping[str, int]
 
 
+class RemediationError(Exception):
+    """Base exception for remediation failures."""
+
+
+class RemediationNotFound(RemediationError):
+    """Raised when the target violation cannot be located."""
+
+
+class RemediationConflict(RemediationError):
+    """Raised when the violation state prevents remediation."""
+
+
+class RemediationValidationError(RemediationError):
+    """Raised when remediation input fails validation or DQ rules."""
+
+    def __init__(self, errors: Sequence[Mapping[str, Any]]):
+        super().__init__("Remediation failed validation.")
+        self.errors: list[Mapping[str, Any]] = list(errors)
+
+
+@dataclass(slots=True)
+class RemediationResult:
+    violation_id: int
+    status: DataQualityStatus
+    remediation_run_id: int | None
+    dq_errors: list[Mapping[str, Any]]
+    edited_payload: Mapping[str, Any]
+    diff: Mapping[str, Mapping[str, Any]]
+    clean_contact_id: int | None
+    clean_volunteer_id: int | None
+
+
+@dataclass(slots=True)
+class RemediationStats:
+    since: datetime
+    attempts: int
+    successes: int
+    failures: int
+    field_counts: Mapping[str, int]
+    rule_counts: Mapping[str, int]
+
+
 class DataQualityViolationService:
     """Facade for searching and exporting data quality violations."""
 
@@ -182,6 +232,249 @@ class DataQualityViolationService:
             .one_or_none()
         )
 
+    def remediate_violation(
+        self,
+        violation_id: int,
+        *,
+        edited_payload: Mapping[str, Any],
+        notes: str | None,
+        user_id: int,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> RemediationResult:
+        """
+        Apply steward-provided edits to a quarantined row and re-run the importer pipeline.
+        """
+
+        violation = self.get_violation(violation_id)
+        if violation is None:
+            raise RemediationNotFound(f"Violation {violation_id} not found.")
+        if violation.status != DataQualityStatus.OPEN:
+            raise RemediationConflict("Violation is not open for remediation.")
+        staging_row = violation.staging_row
+        if staging_row is None:
+            raise RemediationConflict("Violation is detached from its staging row and cannot be remediated.")
+        if not isinstance(edited_payload, Mapping):
+            raise RemediationValidationError(
+                [{"rule_code": "PAYLOAD_FORMAT", "message": "Edited payload must be an object.", "details": {}}]
+            )
+
+        now = datetime.now(timezone.utc)
+        original_payload = _compose_payload_from_staging(staging_row)
+        original_normalized = normalize_payload(original_payload)
+        sanitized_updates = normalize_payload(edited_payload)
+        updated_payload = dict(original_normalized)
+        updated_payload.update(sanitized_updates)
+        diff = diff_payload(original_normalized, updated_payload)
+
+        dq_results = list(evaluate_rules(updated_payload))
+        if dq_results:
+            serialized_errors = [
+                {
+                    "rule_code": result.rule_code,
+                    "severity": result.severity.value if isinstance(result.severity, DataQualitySeverity) else str(result.severity),
+                    "message": result.message,
+                    "details": dict(result.details),
+                }
+                for result in dq_results
+            ]
+            _record_remediation_audit(
+                violation,
+                user_id=user_id,
+                timestamp=now,
+                outcome="validation_failed",
+                diff=diff,
+                edited_payload=updated_payload,
+                notes=notes,
+                dq_errors=serialized_errors,
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
+            self.session.commit()
+            raise RemediationValidationError(serialized_errors)
+
+        remediation_run = _create_remediation_run(self.session, violation, user_id=user_id, timestamp=now)
+        remediation_row = _create_remediation_staging_row(
+            self.session,
+            remediation_run,
+            staging_row,
+            updated_payload,
+        )
+
+        try:
+            dq_summary = run_minimal_dq(remediation_run, dry_run=False)
+            if dq_summary.rows_quarantined:
+                serialized_errors = [
+                    {
+                        "rule_code": result.rule_code,
+                        "severity": result.severity.value if isinstance(result.severity, DataQualitySeverity) else str(result.severity),
+                        "message": result.message,
+                        "details": dict(result.details),
+                    }
+                    for result in dq_summary.violations
+                ]
+                failure_time = datetime.now(timezone.utc)
+                remediation_run.status = ImportRunStatus.FAILED
+                remediation_run.finished_at = failure_time
+                _update_remediation_run_metrics(
+                    remediation_run,
+                    outcome="failed",
+                    timestamp=failure_time,
+                    dq_summary=dq_summary,
+                    clean_summary=None,
+                    core_summary=None,
+                    errors=serialized_errors,
+                )
+                _record_remediation_audit(
+                    violation,
+                    user_id=user_id,
+                    timestamp=failure_time,
+                    outcome="dq_failed",
+                    diff=diff,
+                    edited_payload=updated_payload,
+                    notes=notes,
+                    dq_errors=serialized_errors,
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                    remediation_run_id=remediation_run.id,
+                )
+                self.session.commit()
+                raise RemediationValidationError(serialized_errors)
+
+            clean_summary = promote_clean_volunteers(remediation_run, dry_run=False)
+            core_summary = load_core_volunteers(remediation_run, dry_run=False)
+        except Exception:
+            self.session.rollback()
+            raise
+
+        completed_at = datetime.now(timezone.utc)
+        remediation_run.status = ImportRunStatus.SUCCEEDED
+        remediation_run.finished_at = completed_at
+        _update_remediation_run_metrics(
+            remediation_run,
+            outcome="succeeded",
+            timestamp=completed_at,
+            dq_summary=dq_summary,
+            clean_summary=clean_summary,
+            core_summary=core_summary,
+            errors=None,
+        )
+
+        self.session.flush()
+        self.session.refresh(remediation_row)
+        clean_record = remediation_row.clean_record
+        if clean_record is not None:
+            self.session.refresh(clean_record)
+
+        violation.status = DataQualityStatus.FIXED
+        violation.remediated_at = completed_at
+        violation.remediated_by_user_id = user_id
+        _record_remediation_audit(
+            violation,
+            user_id=user_id,
+            timestamp=completed_at,
+            outcome="succeeded",
+            diff=diff,
+            edited_payload=updated_payload,
+            notes=notes,
+            dq_errors=[],
+            ip_address=ip_address,
+            user_agent=user_agent,
+            remediation_run_id=remediation_run.id,
+            clean_summary={
+                "rows_promoted": clean_summary.rows_promoted,
+                "rows_skipped": clean_summary.rows_skipped,
+            },
+            core_summary={
+                "rows_inserted": core_summary.rows_inserted,
+                "rows_skipped_duplicates": core_summary.rows_skipped_duplicates,
+            },
+        )
+
+        log_details = {
+            "violation_id": violation.id,
+            "remediation_run_id": remediation_run.id,
+            "diff": {key: dict(value) for key, value in diff.items()},
+            "notes": notes,
+        }
+        admin_log = AdminLog(
+            admin_user_id=user_id,
+            action="IMPORT_VIOLATION_REMEDIATED",
+            details=json.dumps(log_details),
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        self.session.add(admin_log)
+
+        self.session.commit()
+
+        clean_contact_id = clean_record.core_contact_id if clean_record is not None else None
+        clean_volunteer_id = clean_record.core_volunteer_id if clean_record is not None else None
+        return RemediationResult(
+            violation_id=violation.id,
+            status=violation.status,
+            remediation_run_id=remediation_run.id,
+            dq_errors=[],
+            edited_payload=updated_payload,
+            diff=diff,
+            clean_contact_id=clean_contact_id,
+            clean_volunteer_id=clean_volunteer_id,
+        )
+
+    def get_remediation_stats(self, *, days: int = 30) -> RemediationStats:
+        """
+        Aggregate remediation outcomes over the requested trailing window.
+        """
+
+        window_days = max(1, int(days))
+        cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
+
+        query = (
+            self._base_query()
+            .options()
+            .filter(DataQualityViolation.remediation_audit_json.isnot(None))
+        )
+
+        attempts = 0
+        successes = 0
+        failures = 0
+        field_counter: Counter = Counter()
+        rule_counter: Counter = Counter()
+
+        for violation in query:
+            for event in _iter_remediation_events(violation):
+                event_timestamp = _parse_event_timestamp(event.get("timestamp"))
+                if event_timestamp is None or event_timestamp < cutoff:
+                    continue
+
+                outcome = str(event.get("outcome") or "").lower()
+                if not outcome:
+                    continue
+
+                attempts += 1
+                if outcome == "succeeded":
+                    successes += 1
+                    diff_payload = event.get("diff") or {}
+                    for field in diff_payload:
+                        field_counter[field] += 1
+                    if violation.rule_code:
+                        rule_counter[violation.rule_code] += 1
+                elif outcome in {"validation_failed", "dq_failed"}:
+                    failures += 1
+                    dq_errors = event.get("dq_errors") or ()
+                    for error in dq_errors:
+                        rule_code = (error or {}).get("rule_code") or violation.rule_code
+                        if rule_code:
+                            rule_counter[rule_code] += 1
+
+        return RemediationStats(
+            since=cutoff,
+            attempts=attempts,
+            successes=successes,
+            failures=failures,
+            field_counts=dict(field_counter),
+            rule_counts=dict(rule_counter),
+        )
     def summarize(self, violation: DataQualityViolation) -> ViolationSummary:
         return self._summarize(violation)
 
@@ -396,6 +689,195 @@ def _sanitize_csv(value: object) -> str:
     if text and text[0] in LEADING_FORMULA_CHARACTERS:
         return f"'{text}"
     return text
+
+
+def _record_remediation_audit(
+    violation: DataQualityViolation,
+    *,
+    user_id: int,
+    timestamp: datetime,
+    outcome: str,
+    diff: Mapping[str, Mapping[str, Any]],
+    edited_payload: Mapping[str, Any],
+    notes: str | None,
+    dq_errors: Sequence[Mapping[str, Any]],
+    ip_address: str | None,
+    user_agent: str | None,
+    remediation_run_id: int | None = None,
+    **extra: Any,
+) -> None:
+    events = []
+    existing = violation.remediation_audit_json or {}
+    if isinstance(existing, Mapping):
+        prior = existing.get("events")
+        if isinstance(prior, Sequence):
+            events.extend(event for event in prior if isinstance(event, Mapping))
+    serialized_diff = {key: dict(value) for key, value in diff.items()}
+    event = {
+        "timestamp": timestamp.isoformat(),
+        "user_id": user_id,
+        "outcome": outcome,
+        "diff": serialized_diff,
+        "edited_payload": dict(edited_payload),
+        "notes": notes,
+        "dq_errors": list(dq_errors),
+        "ip_address": ip_address,
+        "user_agent": user_agent,
+        "remediation_run_id": remediation_run_id,
+    }
+    if extra:
+        event.update(extra)
+    events.append(event)
+    violation.remediation_audit_json = {"events": events}
+    violation.edited_payload_json = dict(edited_payload)
+    violation.edited_fields_json = serialized_diff
+    violation.remediation_notes = notes
+
+
+def _create_remediation_run(
+    session: Session,
+    violation: DataQualityViolation,
+    *,
+    user_id: int,
+    timestamp: datetime,
+) -> ImportRun:
+    parent_run = violation.import_run
+    source = parent_run.source if parent_run else violation.entity_type
+    adapter = parent_run.adapter if parent_run else None
+    run = ImportRun(
+        source=source,
+        adapter=adapter,
+        status=ImportRunStatus.RUNNING,
+        dry_run=False,
+        started_at=timestamp,
+        finished_at=None,
+        triggered_by_user_id=user_id,
+        counts_json={},
+        metrics_json={},
+        anomaly_flags={},
+        error_summary=None,
+        notes=f"Remediation of violation {violation.id} (parent run {violation.run_id})",
+        ingest_params_json={
+            "remediation": {
+                "violation_id": violation.id,
+                "parent_run_id": violation.run_id,
+                "staging_volunteer_id": violation.staging_volunteer_id,
+            }
+        },
+    )
+    session.add(run)
+    session.flush()
+    return run
+
+
+def _create_remediation_staging_row(
+    session: Session,
+    remediation_run: ImportRun,
+    original_row: StagingVolunteer,
+    updated_payload: Mapping[str, Any],
+) -> StagingVolunteer:
+    payload_copy = dict(updated_payload)
+    staging_row = StagingVolunteer(
+        run_id=remediation_run.id,
+        sequence_number=original_row.sequence_number,
+        source_record_id=original_row.source_record_id,
+        external_system=original_row.external_system,
+        external_id=original_row.external_id,
+        payload_json=payload_copy,
+        normalized_json=payload_copy,
+        checksum=_compute_checksum(payload_copy),
+        status=StagingRecordStatus.LANDED,
+    )
+    session.add(staging_row)
+    session.flush()
+    return staging_row
+
+
+def _compose_payload_from_staging(staging_row: StagingVolunteer) -> dict[str, Any]:
+    payload = dict(staging_row.payload_json or {})
+    normalized = staging_row.normalized_json or {}
+    for key, value in normalized.items():
+        payload.setdefault(key, value)
+    payload.setdefault("external_system", staging_row.external_system)
+    if staging_row.external_id and not payload.get("external_id"):
+        payload["external_id"] = staging_row.external_id
+    return payload
+
+
+def _compute_checksum(payload: Mapping[str, Any]) -> str:
+    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _update_remediation_run_metrics(
+    run: ImportRun,
+    *,
+    outcome: str,
+    timestamp: datetime,
+    dq_summary=None,
+    clean_summary=None,
+    core_summary=None,
+    errors: Sequence[Mapping[str, Any]] | None,
+) -> None:
+    counts = dict(run.counts_json or {})
+    remediation_counts = counts.setdefault("remediation", {})
+    remediation_counts["attempts"] = remediation_counts.get("attempts", 0) + 1
+    if outcome == "succeeded":
+        remediation_counts["succeeded"] = remediation_counts.get("succeeded", 0) + 1
+    else:
+        remediation_counts["failed"] = remediation_counts.get("failed", 0) + 1
+    remediation_counts["last_attempt_at"] = timestamp.isoformat()
+    run.counts_json = counts
+
+    metrics = dict(run.metrics_json or {})
+    remediation_metrics = metrics.setdefault("remediation", {})
+    remediation_metrics.update(
+        {
+            "outcome": outcome,
+            "timestamp": timestamp.isoformat(),
+        }
+    )
+    if dq_summary is not None:
+        remediation_metrics["dq"] = {
+            "rows_evaluated": getattr(dq_summary, "rows_evaluated", 0),
+            "rows_validated": getattr(dq_summary, "rows_validated", 0),
+            "rows_quarantined": getattr(dq_summary, "rows_quarantined", 0),
+        }
+    if clean_summary is not None:
+        remediation_metrics["clean"] = {
+            "rows_promoted": getattr(clean_summary, "rows_promoted", 0),
+            "rows_skipped": getattr(clean_summary, "rows_skipped", 0),
+        }
+    if core_summary is not None:
+        remediation_metrics["core"] = {
+            "rows_inserted": getattr(core_summary, "rows_inserted", 0),
+            "rows_skipped_duplicates": getattr(core_summary, "rows_skipped_duplicates", 0),
+        }
+    if errors:
+        remediation_metrics["errors"] = list(errors)
+    run.metrics_json = metrics
+
+
+def _iter_remediation_events(violation: DataQualityViolation) -> Iterable[Mapping[str, Any]]:
+    payload = violation.remediation_audit_json or {}
+    events = payload.get("events") if isinstance(payload, Mapping) else None
+    if not isinstance(events, Sequence):
+        return []
+    return (event for event in events if isinstance(event, Mapping))
+
+
+def _parse_event_timestamp(value: Any) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    text = str(value)
+    try:
+        normalized = text.replace("Z", "+00:00") if text.endswith("Z") else text
+        parsed = datetime.fromisoformat(normalized)
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
 
 
 def _flatten_mapping(candidate: object) -> str:
