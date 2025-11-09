@@ -6,9 +6,15 @@ import pytest
 
 from flask_app.importer import init_importer
 from flask_app.importer.utils import resolve_upload_directory
-from flask_app.importer.pipeline.run_service import ImportRunService
 from flask_app.models import AdminLog, db
-from flask_app.models.importer.schema import ImportRun, ImportRunStatus
+from flask_app.models.importer.schema import (
+    DataQualitySeverity,
+    DataQualityStatus,
+    DataQualityViolation,
+    ImportRun,
+    ImportRunStatus,
+    StagingVolunteer,
+)
 from flask_app.routes.admin_importer import register_importer_admin_routes
 
 
@@ -82,5 +88,61 @@ def run_factory(importer_app, tmp_path):
     for run in created_runs:
         db.session.delete(run)
     db.session.query(AdminLog).delete()
+    db.session.commit()
+
+
+@pytest.fixture
+def violation_factory(importer_app, run_factory):
+    created: list[tuple[StagingVolunteer, DataQualityViolation]] = []
+
+    def _factory(
+        *,
+        rule_code: str = "VOL_EMAIL_INVALID",
+        severity: DataQualitySeverity = DataQualitySeverity.ERROR,
+        status: DataQualityStatus = DataQualityStatus.OPEN,
+        created_offset_minutes: int = 0,
+        run: ImportRun | None = None,
+    ) -> DataQualityViolation:
+        run_obj = run or run_factory()
+        staging = StagingVolunteer(
+            run_id=run_obj.id,
+            external_system="csv",
+            payload_json={
+                "first_name": "Alice",
+                "last_name": "Example",
+                "email": "alice@example.com",
+                "phone": "+15555550123",
+            },
+            normalized_json={
+                "first_name": "Alice",
+                "last_name": "Example",
+                "email": "alice@example.com",
+                "phone_e164": "+15555550123",
+            },
+        )
+        db.session.add(staging)
+        db.session.commit()
+
+        violation = DataQualityViolation(
+            run_id=run_obj.id,
+            staging_volunteer_id=staging.id,
+            rule_code=rule_code,
+            severity=severity,
+            status=status,
+            message=f"{rule_code} triggered",
+            details_json={"field": "email"},
+        )
+        if created_offset_minutes:
+            violation.created_at = datetime.now(timezone.utc) - timedelta(minutes=created_offset_minutes)
+        db.session.add(violation)
+        db.session.commit()
+        created.append((staging, violation))
+        return violation
+
+    yield _factory
+
+    for staging, violation in created:
+        db.session.delete(violation)
+        db.session.delete(staging)
     db.session.commit()
 

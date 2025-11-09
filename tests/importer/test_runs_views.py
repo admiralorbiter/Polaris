@@ -81,6 +81,8 @@ def test_admin_nav_shows_importer_runs(importer_app, client):
     html = response.data.decode("utf-8")
     assert "/admin/imports/runs/dashboard" in html
     assert "Importer Runs" in html
+    assert "/admin/imports/violations" in html
+    assert "DQ Inbox" in html
 
 
 def test_admin_nav_hides_importer_runs_when_disabled(app, client):

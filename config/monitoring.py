@@ -187,6 +187,106 @@ class ImporterMonitoring:
         else None
     )
 
+    DQ_LIST_COUNTER = (
+        Counter(
+            "importer_dq_list_requests_total",
+            "Total importer DQ violations list API requests.",
+            labelnames=("status",),
+        )
+        if Counter
+        else None
+    )
+    DQ_LIST_LATENCY = (
+        Histogram(
+            "importer_dq_list_request_seconds",
+            "Latency histogram for DQ violations list API.",
+            labelnames=("status",),
+            buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5),
+        )
+        if Histogram
+        else None
+    )
+    DQ_LIST_RESULT_SIZE = (
+        Histogram(
+            "importer_dq_list_result_size",
+            "Number of violations returned by list endpoint.",
+            labelnames=("status",),
+            buckets=(0, 1, 5, 10, 25, 50, 100, 250, 500, 1000),
+        )
+        if Histogram
+        else None
+    )
+
+    DQ_DETAIL_COUNTER = (
+        Counter(
+            "importer_dq_detail_requests_total",
+            "Total importer DQ violation detail API requests.",
+            labelnames=("status",),
+        )
+        if Counter
+        else None
+    )
+    DQ_DETAIL_LATENCY = (
+        Histogram(
+            "importer_dq_detail_request_seconds",
+            "Latency histogram for DQ violation detail API.",
+            labelnames=("status",),
+            buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5),
+        )
+        if Histogram
+        else None
+    )
+
+    DQ_STATS_COUNTER = (
+        Counter(
+            "importer_dq_stats_requests_total",
+            "Total importer DQ violations stats API requests.",
+            labelnames=("status",),
+        )
+        if Counter
+        else None
+    )
+    DQ_STATS_LATENCY = (
+        Histogram(
+            "importer_dq_stats_request_seconds",
+            "Latency histogram for DQ violations stats API.",
+            labelnames=("status",),
+            buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5),
+        )
+        if Histogram
+        else None
+    )
+
+    DQ_EXPORT_COUNTER = (
+        Counter(
+            "importer_dq_export_requests_total",
+            "Total importer DQ violations export requests.",
+            labelnames=("status",),
+        )
+        if Counter
+        else None
+    )
+    DQ_EXPORT_LATENCY = (
+        Histogram(
+            "importer_dq_export_request_seconds",
+            "Latency histogram for DQ violations export endpoint.",
+            labelnames=("status",),
+            buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10),
+        )
+        if Histogram
+        else None
+    )
+    DQ_EXPORT_ROW_COUNT = (
+        Histogram(
+            "importer_dq_export_row_count",
+            "Row count of exported DQ violations.",
+            labelnames=("status",),
+            buckets=(0, 1, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000),
+        )
+        if Histogram
+        else None
+    )
+
     @classmethod
     def record_runs_list(cls, *, duration_seconds: float, status: str, result_count: int):
         if cls.RUNS_LIST_COUNTER:
@@ -209,3 +309,35 @@ class ImporterMonitoring:
             cls.RUNS_STATS_COUNTER.labels(status=status).inc()
         if cls.RUNS_STATS_LATENCY:
             cls.RUNS_STATS_LATENCY.labels(status=status).observe(max(duration_seconds, 0.0))
+
+    @classmethod
+    def record_dq_list(cls, *, duration_seconds: float, status: str, result_count: int):
+        if cls.DQ_LIST_COUNTER:
+            cls.DQ_LIST_COUNTER.labels(status=status).inc()
+        if cls.DQ_LIST_LATENCY:
+            cls.DQ_LIST_LATENCY.labels(status=status).observe(max(duration_seconds, 0.0))
+        if cls.DQ_LIST_RESULT_SIZE:
+            cls.DQ_LIST_RESULT_SIZE.labels(status=status).observe(float(max(result_count, 0)))
+
+    @classmethod
+    def record_dq_detail(cls, *, duration_seconds: float, status: str):
+        if cls.DQ_DETAIL_COUNTER:
+            cls.DQ_DETAIL_COUNTER.labels(status=status).inc()
+        if cls.DQ_DETAIL_LATENCY:
+            cls.DQ_DETAIL_LATENCY.labels(status=status).observe(max(duration_seconds, 0.0))
+
+    @classmethod
+    def record_dq_stats(cls, *, duration_seconds: float, status: str):
+        if cls.DQ_STATS_COUNTER:
+            cls.DQ_STATS_COUNTER.labels(status=status).inc()
+        if cls.DQ_STATS_LATENCY:
+            cls.DQ_STATS_LATENCY.labels(status=status).observe(max(duration_seconds, 0.0))
+
+    @classmethod
+    def record_dq_export(cls, *, duration_seconds: float, status: str, row_count: int):
+        if cls.DQ_EXPORT_COUNTER:
+            cls.DQ_EXPORT_COUNTER.labels(status=status).inc()
+        if cls.DQ_EXPORT_LATENCY:
+            cls.DQ_EXPORT_LATENCY.labels(status=status).observe(max(duration_seconds, 0.0))
+        if cls.DQ_EXPORT_ROW_COUNT:
+            cls.DQ_EXPORT_ROW_COUNT.labels(status=status).observe(float(max(row_count, 0)))

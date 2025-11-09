@@ -350,6 +350,12 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
   - Actions: Edit & Requeue (IMP-22), Suppress (future), Mark as Won't Fix (future)
 - **Export button**: Generates CSV with columns: violation_id, run_id, rule_code, severity, status, staging_row_data (flattened), violation_details, created_at
 - **Bulk actions toolbar**: Select multiple violations, bulk export, bulk suppress (future)
+- **Dashboard polish**:
+  - Summary cards (total, by severity, by status, top rule) with live stats endpoint
+  - Status/severity badges aligned with palette; tooltips/hints surfaced in detail modal
+  - Admin nav entry under `Admin ▸ DQ Inbox` gated by importer flag/permissions
+  - Responsive table with wrapping preview text and accessible pagination/ARIA updates
+  - Toast notifications for errors, CSV export feedback
 
 **Access Control**:
 - Route: `/importer/dq-inbox` (or `/admin/imports/violations`)
@@ -361,6 +367,9 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Track export events (user_id, rule_code filter, row count)
 - Expose violation stats API: `GET /importer/violations/stats?rule_code=VOL_CONTACT_REQUIRED&days=7`
 - Export CSV should sanitize formula injection (prepend `'` to cells starting with `=`, `+`, `-`, `@`)
+- Prometheus metrics: list/detail/stats/export counters & latency histograms (`importer_dq_*`) + export row count histogram
+- Structured logs attach `dq_` prefixed fields (rule_code, response time, row counts) to facilitate incident review
+- API surface: rule code lookup (`GET /importer/violations/rule_codes`) for dynamic filter population
 
 **Testing Expectations**:
 - **Unit tests**: Violation query filters, CSV export sanitization, JSON serialization

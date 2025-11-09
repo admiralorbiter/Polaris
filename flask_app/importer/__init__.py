@@ -15,6 +15,7 @@ from flask_app.utils.importer import get_importer_adapters, is_importer_enabled
 
 from .celery_app import ensure_celery_app, get_celery_app
 from .cli import get_disabled_importer_group, importer_cli
+from .pipeline.dq_service import DataQualityViolationService, ViolationFilters
 from .pipeline.run_service import ImportRunService, RunFilters
 from .registry import AdapterDescriptor, get_adapter_registry, resolve_adapters
 from .views import importer_blueprint
@@ -27,6 +28,8 @@ __all__ = [
     "get_celery_app",
     "ImportRunService",
     "RunFilters",
+    "DataQualityViolationService",
+    "ViolationFilters",
 ]
 
 
@@ -109,7 +112,11 @@ def init_importer(app: Flask) -> None:
     state["menu_items"] = (
         {
             "label": "Importer Runs",
-            "endpoint": "admin_importer.importer_dashboard",
+            "endpoint": "admin_importer.importer_runs_dashboard_page",
+        },
+        {
+            "label": "DQ Inbox",
+            "endpoint": "admin_importer.importer_dq_inbox_page",
         },
         {
             "label": "Importer Health",

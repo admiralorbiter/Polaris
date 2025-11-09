@@ -32,11 +32,7 @@
                   {% if importer_enabled and importer_menu_items %}
                     <li><hr class="dropdown-divider"></li>
                     {% for item in importer_menu_items %}
-                      {% if item.endpoint == "admin_importer.importer_dashboard" %}
-                        <li><a class="dropdown-item" href="{{ url_for('admin_importer.importer_runs_dashboard_page') }}">Importer Runs</a></li>
-                      {% else %}
-                        <li><a class="dropdown-item" href="{{ url_for(item.endpoint) }}">{{ item.label }}</a></li>
-                      {% endif %}
+                      <li><a class="dropdown-item" href="{{ url_for(item.endpoint) }}">{{ item.label }}</a></li>
                     {% endfor %}
                   {% endif %}
                 </ul>

@@ -8,11 +8,15 @@ import time
 from http import HTTPStatus
 
 from celery.exceptions import TimeoutError as CeleryTimeoutError
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, jsonify, make_response, request
 from flask_login import current_user
 from sqlalchemy.exc import NoResultFound
 
 from config.monitoring import ImporterMonitoring
+from flask_app.importer.pipeline.dq_service import (
+    DataQualityViolationService,
+    ViolationFilters,
+)
 from flask_app.importer.pipeline.run_service import ImportRunService, RunFilters
 from flask_app.utils.importer import is_importer_enabled
 from flask_app.utils.permissions import has_permission
@@ -105,6 +109,7 @@ def importer_worker_health():
 
 
 _run_service = ImportRunService()
+_dq_service = DataQualityViolationService()
 
 
 def _json_error(message: str, status: HTTPStatus):
@@ -127,6 +132,12 @@ def _ensure_manage_imports_permission():
     if not has_permission(current_user, "manage_imports"):
         return _json_error("Missing manage_imports permission.", HTTPStatus.FORBIDDEN)
     return None
+
+
+def _ensure_imports_view_permission():
+    if has_permission(current_user, "manage_imports") or has_permission(current_user, "view_imports"):
+        return None
+    return _json_error("Missing importer view permission.", HTTPStatus.FORBIDDEN)
 
 
 def _parse_filters():
@@ -364,3 +375,272 @@ def importer_runs_stats():
     }
 
     return jsonify(response_payload), HTTPStatus.OK
+
+
+# ---------------------------------------------------------------------------
+# DQ violations APIs
+# ---------------------------------------------------------------------------
+
+
+def _parse_violation_filters():
+    raw = request.args
+    try:
+        filters = ViolationFilters.coerce(
+            page=raw.get("page"),
+            page_size=raw.get("per_page") or raw.get("page_size"),
+            sort=raw.get("sort"),
+            rule_codes=_split_csv(raw.get("rule_code") or raw.get("rule_codes")),
+            severities=_split_csv(raw.get("severity") or raw.get("severities")),
+            statuses=_split_csv(raw.get("status") or raw.get("statuses")),
+            run_ids=_split_csv(raw.get("run_id") or raw.get("run_ids")),
+            created_from=raw.get("created_from"),
+            created_to=raw.get("created_to"),
+        )
+    except ValueError as exc:
+        raise ValueError(str(exc)) from exc
+    return filters
+
+
+def _serialize_violation_summary(summary):
+    return {
+        "id": summary.id,
+        "run_id": summary.run_id,
+        "staging_volunteer_id": summary.staging_volunteer_id,
+        "rule_code": summary.rule_code,
+        "severity": summary.severity,
+        "status": summary.status,
+        "created_at": summary.created_at.isoformat(),
+        "preview": summary.preview,
+        "source": summary.source,
+    }
+
+
+def _remediation_hint(rule_code: str) -> str:
+    hints = {
+        "VOL_CONTACT_REQUIRED": "Add at least one contact method before requeueing.",
+        "VOL_EMAIL_INVALID": "Correct the email format or remove it if unavailable.",
+        "VOL_PHONE_INVALID": "Provide a valid E.164 formatted phone number.",
+    }
+    return hints.get(rule_code, "Review violation details and update the payload before requeueing.")
+
+
+def _serialize_violation_detail(violation):
+    staging = violation.staging_row
+    import_run = violation.import_run
+    payload = staging.payload_json if staging else {}
+    normalized = staging.normalized_json if staging else {}
+    details = violation.details_json or {}
+    severity = violation.severity.value if hasattr(violation.severity, "value") else str(violation.severity)
+    status = violation.status.value if hasattr(violation.status, "value") else str(violation.status)
+
+    summary = _dq_service.summarize(violation)
+
+    return {
+        "id": violation.id,
+        "run_id": violation.run_id,
+        "staging_volunteer_id": violation.staging_volunteer_id,
+        "rule_code": violation.rule_code,
+        "severity": severity,
+        "status": status,
+        "created_at": violation.created_at.isoformat() if violation.created_at else None,
+        "source": import_run.source if import_run else None,
+        "preview": summary.preview,
+        "staging_payload": payload,
+        "normalized_payload": normalized,
+        "violation_details": details,
+        "remediation_hint": _remediation_hint(violation.rule_code),
+    }
+
+
+@importer_blueprint.get("/violations")
+def importer_violations_list():
+    enabled_response = _ensure_importer_enabled_api()
+    if enabled_response:
+        return enabled_response
+
+    auth_response = _ensure_authenticated_api()
+    if auth_response:
+        return auth_response
+
+    permission_response = _ensure_imports_view_permission()
+    if permission_response:
+        return permission_response
+
+    try:
+        filters = _parse_violation_filters()
+    except ValueError as exc:
+        ImporterMonitoring.record_dq_list(duration_seconds=0.0, status="invalid_request", result_count=0)
+        return _json_error(str(exc), HTTPStatus.BAD_REQUEST)
+
+    start_time = time.perf_counter()
+    try:
+        result = _dq_service.list_violations(filters)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        current_app.logger.exception("Importer violations list failed.", exc_info=exc)
+        ImporterMonitoring.record_dq_list(duration_seconds=time.perf_counter() - start_time, status="error", result_count=0)
+        return _json_error("Failed to load violations.", HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    duration = time.perf_counter() - start_time
+    ImporterMonitoring.record_dq_list(duration_seconds=duration, status="success", result_count=len(result.items))
+
+    response_payload = {
+        "violations": [_serialize_violation_summary(item) for item in result.items],
+        "total": result.total,
+        "page": result.page,
+        "page_size": result.page_size,
+        "total_pages": result.total_pages,
+        "filters": {
+            "page": filters.page,
+            "page_size": filters.page_size,
+            "sort": filters.sort,
+            "rule_codes": list(filters.rule_codes),
+            "severities": [severity.value for severity in filters.severities],
+            "statuses": [status.value for status in filters.statuses],
+            "run_ids": list(filters.run_ids),
+            "created_from": filters.created_from.isoformat() if filters.created_from else None,
+            "created_to": filters.created_to.isoformat() if filters.created_to else None,
+        },
+    }
+
+    current_app.logger.info(
+        "Importer violations list retrieved",
+        extra={
+            "dq_violation_count": len(result.items),
+            "dq_total_violations": result.total,
+            "dq_response_time_ms": round(duration * 1000, 2),
+            "user_id": current_user.id,
+        },
+    )
+    return jsonify(response_payload), HTTPStatus.OK
+
+
+@importer_blueprint.get("/violations/<int:violation_id>")
+def importer_violation_detail(violation_id: int):
+    enabled_response = _ensure_importer_enabled_api()
+    if enabled_response:
+        return enabled_response
+
+    auth_response = _ensure_authenticated_api()
+    if auth_response:
+        return auth_response
+
+    permission_response = _ensure_imports_view_permission()
+    if permission_response:
+        return permission_response
+
+    start_time = time.perf_counter()
+    violation = _dq_service.get_violation(violation_id)
+    if violation is None:
+        ImporterMonitoring.record_dq_detail(duration_seconds=time.perf_counter() - start_time, status="not_found")
+        return _json_error(f"Violation {violation_id} not found.", HTTPStatus.NOT_FOUND)
+
+    duration = time.perf_counter() - start_time
+    ImporterMonitoring.record_dq_detail(duration_seconds=duration, status="success")
+
+    payload = _serialize_violation_detail(violation)
+    current_app.logger.info(
+        "Importer violation detail accessed",
+        extra={
+            "dq_violation_id": violation_id,
+            "dq_rule_code": violation.rule_code,
+            "user_id": current_user.id,
+            "dq_response_time_ms": round(duration * 1000, 2),
+        },
+    )
+    return jsonify(payload), HTTPStatus.OK
+
+
+@importer_blueprint.get("/violations/stats")
+def importer_violations_stats():
+    enabled_response = _ensure_importer_enabled_api()
+    if enabled_response:
+        return enabled_response
+
+    auth_response = _ensure_authenticated_api()
+    if auth_response:
+        return auth_response
+
+    permission_response = _ensure_imports_view_permission()
+    if permission_response:
+        return permission_response
+
+    try:
+        filters = _parse_violation_filters()
+    except ValueError as exc:
+        ImporterMonitoring.record_dq_stats(duration_seconds=0.0, status="invalid_request")
+        return _json_error(str(exc), HTTPStatus.BAD_REQUEST)
+
+    start_time = time.perf_counter()
+    try:
+        stats = _dq_service.get_stats(filters)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        current_app.logger.exception("Importer violations stats failed.", exc_info=exc)
+        ImporterMonitoring.record_dq_stats(duration_seconds=time.perf_counter() - start_time, status="error")
+        return _json_error("Failed to load violation statistics.", HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    duration = time.perf_counter() - start_time
+    ImporterMonitoring.record_dq_stats(duration_seconds=duration, status="success")
+
+    response_payload = {
+        "total": stats.total,
+        "by_rule_code": stats.by_rule_code,
+        "by_severity": stats.by_severity,
+        "by_status": stats.by_status,
+    }
+    return jsonify(response_payload), HTTPStatus.OK
+
+
+@importer_blueprint.get("/violations/export")
+def importer_violations_export():
+    enabled_response = _ensure_importer_enabled_api()
+    if enabled_response:
+        return enabled_response
+
+    auth_response = _ensure_authenticated_api()
+    if auth_response:
+        return auth_response
+
+    permission_response = _ensure_manage_imports_permission()
+    if permission_response:
+        return permission_response
+
+    try:
+        filters = _parse_violation_filters()
+    except ValueError as exc:
+        ImporterMonitoring.record_dq_export(duration_seconds=0.0, status="invalid_request", row_count=0)
+        return _json_error(str(exc), HTTPStatus.BAD_REQUEST)
+
+    start_time = time.perf_counter()
+    try:
+        filename, csv_content = _dq_service.export_csv(filters)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        current_app.logger.exception("Importer violations export failed.", exc_info=exc)
+        ImporterMonitoring.record_dq_export(duration_seconds=time.perf_counter() - start_time, status="error", row_count=0)
+        return _json_error("Failed to export violations.", HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    duration = time.perf_counter() - start_time
+    row_count = csv_content.count("\n") - 1 if csv_content else 0
+    ImporterMonitoring.record_dq_export(duration_seconds=duration, status="success", row_count=max(row_count, 0))
+
+    response = make_response(csv_content)
+    response.headers["Content-Type"] = "text/csv"
+    response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
+@importer_blueprint.get("/violations/rule_codes")
+def importer_violations_rule_codes():
+    enabled_response = _ensure_importer_enabled_api()
+    if enabled_response:
+        return enabled_response
+
+    auth_response = _ensure_authenticated_api()
+    if auth_response:
+        return auth_response
+
+    permission_response = _ensure_imports_view_permission()
+    if permission_response:
+        return permission_response
+
+    codes = _dq_service.list_rule_codes()
+    return jsonify({"rule_codes": codes}), HTTPStatus.OK

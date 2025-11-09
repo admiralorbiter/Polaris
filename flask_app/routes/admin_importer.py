@@ -12,16 +12,23 @@ from flask import Blueprint, current_app, jsonify, render_template, request, sen
 from flask_login import current_user, login_required
 
 from flask_app.importer.celery_app import DEFAULT_QUEUE_NAME, get_celery_app
+from flask_app.importer.pipeline.dq_service import DataQualityViolationService
 from flask_app.importer.pipeline.run_service import ImportRunService
 from flask_app.importer.utils import allowed_file, cleanup_upload, persist_upload, resolve_upload_directory
 from flask_app.models import AdminLog, db
-from flask_app.models.importer.schema import ImportRun, ImportRunStatus
+from flask_app.models.importer.schema import (
+    DataQualitySeverity,
+    DataQualityStatus,
+    ImportRun,
+    ImportRunStatus,
+)
 from flask_app.utils.importer import is_importer_enabled
 from flask_app.utils.permissions import permission_required
 
 
 admin_importer_blueprint = Blueprint("admin_importer", __name__, url_prefix="/admin/imports")
 _run_service = ImportRunService()
+_dq_service = DataQualityViolationService()
 
 
 def _ensure_importer_enabled():
@@ -150,6 +157,33 @@ def importer_runs_dashboard_page():
         allowed_page_sizes=allowed_page_sizes,
         auto_refresh_seconds=auto_refresh_seconds,
         source_options=sources,
+    )
+
+
+@admin_importer_blueprint.get("/violations")
+@login_required
+@permission_required("manage_imports", org_context=False)
+def importer_dq_inbox_page():
+    if not _ensure_importer_enabled():
+        return render_template("errors/404.html"), HTTPStatus.NOT_FOUND
+
+    severity_options = [severity.value for severity in DataQualitySeverity]
+    status_options = [status.value for status in DataQualityStatus]
+    rule_code_options = _dq_service.list_rule_codes()
+
+    current_app.logger.info(
+        "Importer DQ inbox page rendered",
+        extra={
+            "user_id": current_user.id,
+            "dq_rule_codes_available": len(rule_code_options),
+        },
+    )
+
+    return render_template(
+        "importer/violations.html",
+        severity_options=severity_options,
+        status_options=status_options,
+        rule_code_options=rule_code_options,
     )
 
 

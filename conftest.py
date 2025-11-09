@@ -64,6 +64,7 @@ def app():
                 "SQLALCHEMY_ECHO": True,  # Enable SQL echo for tests (like development)
                 "SECRET_KEY": "test-secret-key-for-testing-only",
                 "DEBUG": True,
+                "TEMPLATES_AUTO_RELOAD": True,
                 "MONITORING_ENABLED": False,
                 "ERROR_ALERTING_ENABLED": False,
                 "ENABLE_FILE_LOGGING": True,  # Enable file logging for tests
@@ -75,6 +76,8 @@ def app():
                 "IMPORTER_WORKER_ENABLED": False,
             }
         )
+        flask_app.jinja_env.auto_reload = True  # Ensure template recompilation during tests
+        flask_app.jinja_env.cache = {}  # Clear any cached templates before running a test
 
         # Re-initialize logging with updated config to pick up LOG_LEVEL=DEBUG
         from flask_app.utils.logging_config import setup_logging
@@ -82,12 +85,14 @@ def app():
         setup_logging(flask_app)
 
         with flask_app.app_context():
+            flask_app.jinja_env.cache = {}  # Clear template cache inside app context as well
             # Drop any existing tables to ensure clean state
             db.drop_all()
             # Create all tables
             db.create_all()
             yield flask_app
             # Clean up: remove all data and drop tables
+            flask_app.jinja_env.cache = {}  # Ensure cache is clear for subsequent tests
             db.session.remove()
             db.session.close()
             db.drop_all()

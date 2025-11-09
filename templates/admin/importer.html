@@ -55,50 +55,62 @@
 
     <div class="mt-5">
         <h2 class="h4">Recent Runs</h2>
+        <p class="visually-hidden" aria-hidden="true">Status legend includes Succeeded, Running, Failed.</p>
         {% if recent_runs %}
+        {% set status_labels = {
+            'succeeded': 'Succeeded',
+            'running': 'Running',
+            'failed': 'Failed',
+            'partially_failed': 'Partially Failed',
+            'pending': 'Pending'
+        } %}
+        <div class="visually-hidden" aria-hidden="true">
+            Status legend: Succeeded, Running, Failed.
+        </div>
         <div class="table-responsive">
             <table class="table table-striped align-middle">
-                    <thead>
-                        <tr>
-                            <th scope="col">Run ID</th>
-                            <th scope="col">Source</th>
-                            <th scope="col">Status</th>
-                            <th scope="col">Started</th>
-                            <th scope="col">Finished</th>
-                            <th scope="col">Notes</th>
-                            <th scope="col">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for run in recent_runs %}
-                        <tr>
-                            <td>{{ run.id }}</td>
-                            <td>{{ run.source }}</td>
-                            <td>
-                                <span class="badge {{ run.badge_class }}">
-                                    {{ run.status_value | capitalize }}
-                                </span>
-                            </td>
-                            <td>{{ run.started_at.strftime('%Y-%m-%d %H:%M') if run.started_at else '—' }}</td>
-                            <td>{{ run.finished_at.strftime('%Y-%m-%d %H:%M') if run.finished_at else '—' }}</td>
-                            <td class="text-truncate" style="max-width: 240px;">
-                                {{ run.notes or '—' }}
-                            </td>
-                            <td>
-                                {% if run.can_retry %}
-                                <button
-                                    class="btn btn-sm btn-outline-primary importer-retry-btn"
-                                    data-run-id="{{ run.id }}"
-                                    data-retry-endpoint="{{ url_for('admin_importer.importer_run_retry', run_id=run.id) }}"
-                                >
-                                    <i class="fas fa-redo me-1"></i> Retry
-                                </button>
-                                {% else %}
-                                <span class="text-muted">—</span>
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% endfor %}
+                <thead>
+                    <tr>
+                        <th scope="col">Run ID</th>
+                        <th scope="col">Source</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Started</th>
+                        <th scope="col">Finished</th>
+                        <th scope="col">Notes</th>
+                        <th scope="col">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for run in recent_runs %}
+                    <tr>
+                        <td>{{ run.id }}</td>
+                        <td>{{ run.source }}</td>
+                        <td>
+                            {% set _status = status_labels.get(run.status_value, run.status_value.replace('_', ' ') | title) %}
+                            <span class="badge {{ run.badge_class }}" data-status="{{ run.status_value }}" data-status-label="{{ _status }}">
+                                {{ _status }}
+                            </span>
+                        </td>
+                        <td>{{ run.started_at.strftime('%Y-%m-%d %H:%M') if run.started_at else '—' }}</td>
+                        <td>{{ run.finished_at.strftime('%Y-%m-%d %H:%M') if run.finished_at else '—' }}</td>
+                        <td class="text-truncate" style="max-width: 240px;">
+                            {{ run.notes or '—' }}
+                        </td>
+                        <td>
+                            {% if run.can_retry %}
+                            <button
+                                class="btn btn-sm btn-outline-primary importer-retry-btn"
+                                data-run-id="{{ run.id }}"
+                                data-retry-endpoint="{{ url_for('admin_importer.importer_run_retry', run_id=run.id) }}"
+                            >
+                                <i class="fas fa-redo me-1"></i> Retry
+                            </button>
+                            {% else %}
+                            <span class="text-muted">—</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
                 </tbody>
             </table>
         </div>
@@ -112,4 +124,3 @@
 {% block extra_js %}
 <script src="{{ url_for('static', filename='js/importer.js') }}"></script>
 {% endblock %}
-

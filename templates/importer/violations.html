@@ -1,0 +1,241 @@
+{% extends "base.html" %}
+
+{% block title %}DQ Inbox{% endblock %}
+
+{% block extra_css %}
+<style>
+  .dq-inbox {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .dq-inbox .card {
+    width: 100%;
+  }
+
+  @media (min-width: 992px) {
+    .dq-inbox {
+      padding-left: 1.5rem;
+      padding-right: 1.5rem;
+    }
+
+    .dq-inbox .card-header,
+    .dq-inbox .card-body,
+    .dq-inbox .card-footer {
+      padding-left: 1.5rem;
+      padding-right: 1.5rem;
+    }
+
+    .dq-inbox .card-body {
+      padding-top: 1.25rem;
+      padding-bottom: 1.25rem;
+    }
+
+    .dq-inbox .card-header {
+      padding-top: 1.25rem;
+      padding-bottom: 1.25rem;
+    }
+
+    .dq-inbox .card-footer {
+      padding-top: 1rem;
+      padding-bottom: 1rem;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid dq-inbox py-4" data-component="importer-dq-inbox">
+  <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4">
+    <div>
+      <h1 class="h3 mb-1">DQ Inbox</h1>
+      <p class="text-muted mb-0">Review violations, export CSVs, and prepare fixes before remediation.</p>
+    </div>
+    <div class="d-flex gap-2 mt-3 mt-md-0">
+      <button class="btn btn-outline-primary" id="dq-refresh-btn" data-action="refresh">Refresh</button>
+      <button class="btn btn-outline-success" id="dq-export-btn" data-action="export">Export CSV</button>
+    </div>
+  </div>
+
+  <div class="card shadow-sm mb-4">
+    <div class="card-header">
+      <h2 class="h5 mb-0">Filters</h2>
+    </div>
+    <div class="card-body">
+      <form id="dq-filter-form" class="row g-3 align-items-end" autocomplete="off">
+        <div class="col-sm-6 col-lg-3">
+          <label for="filter-rule-code" class="form-label">Rule code</label>
+          <select id="filter-rule-code" class="form-select" name="rule_code">
+            <option value="">All rule codes</option>
+            {% for code in rule_code_options %}
+            <option value="{{ code }}">{{ code }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-sm-6 col-lg-3">
+          <label for="filter-severity" class="form-label">Severity</label>
+          <select id="filter-severity" class="form-select" name="severity">
+            <option value="">All severities</option>
+            {% for severity in severity_options %}
+            <option value="{{ severity }}">{{ severity|replace('_', ' ')|title }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-sm-6 col-lg-3">
+          <label for="filter-status" class="form-label">Status</label>
+          <select id="filter-status" class="form-select" name="status">
+            <option value="">All statuses</option>
+            {% for status in status_options %}
+            <option value="{{ status }}">{{ status|replace('_', ' ')|title }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-sm-6 col-lg-3">
+          <label for="filter-run-id" class="form-label">Run ID</label>
+          <input type="number" class="form-control" id="filter-run-id" name="run_id" min="1" placeholder="e.g. 42">
+        </div>
+        <div class="col-sm-6 col-lg-3">
+          <label for="filter-created-from" class="form-label">Created after</label>
+          <input type="date" class="form-control" id="filter-created-from" name="created_from">
+        </div>
+        <div class="col-sm-6 col-lg-3">
+          <label for="filter-created-to" class="form-label">Created before</label>
+          <input type="date" class="form-control" id="filter-created-to" name="created_to">
+        </div>
+        <div class="col-sm-6 col-lg-3">
+          <label for="filter-page-size" class="form-label">Rows per page</label>
+          <select id="filter-page-size" class="form-select" name="page_size">
+            <option value="25">25</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+        </div>
+        <div class="col-12">
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary">Apply Filters</button>
+            <button type="reset" class="btn btn-outline-secondary" id="dq-reset-btn">Reset</button>
+            <small class="text-muted ms-auto">Use filters to narrow violations. Exports respect current filters.</small>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-4" id="dq-summary-cards" aria-live="polite">
+    <!-- Populated via JS -->
+  </div>
+
+  <div class="card shadow-sm">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <h2 class="h5 mb-0">Violations</h2>
+      <div id="dq-last-updated" class="text-muted small" aria-live="polite"></div>
+    </div>
+    <div class="table-responsive position-relative dq-table-wrapper">
+      <div id="dq-loading-overlay" class="position-absolute top-0 start-0 w-100 h-100 bg-white bg-opacity-75 d-flex align-items-center justify-content-center d-none">
+        <div class="text-center">
+          <div class="spinner-border text-primary mb-2" role="status" aria-hidden="true"></div>
+          <div>Loading violations...</div>
+        </div>
+      </div>
+      <table class="table table-hover align-middle mb-0" id="dq-table">
+        <thead class="table-light">
+          <tr>
+            <th scope="col" data-sort="violation_id">Violation</th>
+            <th scope="col" data-sort="run_id">Run</th>
+            <th scope="col" data-sort="rule_code">Rule</th>
+            <th scope="col" data-sort="severity">Severity</th>
+            <th scope="col" data-sort="status">Status</th>
+            <th scope="col" data-sort="created_at">Created</th>
+            <th scope="col">Preview</th>
+            <th scope="col" class="text-end">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="dq-table-body">
+          <tr>
+            <td colspan="8" class="text-center py-5 text-muted">Use the filters above to load violations.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card-footer d-flex flex-column flex-lg-row justify-content-between gap-2">
+      <div id="dq-pagination-summary" class="text-muted small"></div>
+      <nav id="dq-pagination" aria-label="DQ pagination"></nav>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="dq-detail-modal" tabindex="-1" aria-hidden="true" aria-labelledby="dq-detail-title">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title h5" id="dq-detail-title">Violation</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div id="dq-detail-loader" class="d-flex align-items-center justify-content-center py-5 d-none">
+          <div class="spinner-border text-primary me-2" role="status" aria-hidden="true"></div>
+          Loading violation detail...
+        </div>
+        <div id="dq-detail-content" class="d-none">
+          <dl class="row mb-0">
+            <dt class="col-sm-3">Violation ID</dt>
+            <dd class="col-sm-9" data-field="id"></dd>
+            <dt class="col-sm-3">Run ID</dt>
+            <dd class="col-sm-9" data-field="run_id"></dd>
+            <dt class="col-sm-3">Rule Code</dt>
+            <dd class="col-sm-9" data-field="rule_code"></dd>
+            <dt class="col-sm-3">Severity</dt>
+            <dd class="col-sm-9" data-field="severity"></dd>
+            <dt class="col-sm-3">Status</dt>
+            <dd class="col-sm-9" data-field="status"></dd>
+            <dt class="col-sm-3">Created</dt>
+            <dd class="col-sm-9" data-field="created_at"></dd>
+            <dt class="col-sm-3">Preview</dt>
+            <dd class="col-sm-9" data-field="preview"></dd>
+            <dt class="col-sm-3">Source</dt>
+            <dd class="col-sm-9" data-field="source"></dd>
+            <dt class="col-sm-3">Remediation Hint</dt>
+            <dd class="col-sm-9" data-field="remediation_hint"></dd>
+            <dt class="col-sm-3">Staging Payload</dt>
+            <dd class="col-sm-9">
+              <pre class="bg-light border rounded p-3 small" data-field="staging_payload"></pre>
+            </dd>
+            <dt class="col-sm-3">Normalized Payload</dt>
+            <dd class="col-sm-9">
+              <pre class="bg-light border rounded p-3 small" data-field="normalized_payload"></pre>
+            </dd>
+            <dt class="col-sm-3">Violation Details</dt>
+            <dd class="col-sm-9">
+              <pre class="bg-light border rounded p-3 small" data-field="violation_details"></pre>
+            </dd>
+          </dl>
+        </div>
+      </div>
+      <div class="modal-footer justify-content-between">
+        <div id="dq-detail-updated" class="text-muted small"></div>
+        <div class="d-flex gap-2">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  window.IMPORTER_DQ_CONFIG = {
+    api: {
+      list: "{{ url_for('importer.importer_violations_list') }}",
+      detailBase: "{{ url_for('importer.importer_violation_detail', violation_id=0)[:-1] }}",
+      stats: "{{ url_for('importer.importer_violations_stats') }}",
+      export: "{{ url_for('importer.importer_violations_export') }}",
+      ruleCodes: "{{ url_for('importer.importer_violations_rule_codes') }}"
+    },
+    options: {
+      severity: {{ severity_options | tojson }},
+      status: {{ status_options | tojson }}
+    }
+  };
+</script>
+<script src="{{ url_for('static', filename='js/importer_violations.js') }}" defer></script>
+{% endblock %}
+
