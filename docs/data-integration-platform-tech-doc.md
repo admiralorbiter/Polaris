@@ -14,6 +14,7 @@
 ## Table of Contents
 - [Epics Overview](#epics-overview)
 - [Cross-Team Quality Bars](#cross-team-quality-bars)
+- [Supporting Documentation](#supporting-documentation)
 - [Sprint 0 — Foundations](#sprint-0--foundations)
 - [Sprint 1 — CSV Adapter + ELT Skeleton](#sprint-1--csv-adapter--elt-skeleton)
 - [Sprint 2 — Runs Dashboard + DQ Inbox](#sprint-2--runs-dashboard--dq-inbox)
@@ -27,6 +28,26 @@
 - [Backlog (Nice-to-Have)](#backlog-nice-to-have)
 - [Roles & RACI](#roles--raci)
 - [Risk Register](#risk-register)
+
+---
+
+## Supporting Documentation
+
+**Architecture & Design**:
+- `docs/data-integration-platform-overview.md` — High-level architecture, data layers, pipeline flow, and design principles
+- Architecture diagram (future): End-to-end pipeline flow diagram showing Extract → Land → Transform → Link → Load → Reconcile stages
+
+**Sprint Retrospectives & Learnings**:
+- `docs/sprint1-retrospective.md` — Sprint 1 completion retrospective, lessons learned, and recommendations for Sprint 2
+
+**Operational Guides**:
+- `docs/importer-feature-flag.md` — Feature flag configuration, troubleshooting, and verification checklist
+- `docs/commands.md` — CLI command reference with troubleshooting and debugging tips
+- `docs/importer-dor.md` — Definition of Ready checklist for importer tickets
+- `docs/importer-dod.md` — Definition of Done checklist for importer tickets
+
+**Test Data & Scenarios**:
+- `ops/testdata/importer_golden_dataset_v0/README.md` — Golden dataset documentation with expected outcomes
 
 ---
 
@@ -204,6 +225,50 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 
 ---
 
+### Sprint 1 Completion Status
+
+**Status**: ✅ **COMPLETE** — All core stories delivered and tested.
+
+**Delivered Features**:
+- ✅ CSV adapter with canonical field support and header normalization (`IMP-10`)
+- ✅ Minimal DQ rules: `VOL_CONTACT_REQUIRED`, `VOL_EMAIL_FORMAT`, `VOL_PHONE_E164` (`IMP-11`)
+- ✅ Create-only upsert with duplicate email detection (`IMP-12`)
+- ✅ CLI and admin UI for triggering runs with async/sync modes (`IMP-13`)
+- ✅ Worker process with SQLite transport (Redis optional) (`IMP-3`)
+- ✅ Feature flag system and optional mounting (`IMP-1`)
+- ✅ Base schema migrations (`IMP-2`)
+- ✅ Golden dataset v0 with test scenarios (`IMP-4`)
+
+**Test Coverage**:
+- Unit tests: CSV adapter, DQ rules, pipeline stages, CLI commands
+- Integration tests: End-to-end runs against golden dataset
+- Test files: `test_importer_csv_adapter.py`, `test_importer_dq_minimal.py`, `test_importer_pipeline_*.py`, `test_importer_cli_csv.py`, `test_importer_feature_flag.py`
+
+**Known Limitations & Deferred Items**:
+- UI for viewing runs is basic (admin page shows recent runs table; full dashboard in Sprint 2)
+- DQ violations viewable via database queries only (DQ inbox UI in Sprint 2)
+- No remediation workflow yet (edit & requeue in Sprint 2)
+- Dry-run mode implemented but not exposed in UI toggle (Sprint 2)
+- Deterministic dedupe not yet implemented (Sprint 3)
+- External ID mapping not yet used for idempotency (Sprint 3)
+
+**Metrics & Observability**:
+- `counts_json` populated with staging, DQ, and core load metrics
+- `metrics_json` preserves full evaluation counts (including dry-runs)
+- CLI `--summary-json` outputs machine-readable stats
+- Worker health check via `flask importer worker ping` and `/importer/worker_health`
+
+**Next Steps for Sprint 2**:
+- Build Runs dashboard with filtering and drill-down
+- Implement DQ inbox with export capability
+- Add remediation workflow (edit & requeue)
+- Expose dry-run toggle in UI
+- Enhance run detail views with violation summaries
+
+**See Also**: `docs/sprint1-retrospective.md` for detailed retrospective, lessons learned, and Sprint 2 recommendations.
+
+---
+
 ## Sprint 2 — Runs Dashboard + DQ Inbox
 **Epic**: EPIC-2  
 **Goal**: Operator UX for monitoring runs and quarantines with basic remediation.
@@ -216,12 +281,73 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Filters: source/status/date; pagination.  
 **Dependencies**: IMP-13.
 
+**UI Wireframe & Layout**:
+- **Main table**: Sortable columns (run_id, source, status badge, started_at, ended_at, duration, rows_staged, rows_validated, rows_quarantined, rows_inserted, rows_skipped_duplicates)
+- **Status badges**: Color-coded (pending=yellow, running=blue, succeeded=green, failed=red, partially_failed=orange)
+- **Filters**: Dropdowns for source (`csv`, future adapters), status (all/pending/running/succeeded/failed), date range picker (last 7/30/90 days, custom)
+- **Pagination**: 25/50/100 rows per page; total count displayed
+- **Drill-down modal/page**: Expandable row or detail route (`/importer/runs/<id>`) showing:
+  - Full `counts_json` breakdown (staging, DQ, core) with nested JSON viewer
+  - `metrics_json` for dry-runs
+  - `error_summary` if failed
+  - Links to DQ violations count (deep-link to inbox filtered by run_id)
+  - Download original upload (if `keep_file=True`)
+  - Retry button (if failed/pending and retry-capable)
+
+**Access Control**:
+- Route: `/importer/runs` (or `/admin/imports/runs` if namespaced)
+- Permission: `manage_imports` or equivalent admin role
+- Audit: Log view events (run_id, user_id, timestamp) for compliance
+
+**Metrics & Telemetry**:
+- Track dashboard load time (p95/p99)
+- Track filter/pagination interactions (client-side events)
+- Expose run counts via API endpoint for external monitoring: `GET /importer/runs/stats?source=csv&status=succeeded&days=7`
+- Dashboard should render within 2s for 1000 runs (indexed queries, pagination)
+
+**Testing Expectations**:
+- **Unit tests**: Dashboard route handlers, filter/pagination logic, JSON serialization
+- **Integration tests**: Render dashboard with 50+ runs, verify filters, pagination, drill-down
+- **Golden data**: Use existing runs from Sprint 1 test fixtures; create test runs with various statuses
+- **UI tests**: Verify status badge colors, filter dropdowns, pagination controls (HTML structure)
+- **Performance tests**: Load dashboard with 1000 runs, verify <2s render time
+
 ### IMP-21 — DQ inbox (basic) with export _(8 pts)_
 **User story**: As a steward, I can filter violations and export them.  
 **Acceptance Criteria**
 - Filter by rule/severity/run; row detail shows raw & normalized views.  
 - Export CSV of violations.  
 **Dependencies**: IMP-11.
+
+**UI Wireframe & Layout**:
+- **Main table**: Columns (violation_id, run_id link, staging_volunteer_id, rule_code badge, severity badge, status badge, created_at, staging row preview)
+- **Filters**: Rule code dropdown (populated from `dq_violations.rule_code` distinct), severity (all/error/warn/info), run_id (autocomplete or dropdown), date range
+- **Row detail modal/sidebar**: Click row to expand showing:
+  - Raw staging payload (`staging_volunteers.payload_json`) formatted JSON viewer
+  - Normalized preview (extracted fields: first_name, last_name, email, phone)
+  - Violation details (`dq_violations.details_json`) with highlighted offending fields
+  - Remediation hints (rule-specific guidance)
+  - Actions: Edit & Requeue (IMP-22), Suppress (future), Mark as Won't Fix (future)
+- **Export button**: Generates CSV with columns: violation_id, run_id, rule_code, severity, status, staging_row_data (flattened), violation_details, created_at
+- **Bulk actions toolbar**: Select multiple violations, bulk export, bulk suppress (future)
+
+**Access Control**:
+- Route: `/importer/dq-inbox` (or `/admin/imports/violations`)
+- Permission: `manage_imports` or `view_imports` (read-only) vs `remediate_imports` (edit actions)
+- PII considerations: Mask sensitive fields (email, phone) for non-admin roles (future enhancement)
+
+**Metrics & Telemetry**:
+- Track violation counts by rule_code (dashboard widget or summary card)
+- Track export events (user_id, rule_code filter, row count)
+- Expose violation stats API: `GET /importer/violations/stats?rule_code=VOL_CONTACT_REQUIRED&days=7`
+- Export CSV should sanitize formula injection (prepend `'` to cells starting with `=`, `+`, `-`, `@`)
+
+**Testing Expectations**:
+- **Unit tests**: Violation query filters, CSV export sanitization, JSON serialization
+- **Integration tests**: Filter by rule_code, export CSV, verify file download, verify CSV injection prevention
+- **Golden data**: Use `volunteers_invalid.csv` from golden dataset; verify expected violations appear
+- **UI tests**: Verify filter dropdowns, row detail modal, export button (HTML structure)
+- **Security tests**: Verify CSV export sanitization prevents formula injection
 
 ### IMP-22 — Remediate: edit & requeue _(8 pts)_
 **User story**: As a steward, I can fix a quarantined row and requeue it.  
@@ -230,11 +356,63 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Violation status moves to `fixed`; audit recorded.  
 **Dependencies**: IMP-21, IMP-12.
 
+**UI Wireframe & Layout**:
+- **Edit form modal/page**: Pre-populated with staging row fields (first_name, last_name, email, phone, etc.)
+- **Field-level validation**: Real-time client-side validation matching DQ rules (email format, phone E.164, contact required)
+- **Save & Requeue button**: On submit:
+  1. Validate form client-side
+  2. POST to `/importer/violations/<violation_id>/remediate` with edited payload
+  3. Server re-runs DQ rules on edited row
+  4. If clean: proceed to upsert (single-row import), update violation status to `fixed`, create audit log
+  5. If still invalid: return validation errors, keep violation status `open`, show new violation details
+- **Success feedback**: Toast notification "Row fixed and queued for import" with link to new run
+- **Error feedback**: Display validation errors inline, highlight offending fields
+
+**Access Control**:
+- Route: `POST /importer/violations/<id>/remediate`
+- Permission: `remediate_imports` or equivalent (stricter than view-only)
+- Audit: Log remediation events (violation_id, user_id, edited_fields JSON diff, timestamp, outcome)
+
+**Metrics & Telemetry**:
+- Track remediation success rate (fixed vs still-quarantined)
+- Track common fixes (which fields edited most often, which rules resolved)
+- Expose remediation stats: `GET /importer/remediation/stats?days=30`
+- Re-queue should create a new mini-run (single-row import) or batch with other remediated rows
+
+**Testing Expectations**:
+- **Unit tests**: Edit form validation, DQ re-run logic, violation status transitions, audit logging
+- **Integration tests**: Edit row, save, verify DQ re-run, verify upsert if clean, verify violation status update
+- **Golden data**: Use violations from `volunteers_invalid.csv`, fix email format, verify resolution
+- **UI tests**: Verify form pre-population, validation errors, success/error feedback (HTML structure)
+- **Edge cases**: Multi-violation rows (fix one, verify others remain), partial edits (null handling)
+
 ### IMP-23 — Dry-run mode _(3 pts)_
-**User story**: As an operator, I can simulate an import without writes.  
+**User story**: As an operator, I can simulate an import without writing to core.  
 **Acceptance Criteria**
 - `--dry-run`/UI toggle executes pipeline but skips core writes; run clearly labeled.  
 **Dependencies**: IMP-12, IMP-20.
+
+**UI Wireframe & Layout**:
+- **Upload form toggle**: Checkbox "Dry run (no writes to database)" above file upload
+- **CLI flag**: `--dry-run` already implemented; ensure UI passes flag to backend
+- **Run badge**: Dry-run runs show special badge "DRY RUN" in dashboard (distinct from status)
+- **Run detail**: Clear messaging "This was a dry run. No data was written to core tables."
+- **Metrics display**: Show what would have been inserted/updated (from `metrics_json`)
+
+**Access Control**:
+- Permission: Same as regular import (`manage_imports`)
+- Audit: Log dry-run events (user_id, file, dry_run=true)
+
+**Metrics & Telemetry**:
+- Track dry-run usage (frequency, user_id)
+- Dry-run runs should still populate `metrics_json` with full evaluation counts
+- Dashboard filter: "Include dry runs" toggle (default: show all)
+
+**Testing Expectations**:
+- **Unit tests**: Dry-run flag propagation, core write skip logic, metrics_json population
+- **Integration tests**: Upload with dry-run toggle, verify no core inserts, verify metrics_json populated
+- **Golden data**: Run `volunteers_valid.csv` with dry-run, verify counts in metrics_json, verify no core records
+- **UI tests**: Verify dry-run checkbox, badge display, messaging (HTML structure)
 
 ---
 

@@ -60,7 +60,44 @@ This note summarizes the IMP-1 work that makes the importer package optional and
   - Adapter validation: unknown adapters raise `ValueError`.
 - Suggested follow-up: extend tests as adapters gain functionality (e.g., registry-driven loading, CLI subcommands).
 
+## Troubleshooting
+
+### Common Issues
+
+| Issue | Symptom | Solution |
+|-------|---------|----------|
+| Importer not appearing in UI | No "Importer" menu in nav bar | Verify `IMPORTER_ENABLED=true` and `IMPORTER_ADAPTERS` is non-empty. Check app logs for startup errors. |
+| Unknown adapter error | `ValueError: Unknown adapter 'xyz'` | Check adapter name spelling in `IMPORTER_ADAPTERS`. Valid names: `csv`, `salesforce`, `google_sheets` (case-insensitive). |
+| Worker not starting | `flask importer worker run` fails | On Windows, add `--pool=solo`. Verify `IMPORTER_WORKER_ENABLED=true` if using conditional worker startup. |
+| Health endpoint 404 | `GET /importer/health` returns 404 | Ensure importer is enabled (`IMPORTER_ENABLED=true`) and blueprint registered. Check `flask routes` for `/importer/health`. |
+| CLI command not found | `flask importer` raises "No such command" | Verify importer is enabled. Check that `init_importer(app)` is called in app factory. |
+| Adapter not loading | Adapter missing from health response | Verify adapter name in `IMPORTER_ADAPTERS` matches registry entry. Check for import errors in logs. |
+
+### Quick Verification Checklist
+
+Before starting Sprint 2 work, verify Sprint 1 completion:
+
+- [ ] `IMPORTER_ENABLED=true` in `.env` or environment
+- [ ] `IMPORTER_ADAPTERS=csv` (or comma-separated list)
+- [ ] App starts without errors (check logs for importer initialization message)
+- [ ] `flask importer` command works (prints adapter list)
+- [ ] `flask importer worker ping` succeeds (worker running)
+- [ ] `GET /importer/health` returns JSON with `enabled: true`
+- [ ] Admin UI shows "Importer" menu (super admin only)
+- [ ] Can upload CSV via admin UI or CLI (`flask importer run --source csv --file <path>`)
+- [ ] Test run completes and creates records in `import_runs` table
+- [ ] Golden dataset files exist in `ops/testdata/importer_golden_dataset_v0/`
+
+### Debugging Tips
+
+1. **Check app logs**: Look for importer initialization messages on startup. Errors will indicate missing config or adapter issues.
+2. **Verify blueprint registration**: Run `flask routes | grep importer` to confirm routes are mounted.
+3. **Test worker connectivity**: Use `flask importer worker ping` to verify Celery worker is reachable.
+4. **Inspect database**: Query `import_runs` table to verify runs are being created.
+5. **Check file permissions**: Ensure `IMPORTER_UPLOAD_DIR` is writable if using file-based uploads.
+
 ## Related Docs
 - `docs/data-integration-platform-overview.md` (§10 Optionality & Packaging) references flags and packaging guidance.
 - `docs/data-integration-platform-tech-doc.md` (IMP-1 story) notes the environment defaults and docs requirement.
+- `docs/commands.md` provides CLI command reference and usage examples.
 
