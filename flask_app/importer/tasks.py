@@ -62,7 +62,7 @@ def ingest_csv(
     Execute the CSV ingest pipeline asynchronously via the importer worker.
     """
 
-    run = ImportRun.query.get(run_id)
+    run = db.session.get(ImportRun, run_id)
     if run is None:
         raise ValueError(f"Import run {run_id} not found.")
 
@@ -126,7 +126,7 @@ def ingest_csv(
         }
     except Exception as exc:  # pragma: no cover - defensive logging path
         db.session.rollback()
-        recovery_run = ImportRun.query.get(run_id)
+        recovery_run = db.session.get(ImportRun, run_id)
         if recovery_run is None:
             raise
         recovery_run.status = ImportRunStatus.FAILED

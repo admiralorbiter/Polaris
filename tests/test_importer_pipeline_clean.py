@@ -6,7 +6,7 @@ def _make_import_run() -> ImportRun:
     run = ImportRun(source="csv", adapter="csv", status=ImportRunStatus.PENDING, dry_run=False)
     db.session.add(run)
     db.session.commit()
-    return ImportRun.query.get(run.id)
+    return db.session.get(ImportRun, run.id)
 
 
 def _make_staging_row(
@@ -39,7 +39,7 @@ def _make_staging_row(
     )
     db.session.add(row)
     db.session.commit()
-    return StagingVolunteer.query.get(row.id)
+    return db.session.get(StagingVolunteer, row.id)
 
 
 def test_promote_clean_volunteers_creates_records(app):

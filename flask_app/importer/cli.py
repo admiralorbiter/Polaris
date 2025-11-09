@@ -125,7 +125,7 @@ def _execute_csv_inline(
         return staging_summary, dq_summary, clean_summary, core_summary
     except Exception as exc:
         db.session.rollback()
-        recovery_run = ImportRun.query.get(run_id)
+        recovery_run = db.session.get(ImportRun, run_id)
         if recovery_run is None:
             raise click.ClickException(f"Import run {run_id} failed and could not be recovered.") from exc
         recovery_run.status = ImportRunStatus.FAILED
@@ -366,7 +366,7 @@ def importer_run(
                 },
             )
         except Exception as exc:  # pragma: no cover - defensive path
-            recovery_run = ImportRun.query.get(run_id)
+            recovery_run = db.session.get(ImportRun, run_id)
             if recovery_run is not None:
                 recovery_run.status = ImportRunStatus.FAILED
                 recovery_run.error_summary = str(exc)
@@ -393,7 +393,7 @@ def importer_run(
         click.echo(json.dumps(payload))
         return
 
-    run = ImportRun.query.get(run_id)
+    run = db.session.get(ImportRun, run_id)
     if run is None:
         raise click.ClickException(f"Import run {run_id} could not be reloaded before execution.")
 

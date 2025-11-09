@@ -18,7 +18,7 @@ def _make_run() -> ImportRun:
     run = ImportRun(source="csv", adapter="csv", status=ImportRunStatus.PENDING, dry_run=False)
     db.session.add(run)
     db.session.commit()
-    return ImportRun.query.get(run.id)
+    return db.session.get(ImportRun, run.id)
 
 
 def _make_validated_row(run: ImportRun, *, seq: int, email: str, phone: str | None = None) -> StagingVolunteer:
@@ -45,7 +45,7 @@ def _make_validated_row(run: ImportRun, *, seq: int, email: str, phone: str | No
     )
     db.session.add(row)
     db.session.commit()
-    return StagingVolunteer.query.get(row.id)
+    return db.session.get(StagingVolunteer, row.id)
 
 
 def test_load_core_volunteers_inserts_contacts(app):

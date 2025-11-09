@@ -23,7 +23,7 @@ def _create_import_run(*, dry_run: bool = False) -> ImportRun:
     )
     db.session.add(run)
     db.session.commit()
-    return ImportRun.query.get(run.id)
+    return db.session.get(ImportRun, run.id)
 
 
 def test_stage_volunteers_from_csv_persists_rows(app):

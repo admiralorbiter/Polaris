@@ -18,7 +18,7 @@ def _create_import_run(*, dry_run: bool = False) -> ImportRun:
     )
     db.session.add(run)
     db.session.commit()
-    return ImportRun.query.get(run.id)
+    return db.session.get(ImportRun, run.id)
 
 
 def _create_staging_row(
@@ -38,7 +38,7 @@ def _create_staging_row(
     )
     db.session.add(row)
     db.session.commit()
-    return StagingVolunteer.query.get(row.id)
+    return db.session.get(StagingVolunteer, row.id)
 
 
 def test_run_minimal_dq_validates_clean_rows(app):
@@ -52,14 +52,14 @@ def test_run_minimal_dq_validates_clean_rows(app):
     summary = run_minimal_dq(run, dry_run=False)
     db.session.commit()
 
-    refreshed_row = StagingVolunteer.query.get(row.id)
+    refreshed_row = db.session.get(StagingVolunteer, row.id)
     assert refreshed_row.status == StagingRecordStatus.VALIDATED
     assert summary.rows_evaluated == 1
     assert summary.rows_validated == 1
     assert summary.rows_quarantined == 0
     assert not summary.rule_counts
 
-    refreshed_run = ImportRun.query.get(run.id)
+    refreshed_run = db.session.get(ImportRun, run.id)
     dq_counts = refreshed_run.counts_json["dq"]["volunteers"]
     assert dq_counts["rows_validated"] == 1
     assert dq_counts["rows_quarantined"] == 0
@@ -79,7 +79,7 @@ def test_run_minimal_dq_quarantines_and_logs_violations(app):
     summary = run_minimal_dq(run, dry_run=False)
     db.session.commit()
 
-    refreshed_row = StagingVolunteer.query.get(row.id)
+    refreshed_row = db.session.get(StagingVolunteer, row.id)
     assert refreshed_row.status == StagingRecordStatus.QUARANTINED
     assert summary.rows_quarantined == 1
     assert summary.rule_counts["VOL_CONTACT_REQUIRED"] == 1
@@ -90,7 +90,7 @@ def test_run_minimal_dq_quarantines_and_logs_violations(app):
     assert violations[0].severity.name == "ERROR"
     assert violations[0].details_json["fields"] == ["email", "phone"]
 
-    refreshed_run = ImportRun.query.get(run.id)
+    refreshed_run = db.session.get(ImportRun, run.id)
     dq_counts = refreshed_run.counts_json["dq"]["volunteers"]
     assert dq_counts["rows_quarantined"] == 1
     assert dq_counts["rule_counts"]["VOL_CONTACT_REQUIRED"] == 1
@@ -107,13 +107,13 @@ def test_run_minimal_dq_dry_run_skips_persistence(app):
     summary = run_minimal_dq(run, dry_run=True)
     db.session.commit()
 
-    refreshed_row = StagingVolunteer.query.get(row.id)
+    refreshed_row = db.session.get(StagingVolunteer, row.id)
     assert refreshed_row.status == StagingRecordStatus.LANDED
     assert DataQualityViolation.query.count() == 0
     assert summary.rows_quarantined == 1
     assert summary.dry_run is True
 
-    refreshed_run = ImportRun.query.get(run.id)
+    refreshed_run = db.session.get(ImportRun, run.id)
     dq_counts = refreshed_run.counts_json["dq"]["volunteers"]
     assert dq_counts["rows_quarantined"] == 0
     assert dq_counts["dry_run"] is True
