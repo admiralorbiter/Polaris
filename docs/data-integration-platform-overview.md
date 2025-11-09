@@ -379,6 +379,8 @@ Each rule has: `rule_code`, `severity` (error/warn/info), remediation hints, and
 - **Config**
     - ENV vars: `IMPORTER_ENABLED`, `IMPORTER_ADAPTERS`, `IMPORTER_SCHEDULE`, `IMPORTER_RULES_MODE=warn|enforce`, thresholds.
     - Worker flags: `IMPORTER_WORKER_ENABLED` (default false), `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`; leave unset to use the bundled SQLite transport (`celery.sqlite`) so no Redis is required locally.
+    - DoR/DoD checklists live in `docs/importer-dor.md` and `docs/importer-dod.md`; reference them from importer issues.
+    - Golden dataset samples live under `ops/testdata/importer_golden_dataset_v0/`; update the README when new scenarios are added.
     - YAML mapping files stored under `/app/importer/mappings/`.
 - **Processes**
     - Web: `gunicorn ...`

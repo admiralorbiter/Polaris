@@ -102,8 +102,8 @@
 ### IMP-4 — DoR/DoD checklists & Golden Dataset scaffold _(3 pts)_
 **User story**: As QA/PM, I want shared criteria and seed test data.  
 **Acceptance Criteria**
-- DoR/DoD documents added.  
-- Golden dataset v0 spec created (CSV with edge cases).  
+- DoR/DoD documents added (`docs/importer-dor.md`, `docs/importer-dod.md`) and referenced from backlog.  
+- Golden dataset v0 scaffold created under `ops/testdata/importer_golden_dataset_v0/` with starter volunteer samples (happy path, validation failures, duplicates) plus README noting expected outcomes and extension guidance.  
 **Dependencies**: none.
 
 ---

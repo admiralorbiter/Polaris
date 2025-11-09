@@ -1,0 +1,4 @@
+external_system,external_id,first_name,last_name,email,phone_e164,status,source_updated_at
+legacy_csv,vol-dup-001,Samantha,Stone,samantha.stone@example.org,+14155550105,ACTIVE,2025-10-03T08:00:00Z
+legacy_csv,vol-dup-002,Sammy,Stone,samantha.stone@example.org,+14155550105,ACTIVE,2025-10-03T08:05:00Z
+
