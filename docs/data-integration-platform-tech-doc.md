@@ -122,6 +122,31 @@
 **Dependencies**: IMP-2.  
 **Notes**: Document canonical fields.
 
+**Canonical CSV columns (v1.0)**
+
+| Column             | Required | Notes |
+|--------------------|----------|-------|
+| `external_system`  | No       | Defaults to `csv` when omitted. |
+| `external_id`      | No       | Stable identifier from the source system. |
+| `first_name`       | Yes      | Volunteer given name. |
+| `last_name`        | Yes      | Volunteer family name. |
+| `email`            | No       | Primary email; DQ ensures at least one of `{email, phone}` downstream. |
+| `phone`            | No       | Primary phone in any readable format (normalized later). |
+| `alternate_emails` | No       | Comma-separated list; stored raw for future DQ. |
+| `alternate_phones` | No       | Comma-separated list; stored raw for future DQ. |
+| `source_updated_at`| No       | ISO-8601 timestamp from source (used for freshness). |
+| `ingest_version`   | No       | Contract version stamp to help migrations. |
+
+> The adapter accepts sensible aliases (`First Name`, `Email Address`, `Phone Number`, etc.) and normalizes headers to the canonical names above.
+
+**CLI usage (synchronous)**
+
+```
+flask importer run --source csv --file ops/testdata/importer_golden_dataset_v0/volunteers_valid.csv
+```
+
+The command creates an `import_run`, validates the header, stages rows (or performs a dry-run), and updates `counts_json`/`metrics_json` with `{rows_processed, rows_staged, rows_skipped_blank, dry_run, headers}`.
+
 ### IMP-11 — Minimal DQ: required & format _(5 pts)_
 **User story**: As a data steward, invalid rows are quarantined with clear reasons.  
 **Acceptance Criteria**
@@ -425,4 +450,3 @@
 - **Data churn from bad dedupe** → start deterministic + high thresholds; enable auto‑merge later.  
 - **Rate limits/long backfills** → concurrency caps; retry/backoff; pausable runs.  
 - **PII exposure** → RBAC, masking, audit logs, retention policies.
-

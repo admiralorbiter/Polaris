@@ -70,6 +70,9 @@ def app():
                 "ENABLE_CONSOLE_LOGGING": True,  # Enable console logging for tests
                 "LOG_LEVEL": "DEBUG",  # Set DEBUG level for tests
                 "EMAIL_VALIDATION_CHECK_DELIVERABILITY": False,  # Skip DNS checks in tests
+                "IMPORTER_ENABLED": False,
+                "IMPORTER_ADAPTERS": (),
+                "IMPORTER_WORKER_ENABLED": False,
             }
         )
 
@@ -521,9 +524,7 @@ def pytest_configure(config):
     # This is a safety measure in case conftest imports happen in unexpected order
     os.environ["FLASK_ENV"] = "testing"
 
-    config.addinivalue_line(
-        "markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')"
-    )
+    config.addinivalue_line("markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')")
     config.addinivalue_line("markers", "integration: marks tests as integration tests")
     config.addinivalue_line("markers", "unit: marks tests as unit tests")
 

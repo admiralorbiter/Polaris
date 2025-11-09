@@ -1,5 +1,4 @@
-external_system,external_id,first_name,last_name,email,phone_e164,status,source_updated_at
-legacy_csv,vol-bad-001,Charlie,Brown,,,+14155550103,ACTIVE,2025-10-02T09:00:00Z
-legacy_csv,vol-bad-002,Lucy,Van Pelt,lucy-at-example.com,+1555,ACTIVE,2025-10-02T09:05:00Z
-legacy_csv,vol-bad-003,Peppermint,Patty,,,+15555550104,ACTIVE,2025-10-02T09:10:00Z
-
+external_system,external_id,first_name,last_name,email,phone,source_updated_at
+legacy_csv,vol-bad-001,Charlie,Brown,,,"2025-10-02T09:00:00Z"
+legacy_csv,vol-bad-002,Lucy,Van Pelt,lucy-at-example.com,+1555,2025-10-02T09:05:00Z
+legacy_csv,vol-bad-003,Peppermint,Patty,,+15555550104,2025-10-02T09:10:00Z

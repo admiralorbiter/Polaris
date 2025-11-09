@@ -9,9 +9,14 @@ needed for worker health checks and integration tests today.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from celery import shared_task
+
+from flask_app.importer.pipeline import stage_volunteers_from_csv
+from flask_app.models.base import db
+from flask_app.models.importer.schema import ImportRun, ImportRunStatus
 
 
 @shared_task(name="importer.healthcheck", bind=True)
@@ -41,3 +46,56 @@ def noop_ingest(self, *, payload: dict[str, Any] | None = None) -> dict[str, Any
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
 
+
+@shared_task(name="importer.pipeline.ingest_csv", bind=True)
+def ingest_csv(
+    self, *, run_id: int, file_path: str, dry_run: bool = False, source_system: str = "csv"
+) -> dict[str, Any]:
+    """
+    Execute the CSV ingest pipeline asynchronously via the importer worker.
+    """
+
+    run = ImportRun.query.get(run_id)
+    if run is None:
+        raise ValueError(f"Import run {run_id} not found.")
+
+    run.status = ImportRunStatus.RUNNING
+    run.started_at = datetime.now(timezone.utc)
+    db.session.commit()
+
+    path = Path(file_path)
+    if not path.exists():
+        run.status = ImportRunStatus.FAILED
+        run.error_summary = f"CSV file not found: {file_path}"
+        run.finished_at = datetime.now(timezone.utc)
+        db.session.commit()
+        raise FileNotFoundError(f"CSV file not found: {file_path}")
+
+    try:
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            summary = stage_volunteers_from_csv(
+                run,
+                handle,
+                source_system=source_system,
+                dry_run=dry_run,
+            )
+        run.status = ImportRunStatus.SUCCEEDED
+        run.finished_at = datetime.now(timezone.utc)
+        db.session.commit()
+        return {
+            "run_id": run_id,
+            "rows_processed": summary.rows_processed,
+            "rows_staged": summary.rows_staged,
+            "rows_skipped_blank": summary.rows_skipped_blank,
+            "dry_run": summary.dry_run,
+        }
+    except Exception as exc:  # pragma: no cover - defensive logging path
+        db.session.rollback()
+        recovery_run = ImportRun.query.get(run_id)
+        if recovery_run is None:
+            raise
+        recovery_run.status = ImportRunStatus.FAILED
+        recovery_run.error_summary = str(exc)
+        recovery_run.finished_at = datetime.now(timezone.utc)
+        db.session.commit()
+        raise

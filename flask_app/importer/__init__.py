@@ -13,8 +13,8 @@ from flask import Flask
 
 from flask_app.utils.importer import get_importer_adapters, is_importer_enabled
 
-from .cli import get_disabled_importer_group, importer_cli
 from .celery_app import ensure_celery_app, get_celery_app
+from .cli import get_disabled_importer_group, importer_cli
 from .registry import AdapterDescriptor, get_adapter_registry, resolve_adapters
 from .views import importer_blueprint
 
@@ -45,10 +45,11 @@ def _register_template_context(app: Flask, state: dict[str, Any]) -> None:
 
     @app.context_processor
     def importer_context():
+        enabled_flag = bool(app.config.get("IMPORTER_ENABLED", False))
         extension_state = app.extensions.get(IMPORTER_EXTENSION_KEY, {})
         return {
-            "importer_enabled": extension_state.get("enabled", False),
-            "importer_menu_items": extension_state.get("menu_items", ()),
+            "importer_enabled": enabled_flag,
+            "importer_menu_items": extension_state.get("menu_items", ()) if enabled_flag else (),
         }
 
     state["_context_registered"] = True
@@ -89,14 +90,14 @@ def init_importer(app: Flask) -> None:
     _register_template_context(app, state)
 
     if not enabled:
+        state["active_adapters"] = ()
+        state["menu_items"] = ()
         _set_cli(app, enabled=False)
         app.logger.info("Importer disabled via IMPORTER_ENABLED flag; skipping registration.")
         return
 
     registry = get_adapter_registry()
-    active_descriptors: Iterable[AdapterDescriptor] = resolve_adapters(
-        configured_adapters, registry
-    )
+    active_descriptors: Iterable[AdapterDescriptor] = resolve_adapters(configured_adapters, registry)
     state["active_adapters"] = tuple(active_descriptors)
     state["menu_items"] = (
         {
@@ -106,9 +107,13 @@ def init_importer(app: Flask) -> None:
     )
     ensure_celery_app(app, state)
 
-    app.register_blueprint(importer_blueprint)
+    if importer_blueprint.name not in app.blueprints and not getattr(app, "_got_first_request", False):
+        app.register_blueprint(importer_blueprint)
+    elif importer_blueprint.name not in app.blueprints:
+        app.logger.warning(
+            "Importer blueprint registration skipped because the app has already handled its first request."
+        )
     _set_cli(app, enabled=True)
 
     adapter_names = ", ".join(adapter.name for adapter in active_descriptors) or "none"
     app.logger.info("Importer enabled with adapters: %s", adapter_names)
-
