@@ -153,6 +153,11 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Rules: must have `{email || phone}`; email format; phone E.164.  
 - Violations logged with rule codes & details; good rows pass to next step.  
 **Dependencies**: IMP-10.  
+**Implementation Notes**
+- Rule codes ship as: `VOL_CONTACT_REQUIRED`, `VOL_EMAIL_FORMAT`, `VOL_PHONE_E164` (all `error` severity today).  
+- DQ engine writes status transitions (`LANDED → VALIDATED/QUARANTINED`) on `staging_volunteers`, with timestamps and first violation message stored in `last_error`.  
+- Each violation is persisted into `dq_violations.details_json` with offending fields and values; `ImportRun.counts_json.dq.volunteers` aggregates `{rows_evaluated, rows_validated, rows_quarantined, rule_counts}` while `metrics_json` preserves full counts even for dry-runs.  
+- CLI and worker summaries surface per-rule tallies so stewards can spot systemic issues immediately after a run.
 
 ### IMP-12 — Upsert (create-only) into core volunteers _(8 pts)_
 **User story**: As an operator, clean new rows load into core; duplicates (by email) are skipped for now.  

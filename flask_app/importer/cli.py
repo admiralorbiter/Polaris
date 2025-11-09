@@ -18,7 +18,12 @@ from celery.exceptions import TimeoutError as CeleryTimeoutError
 from flask.cli import ScriptInfo
 
 from flask_app.importer.celery_app import DEFAULT_QUEUE_NAME, get_celery_app
-from flask_app.importer.pipeline import StagingSummary, stage_volunteers_from_csv
+from flask_app.importer.pipeline import (
+    DQProcessingSummary,
+    StagingSummary,
+    run_minimal_dq,
+    stage_volunteers_from_csv,
+)
 from flask_app.models.base import db
 from flask_app.models.importer.schema import ImportRun, ImportRunStatus
 from flask_app.utils.importer import get_importer_adapters, is_importer_enabled
@@ -88,7 +93,7 @@ def _execute_csv_inline(
     *,
     dry_run: bool,
     source_system: str,
-) -> StagingSummary:
+) -> tuple[StagingSummary, DQProcessingSummary]:
     run_id = run.id
     run.status = ImportRunStatus.RUNNING
     run.started_at = datetime.now(timezone.utc)
@@ -96,16 +101,17 @@ def _execute_csv_inline(
 
     try:
         with csv_path.open("r", encoding="utf-8", newline="") as handle:
-            summary = stage_volunteers_from_csv(
+            staging_summary = stage_volunteers_from_csv(
                 run,
                 handle,
                 source_system=source_system,
                 dry_run=dry_run,
             )
+        dq_summary = run_minimal_dq(run, dry_run=dry_run, csv_rows=staging_summary.dry_run_rows)
         run.status = ImportRunStatus.SUCCEEDED
         run.finished_at = datetime.now(timezone.utc)
         db.session.commit()
-        return summary
+        return staging_summary, dq_summary
     except Exception as exc:
         db.session.rollback()
         recovery_run = ImportRun.query.get(run_id)
@@ -118,15 +124,27 @@ def _execute_csv_inline(
         raise click.ClickException(f"Import run {run_id} failed: {exc}") from exc
 
 
-def _format_summary(run: ImportRun, summary: StagingSummary) -> str:
-    header_preview = ", ".join(summary.header) if summary.header else "n/a"
+def _format_summary(
+    run: ImportRun, staging_summary: StagingSummary, dq_summary: DQProcessingSummary
+) -> str:
+    header_preview = ", ".join(staging_summary.header) if staging_summary.header else "n/a"
     status_value = run.status.value if hasattr(run.status, "value") else str(run.status)
+    rule_counts = dq_summary.rule_counts
+    rule_counts_display = (
+        ", ".join(f"{code}={count}" for code, count in sorted(rule_counts.items()))
+        if rule_counts
+        else "none"
+    )
     return (
-        f"Run {run.id} completed with status {status_value} (dry_run={summary.dry_run}).\n"
-        f"  rows_processed : {summary.rows_processed}\n"
-        f"  rows_staged    : {summary.rows_staged}\n"
-        f"  rows_skipped   : {summary.rows_skipped_blank}\n"
-        f"  headers        : {header_preview}"
+        f"Run {run.id} completed with status {status_value} (dry_run={staging_summary.dry_run}).\n"
+        f"  rows_processed     : {staging_summary.rows_processed}\n"
+        f"  rows_staged        : {staging_summary.rows_staged}\n"
+        f"  rows_skipped       : {staging_summary.rows_skipped_blank}\n"
+        f"  headers            : {header_preview}\n"
+        f"  dq_rows_evaluated  : {dq_summary.rows_evaluated}\n"
+        f"  dq_rows_validated  : {dq_summary.rows_validated}\n"
+        f"  dq_rows_quarantined: {dq_summary.rows_quarantined}\n"
+        f"  dq_rule_counts     : {rule_counts_display}"
     )
 
 
@@ -258,10 +276,10 @@ def importer_run(ctx, source: str, file_path: Optional[Path], dry_run: bool, enq
     if run is None:
         raise click.ClickException(f"Import run {run_id} could not be reloaded before execution.")
 
-    summary = _execute_csv_inline(
+    staging_summary, dq_summary = _execute_csv_inline(
         run,
         csv_path,
         dry_run=dry_run,
         source_system=normalized_source,
     )
-    click.echo(_format_summary(run, summary))
+    click.echo(_format_summary(run, staging_summary, dq_summary))

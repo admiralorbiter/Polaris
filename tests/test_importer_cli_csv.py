@@ -47,6 +47,10 @@ def test_importer_run_cli_stages_data_inline(app, runner, tmp_path):
     assert run.status == ImportRunStatus.SUCCEEDED
     counts = run.counts_json["staging"]["volunteers"]
     assert counts["rows_staged"] == 2
+    dq_counts = run.counts_json["dq"]["volunteers"]
+    assert dq_counts["rows_validated"] == 2
+    assert dq_counts["rows_quarantined"] == 0
+    assert dq_counts["rule_counts"] == {}
 
     staged_rows = db.session.query(StagingVolunteer).all()
     assert len(staged_rows) == 2
@@ -75,4 +79,10 @@ def test_importer_run_cli_dry_run_skips_writes(app, runner, tmp_path):
     assert run.status == ImportRunStatus.SUCCEEDED
     counts = run.counts_json["staging"]["volunteers"]
     assert counts["rows_staged"] == 0
+    dq_counts = run.counts_json["dq"]["volunteers"]
+    assert dq_counts["rows_validated"] == 0
+    assert dq_counts["rows_quarantined"] == 0
+    assert dq_counts["dry_run"] is True
+    dq_metrics = run.metrics_json["dq"]["volunteers"]
+    assert dq_metrics["rows_validated"] == 2
     assert db.session.query(StagingVolunteer).count() == 0

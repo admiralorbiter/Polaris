@@ -15,10 +15,22 @@ Each CSV includes a header row. Use these files with `flask importer run --sourc
 | File                    | Records | Expected result                                                                 |
 |------------------------|---------|----------------------------------------------------------------------------------|
 | `volunteers_valid.csv`   | 3       | All rows land in `staging_volunteers`, pass validation, and appear in counts.    |
-| `volunteers_invalid.csv` | 3       | Rows land but are quarantined with rule codes (e.g., `REQ-001`, `FMT-101`).       |
+| `volunteers_invalid.csv` | 3       | Rows land but are quarantined with rule codes (`VOL_CONTACT_REQUIRED`, `VOL_EMAIL_FORMAT`, `VOL_PHONE_E164`). |
 | `volunteers_duplicates.csv` | 2   | Both rows land; deterministic dedupe should flag them as a potential duplicate. |
 
-Document additional nuances (DQ messages, counts, etc.) as the importer matures.
+Document additional nuances (DQ messages, counts, etc.) as the importer matures. For IMP-11, expect the invalid CSV to yield the following per-rule counts when run via CLI or worker:
+
+- `VOL_CONTACT_REQUIRED`: 1 (missing both email and phone)
+- `VOL_EMAIL_FORMAT`: 1 (bad email + malformed phone)
+- `VOL_PHONE_E164`: 1 (phone not normalized to E.164)
+
+Run locally with:
+
+```
+flask importer run --source csv --file ops/testdata/importer_golden_dataset_v0/volunteers_invalid.csv
+```
+
+The command summary and `import_runs.counts_json["dq"]["volunteers"]` should reflect the tallies above.
 
 ## Extending the Dataset
 

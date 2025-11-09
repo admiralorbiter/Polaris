@@ -14,7 +14,7 @@ from typing import Any
 
 from celery import shared_task
 
-from flask_app.importer.pipeline import stage_volunteers_from_csv
+from flask_app.importer.pipeline import run_minimal_dq, stage_volunteers_from_csv
 from flask_app.models.base import db
 from flask_app.models.importer.schema import ImportRun, ImportRunStatus
 
@@ -73,21 +73,26 @@ def ingest_csv(
 
     try:
         with path.open("r", encoding="utf-8", newline="") as handle:
-            summary = stage_volunteers_from_csv(
+            staging_summary = stage_volunteers_from_csv(
                 run,
                 handle,
                 source_system=source_system,
                 dry_run=dry_run,
             )
+        dq_summary = run_minimal_dq(run, dry_run=dry_run, csv_rows=staging_summary.dry_run_rows)
         run.status = ImportRunStatus.SUCCEEDED
         run.finished_at = datetime.now(timezone.utc)
         db.session.commit()
         return {
             "run_id": run_id,
-            "rows_processed": summary.rows_processed,
-            "rows_staged": summary.rows_staged,
-            "rows_skipped_blank": summary.rows_skipped_blank,
-            "dry_run": summary.dry_run,
+            "rows_processed": staging_summary.rows_processed,
+            "rows_staged": staging_summary.rows_staged,
+            "rows_skipped_blank": staging_summary.rows_skipped_blank,
+            "dry_run": staging_summary.dry_run,
+            "dq_rows_evaluated": dq_summary.rows_evaluated,
+            "dq_rows_validated": dq_summary.rows_validated,
+            "dq_rows_quarantined": dq_summary.rows_quarantined,
+            "dq_rule_counts": dict(dq_summary.rule_counts),
         }
     except Exception as exc:  # pragma: no cover - defensive logging path
         db.session.rollback()

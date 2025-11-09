@@ -145,6 +145,8 @@ Define **canonical fields** per entity. Examples (select highlights):
 
 Each rule has: `rule_code`, `severity` (error/warn/info), remediation hints, and category.
 
+> Minimal gate (IMP-11) hard-codes three error rules today: `VOL_CONTACT_REQUIRED`, `VOL_EMAIL_FORMAT`, and `VOL_PHONE_E164`. The pipeline records outcomes in `import_runs.counts_json["dq"]["volunteers"]` and mirrors full evaluation metrics (even for dry-runs) in `metrics_json`; CLI/worker logs echo per-rule tallies to fast-track triage.
+
 ### 6.2 Quarantine & Remediation Flow
 
 - Violations logged per row with context (raw + normalized view).

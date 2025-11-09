@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass
 from typing import IO
 
-from flask_app.importer.adapters import VolunteerCSVAdapter
+from flask_app.importer.adapters import VolunteerCSVAdapter, VolunteerCSVRow
 from flask_app.models.base import db
 from flask_app.models.importer.schema import ImportRun, StagingVolunteer
 
@@ -23,6 +23,7 @@ class StagingSummary:
     rows_skipped_blank: int
     header: tuple[str, ...]
     dry_run: bool = False
+    dry_run_rows: tuple[VolunteerCSVRow, ...] = ()
 
 
 def stage_volunteers_from_csv(
@@ -37,17 +38,19 @@ def stage_volunteers_from_csv(
 
     adapter = VolunteerCSVAdapter(file_obj, source_system=source_system)
     rows_to_flush: list[StagingVolunteer] = []
+    dry_run_rows: list[VolunteerCSVRow] = []
     rows_staged = 0
 
     for row in adapter.iter_rows():
-        if dry_run:
-            continue
-
         payload_json = dict(row.raw)
         normalized_json = dict(row.normalized)
         external_system = _resolve_external_system(normalized_json.get("external_system"), source_system)
         external_id = normalized_json.get("external_id")
         checksum = _compute_checksum(normalized_json)
+
+        if dry_run:
+            dry_run_rows.append(row)
+            continue
 
         staging_row = StagingVolunteer(
             run_id=import_run.id,
@@ -77,6 +80,7 @@ def stage_volunteers_from_csv(
         rows_skipped_blank=adapter.statistics.rows_skipped_blank,
         header=adapter.header.canonical_headers if adapter.header else (),
         dry_run=dry_run,
+        dry_run_rows=tuple(dry_run_rows),
     )
     _update_counts(import_run, summary)
     return summary
