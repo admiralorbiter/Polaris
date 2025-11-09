@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from flask import current_app
 from celery import shared_task
 
 from flask_app.importer.pipeline import (
@@ -20,6 +21,7 @@ from flask_app.importer.pipeline import (
     run_minimal_dq,
     stage_volunteers_from_csv,
 )
+from flask_app.importer.utils import cleanup_upload
 from flask_app.models.base import db
 from flask_app.models.importer.schema import ImportRun, ImportRunStatus
 
@@ -54,7 +56,7 @@ def noop_ingest(self, *, payload: dict[str, Any] | None = None) -> dict[str, Any
 
 @shared_task(name="importer.pipeline.ingest_csv", bind=True)
 def ingest_csv(
-    self, *, run_id: int, file_path: str, dry_run: bool = False, source_system: str = "csv"
+    self, *, run_id: int, file_path: str, dry_run: bool = False, source_system: str = "csv", keep_file: bool = False
 ) -> dict[str, Any]:
     """
     Execute the CSV ingest pipeline asynchronously via the importer worker.
@@ -76,6 +78,9 @@ def ingest_csv(
         db.session.commit()
         raise FileNotFoundError(f"CSV file not found: {file_path}")
 
+    # Only cleanup if keep_file is False (default for CLI runs; admin uploads set keep_file=True for retry)
+    cleanup_target: Path | None = None if keep_file else path
+
     try:
         with path.open("r", encoding="utf-8", newline="") as handle:
             staging_summary = stage_volunteers_from_csv(
@@ -94,6 +99,17 @@ def ingest_csv(
         run.status = ImportRunStatus.SUCCEEDED
         run.finished_at = datetime.now(timezone.utc)
         db.session.commit()
+        current_app.logger.info(
+            "Importer run completed",
+            extra={
+                "importer_run_id": run_id,
+                "importer_status": run.status.value,
+                "importer_rows_processed": staging_summary.rows_processed,
+                "importer_rows_inserted": core_summary.rows_inserted,
+                "importer_rows_quarantined": dq_summary.rows_quarantined,
+                "importer_dry_run": staging_summary.dry_run,
+            },
+        )
         return {
             "run_id": run_id,
             "rows_processed": staging_summary.rows_processed,
@@ -117,4 +133,14 @@ def ingest_csv(
         recovery_run.error_summary = str(exc)
         recovery_run.finished_at = datetime.now(timezone.utc)
         db.session.commit()
+        current_app.logger.exception(
+            "Importer run failed",
+            extra={
+                "importer_run_id": run_id,
+                "importer_error": str(exc),
+            },
+        )
         raise
+    finally:
+        if cleanup_target is not None:
+            cleanup_upload(cleanup_target)

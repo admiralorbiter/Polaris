@@ -129,14 +129,22 @@ def create_default_permissions():
 
 def assign_permissions_to_roles(roles, permissions):
     """Assign permissions to roles"""
-    # SUPER_ADMIN gets all permissions
+    role_ids = [role.id for role in roles.values()]
+    existing_pairs = {
+        (rp.role_id, rp.permission_id)
+        for rp in RolePermission.query.filter(RolePermission.role_id.in_(role_ids)).all()
+    }
+
+    def _grant(role, perm):
+        key = (role.id, perm.id)
+        if key not in existing_pairs:
+            db.session.add(RolePermission(role_id=role.id, permission_id=perm.id))
+            existing_pairs.add(key)
+
     super_admin = roles["SUPER_ADMIN"]
     for perm in permissions.values():
-        if not RolePermission.query.filter_by(role_id=super_admin.id, permission_id=perm.id).first():
-            rp = RolePermission(role_id=super_admin.id, permission_id=perm.id)
-            db.session.add(rp)
+        _grant(super_admin, perm)
 
-    # ORG_ADMIN gets all org-level permissions (except system_admin)
     org_admin = roles["ORG_ADMIN"]
     org_admin_perms = [
         "create_users",
@@ -155,9 +163,8 @@ def assign_permissions_to_roles(roles, permissions):
     ]
     for perm_name in org_admin_perms:
         perm = permissions.get(perm_name)
-        if perm and not RolePermission.query.filter_by(role_id=org_admin.id, permission_id=perm.id).first():
-            rp = RolePermission(role_id=org_admin.id, permission_id=perm.id)
-            db.session.add(rp)
+        if perm:
+            _grant(org_admin, perm)
 
     # COORDINATOR gets volunteer management and viewing permissions
     coordinator = roles["COORDINATOR"]
@@ -171,27 +178,24 @@ def assign_permissions_to_roles(roles, permissions):
     ]
     for perm_name in coordinator_perms:
         perm = permissions.get(perm_name)
-        if perm and not RolePermission.query.filter_by(role_id=coordinator.id, permission_id=perm.id).first():
-            rp = RolePermission(role_id=coordinator.id, permission_id=perm.id)
-            db.session.add(rp)
+        if perm:
+            _grant(coordinator, perm)
 
     # VOLUNTEER gets limited viewing permissions
     volunteer = roles["VOLUNTEER"]
     volunteer_perms = ["view_volunteers", "view_reports"]
     for perm_name in volunteer_perms:
         perm = permissions.get(perm_name)
-        if perm and not RolePermission.query.filter_by(role_id=volunteer.id, permission_id=perm.id).first():
-            rp = RolePermission(role_id=volunteer.id, permission_id=perm.id)
-            db.session.add(rp)
+        if perm:
+            _grant(volunteer, perm)
 
     # VIEWER gets read-only permissions
     viewer = roles["VIEWER"]
     viewer_perms = ["view_users", "view_volunteers", "view_reports", "view_organization_settings"]
     for perm_name in viewer_perms:
         perm = permissions.get(perm_name)
-        if perm and not RolePermission.query.filter_by(role_id=viewer.id, permission_id=perm.id).first():
-            rp = RolePermission(role_id=viewer.id, permission_id=perm.id)
-            db.session.add(rp)
+        if perm:
+            _grant(viewer, perm)
 
     db.session.commit()
 

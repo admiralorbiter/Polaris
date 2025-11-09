@@ -306,6 +306,7 @@ Each rule has: `rule_code`, `severity` (error/warn/info), remediation hints, and
 ## 14) Deployment & Ops
 
 - **Processes**: web (Flask) and worker (Celery) as separate processes/containers; locally, `flask importer worker run` uses the built-in SQLite transport so no Redis is required.
+- On Windows, add `--pool=solo` when launching the CLI worker so Celery uses the compatible single-process pool.
 - **Production tuning**: set `CELERY_BROKER_URL` / `CELERY_RESULT_BACKEND` to Redis or Postgres, adjust worker concurrency flags, and run `celery beat` (or cron) for scheduled nightly imports.
 - **Migrations**: add importer tables first; keep core untouched.
 - **Blue/Green or canary** for enabling new rules—start as **warn-only** before enforcing.
@@ -589,9 +590,9 @@ Each rule has: **severity**, **remediation hint**, **auto-fix? (y/n)**, **owner*
 
 **Acceptance criteria**
 
-- `flask importer run --source csv --file …` starts a run and returns `run_id`.
-- UI button (feature‑flagged) to upload a CSV and start a run.
-- Run status visible (pending/running/done/failed).
+- `flask importer run --source csv --file …` queues a run and prints a JSON payload (`{"run_id":…, "task_id":…, "status":"queued"}`); operators can pass `--inline` for the legacy synchronous path.
+- Admin Importer page (flagged) accepts CSV upload, enqueues the Celery task, and polls `/admin/imports/<run_id>/status` for live updates.
+- Run status visible (pending/running/done/failed) with error summary surfaced on failure.
     
     **Dependencies**: IMP‑3.
     

@@ -8,7 +8,7 @@ dependencies are not installed.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -28,6 +28,7 @@ from flask_app.importer.pipeline import (
     run_minimal_dq,
     stage_volunteers_from_csv,
 )
+from flask_app.importer.utils import cleanup_upload, resolve_upload_directory
 from flask_app.models.base import db
 from flask_app.models.importer.schema import ImportRun, ImportRunStatus
 from flask_app.utils.importer import get_importer_adapters, is_importer_enabled
@@ -225,13 +226,18 @@ def worker_group(ctx):
 @click.option("--loglevel", default="info", show_default=True)
 @click.option("--concurrency", type=int, help="Number of worker processes/threads.")
 @click.option(
+    "--pool",
+    type=str,
+    help="Celery pool implementation (e.g., 'prefork', 'solo', 'threads').",
+)
+@click.option(
     "--queues",
     default=DEFAULT_QUEUE_NAME,
     show_default=True,
     help="Comma-separated queue list to consume.",
 )
 @click.pass_context
-def worker_run(ctx, loglevel: str, concurrency: Optional[int], queues: str):
+def worker_run(ctx, loglevel: str, concurrency: Optional[int], pool: Optional[str], queues: str):
     """
     Start the Celery worker in the current process.
     """
@@ -252,8 +258,11 @@ def worker_run(ctx, loglevel: str, concurrency: Optional[int], queues: str):
     ]
     if concurrency:
         argv.extend(["--concurrency", str(concurrency)])
+    if pool:
+        argv.extend(["--pool", pool])
 
-    click.echo(f"Starting importer worker (queues: {queues}, loglevel: {loglevel})")
+    pool_msg = f", pool: {pool}" if pool else ""
+    click.echo(f"Starting importer worker (queues: {queues}, loglevel: {loglevel}{pool_msg})")
     try:
         celery_app.worker_main(argv=argv)
     except KeyboardInterrupt:
@@ -294,11 +303,15 @@ def worker_ping(ctx, timeout: float):
     help="Path to input file (required for csv source).",
 )
 @click.option("--dry-run", is_flag=True, help="Execute pipeline without writing to staging tables.")
-@click.option("--enqueue", is_flag=True, help="Send the run to the importer worker instead of running inline.")
+@click.option(
+    "--inline/--no-inline",
+    default=False,
+    help="Run inline within the CLI process instead of queueing via Celery.",
+)
 @click.option(
     "--summary-json",
     is_flag=True,
-    help="Emit a machine-readable summary payload after completion.",
+    help="Emit a machine-readable summary payload after completion (inline runs only).",
 )
 @click.pass_context
 def importer_run(
@@ -306,7 +319,7 @@ def importer_run(
     source: str,
     file_path: Optional[Path],
     dry_run: bool,
-    enqueue: bool,
+    inline: bool,
     summary_json: bool,
 ):
     """Execute an importer run for the provided source."""
@@ -317,29 +330,67 @@ def importer_run(
 
     normalized_source, csv_path = _prepare_source_inputs(source, file_path)
 
+    if summary_json and not inline:
+        raise click.ClickException("--summary-json is only available for --inline runs.")
+
     run = ImportRun(
         source=normalized_source,
         adapter=normalized_source,
         dry_run=dry_run,
         status=ImportRunStatus.PENDING,
         notes=f"CLI ingest from {csv_path}",
+        counts_json={},
+        metrics_json={},
+        ingest_params_json={
+            "file_path": str(csv_path),
+            "source_system": normalized_source,
+            "dry_run": dry_run,
+            "keep_file": False,  # CLI runs typically use existing files, no need to retain
+        },
     )
     db.session.add(run)
     db.session.commit()
     run_id = run.id
 
-    if enqueue:
+    if not inline:
         celery_app = _resolve_celery(app)
-        async_result = celery_app.send_task(
-            "importer.pipeline.ingest_csv",
-            kwargs={
-                "run_id": run_id,
-                "file_path": str(csv_path),
-                "dry_run": dry_run,
-                "source_system": normalized_source,
+        try:
+            async_result = celery_app.send_task(
+                "importer.pipeline.ingest_csv",
+                kwargs={
+                    "run_id": run_id,
+                    "file_path": str(csv_path),
+                    "dry_run": dry_run,
+                    "source_system": normalized_source,
+                    "keep_file": False,
+                },
+            )
+        except Exception as exc:  # pragma: no cover - defensive path
+            recovery_run = ImportRun.query.get(run_id)
+            if recovery_run is not None:
+                recovery_run.status = ImportRunStatus.FAILED
+                recovery_run.error_summary = str(exc)
+                recovery_run.finished_at = datetime.now(timezone.utc)
+                db.session.commit()
+            raise click.ClickException(f"Failed to enqueue importer run {run_id}: {exc}") from exc
+
+        payload = {
+            "run_id": run_id,
+            "task_id": async_result.id,
+            "status": "queued",
+            "dry_run": dry_run,
+            "source": normalized_source,
+        }
+        app.logger.info(
+            "Importer run queued via CLI",
+            extra={
+                "importer_run_id": run_id,
+                "importer_task_id": async_result.id,
+                "importer_source": normalized_source,
+                "importer_dry_run": dry_run,
             },
         )
-        click.echo(f"Queued importer run {run_id} (task id: {async_result.id})")
+        click.echo(json.dumps(payload))
         return
 
     run = ImportRun.query.get(run_id)
@@ -363,3 +414,136 @@ def importer_run(
                 sort_keys=True,
             )
         )
+
+
+@importer_cli.command("cleanup-uploads")
+@click.option(
+    "--max-age-hours",
+    default=72,
+    show_default=True,
+    type=int,
+    help="Remove importer uploads older than the specified number of hours.",
+)
+@click.pass_context
+def importer_cleanup_uploads(ctx, max_age_hours: int):
+    """
+    Delete stale importer upload files from the configured storage directory.
+    """
+
+    info = ctx.ensure_object(ScriptInfo)
+    app = info.load_app()
+    if not is_importer_enabled(app):
+        raise click.ClickException("Importer is disabled; no uploads to clean up.")
+
+    uploads_dir = resolve_upload_directory(app)
+    if not uploads_dir.exists():
+        click.echo(f"No upload directory found at {uploads_dir}. Nothing to clean.")
+        return
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+    removed = 0
+    for path in uploads_dir.iterdir():
+        if not path.is_file():
+            continue
+        try:
+            modified = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
+        except FileNotFoundError:  # pragma: no cover - race condition
+            continue
+        if modified < cutoff:
+            cleanup_upload(path)
+            removed += 1
+
+    click.echo(f"Removed {removed} upload file(s) older than {max_age_hours} hours from {uploads_dir}.")
+
+
+def _retry_import_run(app, run: ImportRun) -> tuple[str, str]:
+    """
+    Retry an import run by re-enqueueing it with stored parameters.
+
+    Returns:
+        tuple[str, str]: (task_id, status_message)
+    """
+    params = run.ingest_params_json
+    if not params:
+        raise click.ClickException(
+            f"Import run {run.id} cannot be retried: ingest parameters not stored. "
+            "This run was created before retry support was added."
+        )
+
+    file_path = params.get("file_path")
+    if not file_path:
+        raise click.ClickException(f"Import run {run.id} cannot be retried: file_path missing from stored parameters.")
+
+    path = Path(file_path)
+    if not path.exists():
+        raise click.ClickException(
+            f"Import run {run.id} cannot be retried: file not found at {file_path}. "
+            "The upload may have been cleaned up."
+        )
+
+    source_system = params.get("source_system", "csv")
+    dry_run = params.get("dry_run", False)
+    keep_file = params.get("keep_file", True)
+
+    # Reset run state for retry
+    run.status = ImportRunStatus.PENDING
+    run.started_at = None
+    run.finished_at = None
+    run.error_summary = None
+    run.counts_json = {}
+    run.metrics_json = {}
+    db.session.commit()
+
+    celery_app = get_celery_app(app)
+    if celery_app is None:
+        raise click.ClickException("Importer worker is not configured; cannot enqueue retry.")
+
+    async_result = celery_app.send_task(
+        "importer.pipeline.ingest_csv",
+        kwargs={
+            "run_id": run.id,
+            "file_path": str(path),
+            "dry_run": dry_run,
+            "source_system": source_system,
+            "keep_file": keep_file,
+        },
+    )
+
+    app.logger.info(
+        "Import run retried via CLI",
+        extra={
+            "importer_run_id": run.id,
+            "importer_task_id": async_result.id,
+            "importer_source": source_system,
+        },
+    )
+
+    return async_result.id, "queued"
+
+
+@importer_cli.command("retry")
+@click.option("--run-id", required=True, type=int, help="ID of the import run to retry.")
+@click.pass_context
+def importer_retry(ctx, run_id: int):
+    """Retry a failed or pending import run using stored parameters."""
+    info = ctx.ensure_object(ScriptInfo)
+    app = info.load_app()
+    if not is_importer_enabled(app):
+        raise click.ClickException("Importer is disabled; enable it via IMPORTER_ENABLED before retrying.")
+
+    run = db.session.get(ImportRun, run_id)
+    if run is None:
+        raise click.ClickException(f"Import run {run_id} not found.")
+
+    try:
+        task_id, status = _retry_import_run(app, run)
+        payload = {
+            "run_id": run_id,
+            "task_id": task_id,
+            "status": status,
+        }
+        click.echo(json.dumps(payload))
+    except click.ClickException:
+        raise
+    except Exception as exc:  # pragma: no cover - defensive path
+        raise click.ClickException(f"Failed to retry import run {run_id}: {exc}") from exc

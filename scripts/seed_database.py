@@ -65,6 +65,20 @@ stats = {
 }
 
 
+def _commit_batch(pending_count, batch_size):
+    """Commit the current SQLAlchemy session if we've reached the batch threshold."""
+    if pending_count >= batch_size:
+        try:
+            db.session.commit()
+            return 0
+        except Exception as exc:  # noqa: BLE001 - surface commit issues during seeding
+            db.session.rollback()
+            stats["errors"].append(f"Batch commit failed: {exc}")
+            print(f"  ❌ Batch commit failed: {exc}")
+            return 0
+    return pending_count
+
+
 def clear_database():
     """Clear all seeded data from the database"""
     print("Clearing existing data...")
@@ -345,69 +359,97 @@ def seed_users(organizations, roles, dry_run=False):
 
     created_users = []
 
-    for user_data in users_data:
-        if dry_run:
+    if dry_run:
+        for user_data in users_data:
             print(f"  [DRY RUN] Would create user: {user_data['username']}")
             created_users.append(user_data)
-            continue
+        return created_users
 
-        with app.app_context():
-            existing = User.query.filter_by(username=user_data["username"]).first()
+    with app.app_context():
+        required_slugs = {user["org_slug"] for user in users_data}
+        org_lookup = {
+            org.slug: org
+            for org in Organization.query.filter(Organization.slug.in_(required_slugs)).all()
+        }
+
+        role_names = {user["role"] for user in users_data}
+        role_lookup = {
+            role.name: role for role in Role.query.filter(Role.name.in_(role_names)).all()
+        }
+
+        usernames = [user["username"] for user in users_data]
+        emails = [user["email"] for user in users_data]
+        existing_users = {
+            user.username: user for user in User.query.filter(User.username.in_(usernames)).all()
+        }
+        existing_email_users = {
+            user.email: user for user in User.query.filter(User.email.in_(emails)).all()
+        }
+
+        batch_size = 25
+        pending_count = 0
+
+        for user_data in users_data:
+            username = user_data["username"]
+            email = user_data["email"]
+
+            existing = existing_users.get(username) or existing_email_users.get(email)
             if existing:
-                print(f"  ⏭️  User '{user_data['username']}' already exists, skipping")
+                print(f"  ⏭️  User '{username}' already exists, skipping")
                 created_users.append(existing)
                 continue
 
-            # Find organization by slug (query within session context)
-            org = Organization.query.filter_by(slug=user_data["org_slug"]).first()
+            org = org_lookup.get(user_data["org_slug"])
             if not org:
                 stats["errors"].append(
-                    f"User {user_data['username']}: Organization '{user_data['org_slug']}' not found"
+                    f"User {username}: Organization '{user_data['org_slug']}' not found"
                 )
-                print(f"  ❌ Organization '{user_data['org_slug']}' not found for user {user_data['username']}")
+                print(f"  ❌ Organization '{user_data['org_slug']}' not found for user {username}")
                 continue
 
-            # Find role (query within session context)
-            role = Role.query.filter_by(name=user_data["role"]).first()
+            role = role_lookup.get(user_data["role"])
             if not role:
-                stats["errors"].append(f"User {user_data['username']}: Role '{user_data['role']}' not found")
-                print(f"  ❌ Role '{user_data['role']}' not found for user {user_data['username']}")
+                stats["errors"].append(f"User {username}: Role '{user_data['role']}' not found")
+                print(f"  ❌ Role '{user_data['role']}' not found for user {username}")
                 continue
-
-            # Create user
-            user, error = User.safe_create(
-                username=user_data["username"],
-                email=user_data["email"],
-                password_hash=generate_password_hash("password123"),  # Default password
-                first_name=user_data["first_name"],
-                last_name=user_data["last_name"],
-                is_active=True,
-                is_super_admin=False,
-            )
-
-            if error:
-                stats["errors"].append(f"User {user_data['username']}: {error}")
-                print(f"  ❌ Error creating user {user_data['username']}: {error}")
-                continue
-
-            # Assign to organization
-            user_org = UserOrganization(
-                user_id=user.id,
-                organization_id=org.id,
-                role_id=role.id,
-                is_active=True,
-            )
-            db.session.add(user_org)
 
             try:
-                db.session.commit()
-                stats["users"] += 1
-                print(f"  ✅ Created user: {user_data['username']} ({user_data['role']} in {org.name})")
+                user = User(
+                    username=username,
+                    email=email,
+                    password_hash=generate_password_hash("password123"),
+                    first_name=user_data["first_name"],
+                    last_name=user_data["last_name"],
+                    is_active=True,
+                    is_super_admin=False,
+                )
+                db.session.add(user)
+                db.session.flush()
+
+                user_org = UserOrganization(
+                    user_id=user.id,
+                    organization_id=org.id,
+                    role_id=role.id,
+                    is_active=True,
+                )
+                db.session.add(user_org)
+
                 created_users.append(user)
-            except Exception as e:
+                existing_users[user.username] = user
+                existing_email_users[user.email] = user
+                stats["users"] += 1
+                pending_count += 1
+                print(f"  ✅ Created user: {username} ({role.name} in {org.name})")
+            except Exception as exc:  # noqa: BLE001
                 db.session.rollback()
-                stats["errors"].append(f"User {user_data['username']}: {str(e)}")
-                print(f"  ❌ Error assigning user to organization: {str(e)}")
+                stats["errors"].append(f"User {username}: {exc}")
+                print(f"  ❌ Error creating user {username}: {exc}")
+                continue
+
+            pending_count = _commit_batch(pending_count, batch_size)
+
+        if pending_count:
+            pending_count = _commit_batch(pending_count, 1)
 
     return created_users
 
@@ -585,142 +627,164 @@ def seed_volunteers(organizations, dry_run=False):
         "hours": 0,
     }
 
-    for vol_data in volunteers_data:
-        if dry_run:
+    if dry_run:
+        for vol_data in volunteers_data:
             print(f"  [DRY RUN] Would create volunteer: {vol_data['first_name']} {vol_data['last_name']}")
             created_volunteers.append(vol_data)
-            continue
+        return created_volunteers
 
-        with app.app_context():
-            # Find organization by slug (query within session context)
-            org_slug = vol_data["org_slug"]
-            org = Organization.query.filter_by(slug=org_slug).first()
-            if not org:
-                stats["errors"].append(f"Volunteer {vol_data['first_name']}: Organization '{org_slug}' not found")
-                print(f"  ❌ Organization '{org_slug}' not found for volunteer {vol_data['first_name']}")
+    with app.app_context():
+        required_slugs = {vol["org_slug"] for vol in volunteers_data}
+        org_lookup = {
+            org.slug: org
+            for org in Organization.query.filter(Organization.slug.in_(required_slugs)).all()
+        }
+
+        volunteer_emails = [vol["email"] for vol in volunteers_data if vol.get("email")]
+        existing_email_map = {}
+        if volunteer_emails:
+            existing_records = (
+                db.session.query(Volunteer, ContactEmail.email)
+                .join(ContactEmail, ContactEmail.contact_id == Volunteer.id)
+                .filter(
+                    ContactEmail.email.in_(volunteer_emails),
+                    Volunteer.contact_type == ContactType.VOLUNTEER,
+                )
+                .all()
+            )
+            for volunteer, email in existing_records:
+                existing_email_map[email] = volunteer
+
+        batch_size = 20
+        pending_count = 0
+
+        for vol_data in volunteers_data:
+            email = vol_data.get("email")
+            if email and email in existing_email_map:
+                print(f"  ⏭️  Volunteer with email '{email}' already exists, skipping")
+                created_volunteers.append(existing_email_map[email])
                 continue
 
-            # Check if volunteer already exists (by email if provided, otherwise by name)
-            if vol_data.get("email"):
-                existing = (
-                    Volunteer.query.join(ContactEmail)
-                    .filter(
-                        ContactEmail.email == vol_data["email"],
-                        Volunteer.contact_type == ContactType.VOLUNTEER,
-                    )
-                    .first()
+            org = org_lookup.get(vol_data["org_slug"])
+            if not org:
+                stats["errors"].append(
+                    f"Volunteer {vol_data['first_name']}: Organization '{vol_data['org_slug']}' not found"
                 )
-                if existing:
-                    print(f"  ⏭️  Volunteer with email '{vol_data['email']}' already exists, skipping")
-                    created_volunteers.append(existing)
-                    continue
-
-            # Create volunteer
-            volunteer = Volunteer(
-                contact_type=ContactType.VOLUNTEER,
-                first_name=vol_data["first_name"],
-                last_name=vol_data["last_name"],
-                volunteer_status=vol_data["volunteer_status"],
-                is_local=vol_data["is_local"],
-                title=vol_data.get("title"),
-                industry=vol_data.get("industry"),
-                organization_id=org.id,
-                status=ContactStatus.ACTIVE,
-                first_volunteer_date=date.today() - timedelta(days=30 * (len(created_volunteers) + 1)),
-            )
-
-            db.session.add(volunteer)
-            db.session.flush()
-
-            # Add email
-            if vol_data.get("email"):
-                email = ContactEmail(
-                    contact_id=volunteer.id,
-                    email=vol_data["email"],
-                    email_type=EmailType.PERSONAL,
-                    is_primary=True,
-                    is_verified=False,
-                )
-                db.session.add(email)
-                local_stats["emails"] += 1
-
-            # Add phone
-            if vol_data.get("phone"):
-                phone = ContactPhone(
-                    contact_id=volunteer.id,
-                    phone_number=vol_data["phone"],
-                    phone_type=PhoneType.MOBILE,
-                    is_primary=True,
-                    can_text=True,
-                )
-                db.session.add(phone)
-                local_stats["phones"] += 1
-
-            # Add skills
-            for skill_name in vol_data.get("skills", []):
-                skill = VolunteerSkill(
-                    volunteer_id=volunteer.id,
-                    skill_name=skill_name,
-                    skill_category="General",
-                    proficiency_level="Intermediate",
-                    verified=False,
-                )
-                db.session.add(skill)
-                local_stats["skills"] += 1
-
-            # Add interests
-            for interest_name in vol_data.get("interests", []):
-                interest = VolunteerInterest(
-                    volunteer_id=volunteer.id,
-                    interest_name=interest_name,
-                    interest_category="General",
-                )
-                db.session.add(interest)
-                local_stats["interests"] += 1
-
-            # Add availability (Monday, Wednesday, Friday mornings)
-            if vol_data["volunteer_status"] == VolunteerStatus.ACTIVE:
-                for day in [0, 2, 4]:  # Monday, Wednesday, Friday
-                    availability = VolunteerAvailability(
-                        volunteer_id=volunteer.id,
-                        day_of_week=day,
-                        start_time=time(9, 0),
-                        end_time=time(12, 0),
-                        timezone="America/New_York",
-                        is_recurring=True,
-                        is_active=True,
-                    )
-                    db.session.add(availability)
-                    local_stats["availability"] += 1
-
-            # Add some volunteer hours
-            if vol_data["volunteer_status"] == VolunteerStatus.ACTIVE:
-                for i in range(3):
-                    hours_date = date.today() - timedelta(days=7 * (i + 1))
-                    hours = VolunteerHours(
-                        volunteer_id=volunteer.id,
-                        organization_id=org.id,
-                        volunteer_date=hours_date,
-                        hours_worked=4.0 + (i * 0.5),
-                        activity_type="General Volunteering",
-                        notes=f"Volunteer work on {hours_date}",
-                    )
-                    db.session.add(hours)
-                    local_stats["hours"] += 1
-
-                # Update total hours
-                volunteer.total_volunteer_hours = 12.0 + (len(created_volunteers) * 0.5)
-                volunteer.last_volunteer_date = date.today() - timedelta(days=7)
+                print(f"  ❌ Organization '{vol_data['org_slug']}' not found for volunteer {vol_data['first_name']}")
+                continue
 
             try:
-                db.session.commit()
-                stats["volunteers"] += 1
-                print(f"  ✅ Created volunteer: {vol_data['first_name']} {vol_data['last_name']}")
+                sequence_index = len(created_volunteers)
+                volunteer = Volunteer(
+                    contact_type=ContactType.VOLUNTEER,
+                    first_name=vol_data["first_name"],
+                    last_name=vol_data["last_name"],
+                    volunteer_status=vol_data["volunteer_status"],
+                    is_local=vol_data["is_local"],
+                    title=vol_data.get("title"),
+                    industry=vol_data.get("industry"),
+                    organization_id=org.id,
+                    status=ContactStatus.ACTIVE,
+                    first_volunteer_date=date.today() - timedelta(days=30 * (sequence_index + 1)),
+                )
+
+                db.session.add(volunteer)
+                db.session.flush()
+
+                if email:
+                    db.session.add(
+                        ContactEmail(
+                            contact_id=volunteer.id,
+                            email=email,
+                            email_type=EmailType.PERSONAL,
+                            is_primary=True,
+                            is_verified=False,
+                        )
+                    )
+                    local_stats["emails"] += 1
+
+                if vol_data.get("phone"):
+                    db.session.add(
+                        ContactPhone(
+                            contact_id=volunteer.id,
+                            phone_number=vol_data["phone"],
+                            phone_type=PhoneType.MOBILE,
+                            is_primary=True,
+                            can_text=True,
+                        )
+                    )
+                    local_stats["phones"] += 1
+
+                for skill_name in vol_data.get("skills", []):
+                    db.session.add(
+                        VolunteerSkill(
+                            volunteer_id=volunteer.id,
+                            skill_name=skill_name,
+                            skill_category="General",
+                            proficiency_level="Intermediate",
+                            verified=False,
+                        )
+                    )
+                    local_stats["skills"] += 1
+
+                for interest_name in vol_data.get("interests", []):
+                    db.session.add(
+                        VolunteerInterest(
+                            volunteer_id=volunteer.id,
+                            interest_name=interest_name,
+                            interest_category="General",
+                        )
+                    )
+                    local_stats["interests"] += 1
+
+                if vol_data["volunteer_status"] == VolunteerStatus.ACTIVE:
+                    for day in [0, 2, 4]:
+                        db.session.add(
+                            VolunteerAvailability(
+                                volunteer_id=volunteer.id,
+                                day_of_week=day,
+                                start_time=time(9, 0),
+                                end_time=time(12, 0),
+                                timezone="America/New_York",
+                                is_recurring=True,
+                                is_active=True,
+                            )
+                        )
+                        local_stats["availability"] += 1
+
+                    for i in range(3):
+                        hours_date = date.today() - timedelta(days=7 * (i + 1))
+                        db.session.add(
+                            VolunteerHours(
+                                volunteer_id=volunteer.id,
+                                organization_id=org.id,
+                                volunteer_date=hours_date,
+                                hours_worked=4.0 + (i * 0.5),
+                                activity_type="General Volunteering",
+                                notes=f"Volunteer work on {hours_date}",
+                            )
+                        )
+                        local_stats["hours"] += 1
+
+                    volunteer.total_volunteer_hours = 12.0 + (len(created_volunteers) * 0.5)
+                    volunteer.last_volunteer_date = date.today() - timedelta(days=7)
+
                 created_volunteers.append(volunteer)
-            except Exception as e:
+                if email:
+                    existing_email_map[email] = volunteer
+                stats["volunteers"] += 1
+                pending_count += 1
+                print(f"  ✅ Created volunteer: {vol_data['first_name']} {vol_data['last_name']}")
+            except Exception as exc:  # noqa: BLE001
                 db.session.rollback()
-                stats["errors"].append(f"Volunteer {vol_data['first_name']}: {str(e)}")
-                print(f"  ❌ Error creating volunteer: {str(e)}")
+                stats["errors"].append(f"Volunteer {vol_data['first_name']}: {exc}")
+                print(f"  ❌ Error creating volunteer: {exc}")
+                continue
+
+            pending_count = _commit_batch(pending_count, batch_size)
+
+        if pending_count:
+            pending_count = _commit_batch(pending_count, 1)
 
     print(
         f"  📊 Created {stats['volunteers']} volunteers with "
@@ -771,50 +835,66 @@ def seed_students(organizations, dry_run=False):
 
     created_students = []
 
-    for student_data in students_data:
-        if dry_run:
+    if dry_run:
+        for student_data in students_data:
             print(f"  [DRY RUN] Would create student: {student_data['first_name']} {student_data['last_name']}")
             created_students.append(student_data)
-            continue
+        return created_students
 
-        with app.app_context():
-            # Find organization by slug (query within session context)
-            org_slug = student_data["org_slug"]
-            org = Organization.query.filter_by(slug=org_slug).first()
+    with app.app_context():
+        required_slugs = {student["org_slug"] for student in students_data}
+        org_lookup = {
+            org.slug: org
+            for org in Organization.query.filter(Organization.slug.in_(required_slugs)).all()
+        }
+
+        pending_count = 0
+
+        for student_data in students_data:
+            org = org_lookup.get(student_data["org_slug"])
             if not org:
-                stats["errors"].append(f"Student {student_data['first_name']}: Organization '{org_slug}' not found")
-                print(f"  ❌ Organization '{org_slug}' not found for student {student_data['first_name']}")
+                stats["errors"].append(
+                    f"Student {student_data['first_name']}: Organization '{student_data['org_slug']}' not found"
+                )
+                print(f"  ❌ Organization '{student_data['org_slug']}' not found for student {student_data['first_name']}")
                 continue
 
-            student = Student(
-                contact_type=ContactType.STUDENT,
-                first_name=student_data["first_name"],
-                last_name=student_data["last_name"],
-                organization_id=org.id,
-                status=ContactStatus.ACTIVE,
-            )
-
-            db.session.add(student)
-            db.session.flush()
-
-            if student_data.get("email"):
-                email = ContactEmail(
-                    contact_id=student.id,
-                    email=student_data["email"],
-                    email_type=EmailType.PERSONAL,
-                    is_primary=True,
-                )
-                db.session.add(email)
-
             try:
-                db.session.commit()
-                stats["students"] += 1
-                print(f"  ✅ Created student: {student_data['first_name']} {student_data['last_name']}")
+                student = Student(
+                    contact_type=ContactType.STUDENT,
+                    first_name=student_data["first_name"],
+                    last_name=student_data["last_name"],
+                    organization_id=org.id,
+                    status=ContactStatus.ACTIVE,
+                )
+
+                db.session.add(student)
+                db.session.flush()
+
+                if student_data.get("email"):
+                    db.session.add(
+                        ContactEmail(
+                            contact_id=student.id,
+                            email=student_data["email"],
+                            email_type=EmailType.PERSONAL,
+                            is_primary=True,
+                        )
+                    )
+
                 created_students.append(student)
-            except Exception as e:
+                stats["students"] += 1
+                pending_count += 1
+                print(f"  ✅ Created student: {student_data['first_name']} {student_data['last_name']}")
+            except Exception as exc:  # noqa: BLE001
                 db.session.rollback()
-                stats["errors"].append(f"Student {student_data['first_name']}: {str(e)}")
-                print(f"  ❌ Error creating student: {str(e)}")
+                stats["errors"].append(f"Student {student_data['first_name']}: {exc}")
+                print(f"  ❌ Error creating student: {exc}")
+                continue
+
+            pending_count = _commit_batch(pending_count, len(students_data))
+
+        if pending_count:
+            pending_count = _commit_batch(pending_count, 1)
 
     return created_students
 
@@ -846,50 +926,66 @@ def seed_teachers(organizations, dry_run=False):
 
     created_teachers = []
 
-    for teacher_data in teachers_data:
-        if dry_run:
+    if dry_run:
+        for teacher_data in teachers_data:
             print(f"  [DRY RUN] Would create teacher: {teacher_data['first_name']} {teacher_data['last_name']}")
             created_teachers.append(teacher_data)
-            continue
+        return created_teachers
 
-        with app.app_context():
-            # Find organization by slug (query within session context)
-            org_slug = teacher_data["org_slug"]
-            org = Organization.query.filter_by(slug=org_slug).first()
+    with app.app_context():
+        required_slugs = {teacher["org_slug"] for teacher in teachers_data}
+        org_lookup = {
+            org.slug: org
+            for org in Organization.query.filter(Organization.slug.in_(required_slugs)).all()
+        }
+
+        pending_count = 0
+
+        for teacher_data in teachers_data:
+            org = org_lookup.get(teacher_data["org_slug"])
             if not org:
-                stats["errors"].append(f"Teacher {teacher_data['first_name']}: Organization '{org_slug}' not found")
-                print(f"  ❌ Organization '{org_slug}' not found for teacher {teacher_data['first_name']}")
+                stats["errors"].append(
+                    f"Teacher {teacher_data['first_name']}: Organization '{teacher_data['org_slug']}' not found"
+                )
+                print(f"  ❌ Organization '{teacher_data['org_slug']}' not found for teacher {teacher_data['first_name']}")
                 continue
 
-            teacher = Teacher(
-                contact_type=ContactType.TEACHER,
-                first_name=teacher_data["first_name"],
-                last_name=teacher_data["last_name"],
-                organization_id=org.id,
-                status=ContactStatus.ACTIVE,
-            )
-
-            db.session.add(teacher)
-            db.session.flush()
-
-            if teacher_data.get("email"):
-                email = ContactEmail(
-                    contact_id=teacher.id,
-                    email=teacher_data["email"],
-                    email_type=EmailType.WORK,
-                    is_primary=True,
-                )
-                db.session.add(email)
-
             try:
-                db.session.commit()
-                stats["teachers"] += 1
-                print(f"  ✅ Created teacher: {teacher_data['first_name']} {teacher_data['last_name']}")
+                teacher = Teacher(
+                    contact_type=ContactType.TEACHER,
+                    first_name=teacher_data["first_name"],
+                    last_name=teacher_data["last_name"],
+                    organization_id=org.id,
+                    status=ContactStatus.ACTIVE,
+                )
+
+                db.session.add(teacher)
+                db.session.flush()
+
+                if teacher_data.get("email"):
+                    db.session.add(
+                        ContactEmail(
+                            contact_id=teacher.id,
+                            email=teacher_data["email"],
+                            email_type=EmailType.WORK,
+                            is_primary=True,
+                        )
+                    )
+
                 created_teachers.append(teacher)
-            except Exception as e:
+                stats["teachers"] += 1
+                pending_count += 1
+                print(f"  ✅ Created teacher: {teacher_data['first_name']} {teacher_data['last_name']}")
+            except Exception as exc:  # noqa: BLE001
                 db.session.rollback()
-                stats["errors"].append(f"Teacher {teacher_data['first_name']}: {str(e)}")
-                print(f"  ❌ Error creating teacher: {str(e)}")
+                stats["errors"].append(f"Teacher {teacher_data['first_name']}: {exc}")
+                print(f"  ❌ Error creating teacher: {exc}")
+                continue
+
+            pending_count = _commit_batch(pending_count, len(teachers_data))
+
+        if pending_count:
+            pending_count = _commit_batch(pending_count, 1)
 
     return created_teachers
 
@@ -1164,81 +1260,85 @@ def seed_events(organizations, users, volunteers, dry_run=False):
 
     created_events = []
 
-    for event_data in events_data:
-        if dry_run:
+    if dry_run:
+        for event_data in events_data:
             print(f"  [DRY RUN] Would create event: {event_data['title']}")
             created_events.append(event_data)
-            continue
+        return created_events
 
-        with app.app_context():
+    with app.app_context():
+        required_slugs = {event["org_slug"] for event in events_data}
+        org_lookup = {
+            org.slug: org
+            for org in Organization.query.filter(Organization.slug.in_(required_slugs)).all()
+        }
+
+        from flask_app.models import Contact
+        from sqlalchemy import inspect as sqlalchemy_inspect
+
+        batch_size = 5
+        pending_count = 0
+
+        for event_data in events_data:
             existing = Event.query.filter_by(slug=event_data["slug"]).first()
             if existing:
                 print(f"  ⏭️  Event '{event_data['title']}' already exists, skipping")
                 created_events.append(existing)
                 continue
 
-            # Find organization by slug
-            org_slug = event_data["org_slug"]
-            org = Organization.query.filter_by(slug=org_slug).first()
+            org = org_lookup.get(event_data["org_slug"])
             if not org:
-                stats["errors"].append(f"Event {event_data['title']}: Organization '{org_slug}' not found")
-                print(f"  ❌ Organization '{org_slug}' not found for event {event_data['title']}")
+                stats["errors"].append(f"Event {event_data['title']}: Organization '{event_data['org_slug']}' not found")
+                print(f"  ❌ Organization '{event_data['org_slug']}' not found for event {event_data['title']}")
                 continue
 
-            # Create event
-            event = Event(
-                title=event_data["title"],
-                slug=event_data["slug"],
-                description=event_data.get("description"),
-                event_type=event_data["event_type"],
-                event_status=event_data["event_status"],
-                event_format=event_data["event_format"],
-                cancellation_reason=event_data.get("cancellation_reason"),
-                start_date=event_data["start_date"],
-                start_time=event_data.get("start_time"),
-                duration=event_data.get("duration"),
-                location_name=event_data.get("location_name"),
-                location_address=event_data.get("location_address"),
-                virtual_link=event_data.get("virtual_link"),
-                capacity=event_data.get("capacity"),
-                registration_deadline=event_data.get("registration_deadline"),
-                cost=event_data.get("cost"),
-                created_by_user_id=created_by_user_id,
-            )
+            try:
+                event = Event(
+                    title=event_data["title"],
+                    slug=event_data["slug"],
+                    description=event_data.get("description"),
+                    event_type=event_data["event_type"],
+                    event_status=event_data["event_status"],
+                    event_format=event_data["event_format"],
+                    cancellation_reason=event_data.get("cancellation_reason"),
+                    start_date=event_data["start_date"],
+                    start_time=event_data.get("start_time"),
+                    duration=event_data.get("duration"),
+                    location_name=event_data.get("location_name"),
+                    location_address=event_data.get("location_address"),
+                    virtual_link=event_data.get("virtual_link"),
+                    capacity=event_data.get("capacity"),
+                    registration_deadline=event_data.get("registration_deadline"),
+                    cost=event_data.get("cost"),
+                    created_by_user_id=created_by_user_id,
+                )
 
-            # Calculate end_date if duration is provided
-            if event.duration and event.start_date:
-                event.end_date = event.start_date + timedelta(minutes=event.duration)
+                if event.duration and event.start_date:
+                    event.end_date = event.start_date + timedelta(minutes=event.duration)
 
-            db.session.add(event)
-            db.session.flush()
+                db.session.add(event)
+                db.session.flush()
 
-            # Link to organization
-            event_org = EventOrganization(
-                event_id=event.id,
-                organization_id=org.id,
-                is_primary=True,
-            )
-            db.session.add(event_org)
+                db.session.add(
+                    EventOrganization(
+                        event_id=event.id,
+                        organization_id=org.id,
+                        is_primary=True,
+                    )
+                )
 
-            # Link volunteers if specified
-            volunteer_data_list = event_data.get("volunteers", [])
-            if volunteer_data_list:
-                from sqlalchemy import inspect as sqlalchemy_inspect
+                volunteer_data_list = event_data.get("volunteers", [])
+                if volunteer_data_list:
+                    contact_ids = []
+                    for vol_data in volunteer_data_list:
+                        contact_index = vol_data.get("contact_index")
+                        if contact_index is None or contact_index >= len(volunteers):
+                            continue
 
-                from flask_app.models import Contact
-
-                # Collect contact IDs safely (handling detached instances)
-                contact_ids = []
-                for vol_data in volunteer_data_list:
-                    contact_index = vol_data.get("contact_index")
-                    if contact_index is not None and contact_index < len(volunteers):
                         volunteer = volunteers[contact_index]
-                        # If it's a dict, skip (dry run)
                         if isinstance(volunteer, dict):
                             continue
 
-                        # Safely get ID from potentially detached instance
                         try:
                             insp = sqlalchemy_inspect(volunteer)
                             if insp.persistent or insp.pending:
@@ -1246,36 +1346,41 @@ def seed_events(organizations, users, volunteers, dry_run=False):
                             elif insp.detached and insp.identity:
                                 contact_ids.append((insp.identity[0], vol_data))
                         except Exception:
-                            # Skip if we can't get the ID
                             continue
 
-                # Query contacts within session context
-                if contact_ids:
-                    ids_only = [cid[0] for cid in contact_ids]
-                    contacts = Contact.query.filter(Contact.id.in_(ids_only)).all()
-                    contact_dict = {c.id: c for c in contacts}
+                    if contact_ids:
+                        ids_only = [cid[0] for cid in contact_ids]
+                        contacts = Contact.query.filter(Contact.id.in_(ids_only)).all()
+                        contact_dict = {c.id: c for c in contacts}
 
-                    # Create event volunteer links
-                    for contact_id, vol_data in contact_ids:
-                        if contact_id in contact_dict:
-                            event_volunteer = EventVolunteer(
-                                event_id=event.id,
-                                contact_id=contact_id,
-                                role=vol_data.get("role", EventVolunteerRole.ATTENDEE),
-                                registration_status=vol_data.get("status", RegistrationStatus.PENDING),
-                                attended=vol_data.get("attended"),
-                            )
-                            db.session.add(event_volunteer)
+                        for contact_id, vol_data in contact_ids:
+                            if contact_id in contact_dict:
+                                db.session.add(
+                                    EventVolunteer(
+                                        event_id=event.id,
+                                        contact_id=contact_id,
+                                        role=vol_data.get("role", EventVolunteerRole.ATTENDEE),
+                                        registration_status=vol_data.get(
+                                            "status", RegistrationStatus.PENDING
+                                        ),
+                                        attended=vol_data.get("attended"),
+                                    )
+                                )
 
-            try:
-                db.session.commit()
-                stats["events"] += 1
-                print(f"  ✅ Created event: {event_data['title']} ({event_data['event_status'].value})")
                 created_events.append(event)
-            except Exception as e:
+                stats["events"] += 1
+                pending_count += 1
+                print(f"  ✅ Created event: {event_data['title']} ({event_data['event_status'].value})")
+            except Exception as exc:  # noqa: BLE001
                 db.session.rollback()
-                stats["errors"].append(f"Event {event_data['title']}: {str(e)}")
-                print(f"  ❌ Error creating event: {str(e)}")
+                stats["errors"].append(f"Event {event_data['title']}: {exc}")
+                print(f"  ❌ Error creating event: {exc}")
+                continue
+
+            pending_count = _commit_batch(pending_count, batch_size)
+
+        if pending_count:
+            pending_count = _commit_batch(pending_count, 1)
 
     return created_events
 

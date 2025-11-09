@@ -53,6 +53,9 @@ class ImportRun(BaseModel):
     anomaly_flags: Mapped[dict | None] = mapped_column(db.JSON, nullable=True)
     error_summary: Mapped[str | None] = mapped_column(db.Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(db.Text, nullable=True)
+    ingest_params_json: Mapped[dict | None] = mapped_column(
+        db.JSON, nullable=True, comment="Stored parameters for retry support (file_path, source_system, dry_run, keep_file)"
+    )
 
     triggered_by_user = relationship("User", foreign_keys=[triggered_by_user_id])
     staging_rows = relationship(

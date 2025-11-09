@@ -90,6 +90,8 @@ def test_worker_run_invokes_celery(monkeypatch):
             "debug",
             "--concurrency",
             "2",
+            "--pool",
+            "solo",
             "--queues",
             "imports",
         ]
@@ -104,6 +106,8 @@ def test_worker_run_invokes_celery(monkeypatch):
         "imports",
         "--concurrency",
         "2",
+        "--pool",
+        "solo",
     ]
 
 

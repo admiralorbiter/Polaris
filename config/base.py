@@ -92,6 +92,12 @@ class Config:
     CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND")
     CELERY_SQLITE_PATH = os.environ.get("CELERY_SQLITE_PATH")
     CELERY_CONFIG = os.environ.get("CELERY_CONFIG")
+    IMPORTER_UPLOAD_DIR = os.environ.get("IMPORTER_UPLOAD_DIR")
+    try:
+        IMPORTER_MAX_UPLOAD_MB = int(os.environ.get("IMPORTER_MAX_UPLOAD_MB", "25"))
+    except ValueError:
+        IMPORTER_MAX_UPLOAD_MB = 25
+    IMPORTER_SHOW_RECENT_RUNS = _coerce_bool(os.environ.get("IMPORTER_SHOW_RECENT_RUNS"), default=True)
 
     # Session configuration
     PERMANENT_SESSION_LIFETIME = timedelta(days=7)  # Reduced from 31 days for better security

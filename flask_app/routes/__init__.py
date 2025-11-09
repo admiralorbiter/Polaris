@@ -4,6 +4,7 @@ Application routes package
 """
 
 from .admin import register_admin_routes
+from .admin_importer import register_importer_admin_routes
 from .api import register_api_routes
 from .auth import register_auth_routes
 from .event import register_event_routes
@@ -25,3 +26,4 @@ def init_routes(app):
     from flask_app.importer import init_importer
 
     init_importer(app)
+    register_importer_admin_routes(app)

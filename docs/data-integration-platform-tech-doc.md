@@ -100,6 +100,7 @@
 - Health diagnostics: `flask importer worker ping` (CLI) and `/importer/worker_health` when importer enabled.
 - Default transport: SQLite file at `instance/celery.sqlite`; production override via `CELERY_BROKER_URL=redis://...` and matching result backend.
 - Provide Procfile entry (`worker: flask importer worker run`) and optional `docker-compose.worker.yml` snippet for Redis deployments.
+- Windows tip: launch with a solo pool (`flask importer worker run --pool=solo`) because the default prefork pool is unavailable on Windows.
 
 ### IMP-4 — DoR/DoD checklists & Golden Dataset scaffold _(3 pts)_
 **User story**: As QA/PM, I want shared criteria and seed test data.  
@@ -177,6 +178,29 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - `flask importer run --source csv --file <path>` returns `run_id`.  
 - UI upload starts a run; run status visible.  
 **Dependencies**: IMP-3.
+**Implementation Notes**
+- CLI enqueues runs to the Celery `imports` queue by default, emitting a JSON payload such as `{"run_id": 42, "task_id": "...", "status": "queued"}` to stdout so scripts can parse results. A `--inline` override keeps the synchronous path for local debugging and reuses the existing summary output hooks.
+- `--summary-json` continues to stream the detailed payload only when the pipeline executes inline (e.g., during tests); queued executions rely on polling the run record for counters and status.
+
+**Admin UI Flow**
+- Upload form accepts CSV, performs lightweight validation (extension, size) client-side, and posts to a Flask endpoint that persists the file (temp storage or object store) and creates the `ImportRun` record with `triggered_by_user_id`.
+- Server enqueues the Celery task with resolved file path/source metadata, then responds immediately with JSON `{run_id, task_id}`; the UI transitions to a run detail page or modal that polls `/importer/runs/<id>` for status and counters.
+- Polling interval backs off (e.g., 1s → 5s) and surfaces progress: `pending` → `running` → `succeeded/failed`; failures expose `error_summary` and downloadable logs when available.
+- UI surfaces links to download the original upload, view DQ violations count, and deep-link into the Runs dashboard (IMP-20) once it lands.
+
+**Operational Considerations**
+- Require the `manage_imports` (or equivalent) permission to upload; audit log `triggered_by_user_id`, client IP, and filename.
+- Log enqueue/complete/failure events with Celery task ids for cross-correlation; emit metrics (run counts, latency) to the monitoring pipeline.
+- Guard against duplicate submissions by disabling the submit button while enqueueing and by deduplicating identical files within a short TTL.
+- Ensure storage lifecycle policy removes temporary uploads after the run concludes or after a retention window. Admin uploads set `keep_file=True` in `ingest_params_json` to retain files for retry capability; CLI runs default to `keep_file=False` since they reference existing files.
+- Configuration knobs: `IMPORTER_UPLOAD_DIR` (defaults to `instance/import_uploads`), `IMPORTER_MAX_UPLOAD_MB` (25 MB default), and `IMPORTER_SHOW_RECENT_RUNS` (toggles dashboard table); document expected overrides in `env.example`.
+- Maintenance CLI: `flask importer cleanup-uploads --max-age-hours <hours>` prunes stale local uploads for on-prem deployments without object storage. Note: this command should not remove files that are still referenced by runs with `keep_file=True`; consider filtering by run association or using a longer retention window.
+
+**Retry Support**
+- Failed or pending runs can be retried via CLI (`flask importer retry --run-id <id>`) or admin UI (Retry button in Recent Runs table).
+- Retry requires `ImportRun.ingest_params_json` to be populated with `file_path`, `source_system`, `dry_run`, and `keep_file` flags. Runs created before retry support was added cannot be retried.
+- Retry validates file existence before enqueueing; if the upload was cleaned up, retry will fail with a clear error message.
+- On retry, the run status resets to `PENDING`, clears `error_summary`/`counts_json`/`metrics_json`, and re-enqueues the Celery task with the original parameters. Admin retries are logged via `AdminLog` with action `IMPORT_RUN_RETRIED`.
 
 ---
 

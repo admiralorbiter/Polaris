@@ -69,6 +69,11 @@
             <a href="{{ url_for('admin_logs') }}" class="btn btn-info">
                 <i class="fas fa-history"></i> View Logs
             </a>
+            {% if importer_enabled %}
+            <a href="{{ url_for('admin_importer.importer_dashboard') }}" class="btn btn-success">
+                <i class="fas fa-file-upload"></i> Start Import
+            </a>
+            {% endif %}
         </div>
     </div>
 

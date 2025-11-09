@@ -101,6 +101,10 @@ def init_importer(app: Flask) -> None:
     state["active_adapters"] = tuple(active_descriptors)
     state["menu_items"] = (
         {
+            "label": "Importer Runs",
+            "endpoint": "admin_importer.importer_dashboard",
+        },
+        {
             "label": "Importer Health",
             "endpoint": "importer.importer_healthcheck",
         },
