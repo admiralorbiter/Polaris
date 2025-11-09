@@ -15,12 +15,19 @@ from flask_app.utils.importer import get_importer_adapters, is_importer_enabled
 
 from .celery_app import ensure_celery_app, get_celery_app
 from .cli import get_disabled_importer_group, importer_cli
+from .pipeline.run_service import ImportRunService, RunFilters
 from .registry import AdapterDescriptor, get_adapter_registry, resolve_adapters
 from .views import importer_blueprint
 
 IMPORTER_EXTENSION_KEY = "importer"
 
-__all__ = ["init_importer", "IMPORTER_EXTENSION_KEY", "get_celery_app"]
+__all__ = [
+    "init_importer",
+    "IMPORTER_EXTENSION_KEY",
+    "get_celery_app",
+    "ImportRunService",
+    "RunFilters",
+]
 
 
 def _ensure_extension_state(app: Flask) -> dict:

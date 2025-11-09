@@ -38,6 +38,30 @@ def _parse_adapter_list(value):
     return tuple(adapters)
 
 
+def _parse_int_list(value, *, minimum=1, maximum=100):
+    """
+    Parse a comma-separated list of integers with optional bounds.
+    """
+
+    if not value:
+        return []
+
+    parsed: list[int] = []
+    for raw_item in value.split(","):
+        item = raw_item.strip()
+        if not item:
+            continue
+        try:
+            number = int(item)
+        except ValueError:
+            continue
+        if number < minimum or number > maximum:
+            continue
+        if number not in parsed:
+            parsed.append(number)
+    return parsed
+
+
 class Config:
     # SECRET_KEY must be set via environment variable for security
     # Generate with: python -c "import secrets; print(secrets.token_hex(32))"
@@ -98,6 +122,25 @@ class Config:
     except ValueError:
         IMPORTER_MAX_UPLOAD_MB = 25
     IMPORTER_SHOW_RECENT_RUNS = _coerce_bool(os.environ.get("IMPORTER_SHOW_RECENT_RUNS"), default=True)
+    _raw_runs_page_sizes = os.environ.get("IMPORTER_RUNS_PAGE_SIZES", "25,50,100")
+    _parsed_page_sizes = _parse_int_list(_raw_runs_page_sizes, minimum=5, maximum=500)
+    if not _parsed_page_sizes:
+        _parsed_page_sizes = [25, 50, 100]
+    _raw_default_page_size = os.environ.get("IMPORTER_RUNS_PAGE_SIZE_DEFAULT")
+    if _raw_default_page_size is not None:
+        try:
+            IMPORTER_RUNS_PAGE_SIZE_DEFAULT = int(_raw_default_page_size)
+        except ValueError:
+            IMPORTER_RUNS_PAGE_SIZE_DEFAULT = _parsed_page_sizes[0]
+    else:
+        IMPORTER_RUNS_PAGE_SIZE_DEFAULT = _parsed_page_sizes[0]
+    if IMPORTER_RUNS_PAGE_SIZE_DEFAULT not in _parsed_page_sizes:
+        _parsed_page_sizes.insert(0, IMPORTER_RUNS_PAGE_SIZE_DEFAULT)
+    IMPORTER_RUNS_PAGE_SIZES = tuple(sorted(set(_parsed_page_sizes)))
+    try:
+        IMPORTER_RUNS_AUTO_REFRESH_SECONDS = max(0, int(os.environ.get("IMPORTER_RUNS_AUTO_REFRESH_SECONDS", "30")))
+    except ValueError:
+        IMPORTER_RUNS_AUTO_REFRESH_SECONDS = 30
 
     # Session configuration
     PERMANENT_SESSION_LIFETIME = timedelta(days=7)  # Reduced from 31 days for better security

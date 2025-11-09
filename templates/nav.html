@@ -20,18 +20,6 @@
               <a class="nav-link" href="{{ url_for('events_list') }}">Events</a>
             </li>
             {% if current_user.is_super_admin %}
-              {% if importer_enabled and importer_menu_items %}
-              <li class="nav-item dropdown">
-                <a class="nav-link dropdown-toggle" href="#" id="importerDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                  Importer
-                </a>
-                <ul class="dropdown-menu">
-                  {% for item in importer_menu_items %}
-                  <li><a class="dropdown-item" href="{{ url_for(item.endpoint) }}">{{ item.label }}</a></li>
-                  {% endfor %}
-                </ul>
-              </li>
-              {% endif %}
               <li class="nav-item dropdown">
                 <a class="nav-link dropdown-toggle" href="#" id="adminDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                   Admin
@@ -41,6 +29,16 @@
                   <li><a class="dropdown-item" href="{{ url_for('admin_organizations') }}">Organizations</a></li>
                   <li><a class="dropdown-item" href="{{ url_for('admin_users') }}">Manage Users</a></li>
                   <li><a class="dropdown-item" href="{{ url_for('admin_logs') }}">View Logs</a></li>
+                  {% if importer_enabled and importer_menu_items %}
+                    <li><hr class="dropdown-divider"></li>
+                    {% for item in importer_menu_items %}
+                      {% if item.endpoint == "admin_importer.importer_dashboard" %}
+                        <li><a class="dropdown-item" href="{{ url_for('admin_importer.importer_runs_dashboard_page') }}">Importer Runs</a></li>
+                      {% else %}
+                        <li><a class="dropdown-item" href="{{ url_for(item.endpoint) }}">{{ item.label }}</a></li>
+                      {% endif %}
+                    {% endfor %}
+                  {% endif %}
                 </ul>
               </li>
             {% endif %}

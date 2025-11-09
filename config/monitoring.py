@@ -2,6 +2,12 @@
 
 import os
 
+try:  # pragma: no cover - optional dependency at runtime
+    from prometheus_client import Counter, Histogram
+except ImportError:  # pragma: no cover
+    Counter = None
+    Histogram = None
+
 
 class MonitoringConfig:
     """Monitoring and alerting configuration"""
@@ -106,3 +112,100 @@ class TestingMonitoringConfig(MonitoringConfig):
     ENABLE_EMAIL_ALERTS = False
     ENABLE_SLACK_ALERTS = False
     ENABLE_WEBHOOK_ALERTS = False
+
+
+class ImporterMonitoring:
+    """Prometheus metric helpers for importer dashboard endpoints."""
+
+    RUNS_LIST_COUNTER = (
+        Counter(
+            "importer_runs_list_requests_total",
+            "Total importer runs list API requests.",
+            labelnames=("status",),
+        )
+        if Counter
+        else None
+    )
+    RUNS_LIST_LATENCY = (
+        Histogram(
+            "importer_runs_list_request_seconds",
+            "Latency histogram for importer runs list API.",
+            labelnames=("status",),
+            buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5),
+        )
+        if Histogram
+        else None
+    )
+    RUNS_LIST_RESULT_SIZE = (
+        Histogram(
+            "importer_runs_list_result_size",
+            "Number of runs returned by list endpoint.",
+            labelnames=("status",),
+            buckets=(0, 1, 5, 10, 25, 50, 100, 250, 500),
+        )
+        if Histogram
+        else None
+    )
+
+    RUNS_DETAIL_COUNTER = (
+        Counter(
+            "importer_runs_detail_requests_total",
+            "Total importer run detail API requests.",
+            labelnames=("status",),
+        )
+        if Counter
+        else None
+    )
+    RUNS_DETAIL_LATENCY = (
+        Histogram(
+            "importer_runs_detail_request_seconds",
+            "Latency histogram for importer run detail API.",
+            labelnames=("status",),
+            buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5),
+        )
+        if Histogram
+        else None
+    )
+
+    RUNS_STATS_COUNTER = (
+        Counter(
+            "importer_runs_stats_requests_total",
+            "Total importer runs stats API requests.",
+            labelnames=("status",),
+        )
+        if Counter
+        else None
+    )
+    RUNS_STATS_LATENCY = (
+        Histogram(
+            "importer_runs_stats_request_seconds",
+            "Latency histogram for importer runs stats API.",
+            labelnames=("status",),
+            buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5),
+        )
+        if Histogram
+        else None
+    )
+
+    @classmethod
+    def record_runs_list(cls, *, duration_seconds: float, status: str, result_count: int):
+        if cls.RUNS_LIST_COUNTER:
+            cls.RUNS_LIST_COUNTER.labels(status=status).inc()
+        if cls.RUNS_LIST_LATENCY:
+            cls.RUNS_LIST_LATENCY.labels(status=status).observe(max(duration_seconds, 0.0))
+        if cls.RUNS_LIST_RESULT_SIZE:
+            cls.RUNS_LIST_RESULT_SIZE.labels(status=status).observe(float(max(result_count, 0)))
+
+    @classmethod
+    def record_runs_detail(cls, *, duration_seconds: float, status: str):
+        if cls.RUNS_DETAIL_COUNTER:
+            cls.RUNS_DETAIL_COUNTER.labels(status=status).inc()
+        if cls.RUNS_DETAIL_LATENCY:
+            cls.RUNS_DETAIL_LATENCY.labels(status=status).observe(max(duration_seconds, 0.0))
+
+    @classmethod
+    def record_runs_stats(cls, *, duration_seconds: float, status: str):
+        if cls.RUNS_STATS_COUNTER:
+            cls.RUNS_STATS_COUNTER.labels(status=status).inc()
+        if cls.RUNS_STATS_LATENCY:
+            cls.RUNS_STATS_LATENCY.labels(status=status).observe(max(duration_seconds, 0.0))

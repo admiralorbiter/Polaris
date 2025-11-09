@@ -8,11 +8,12 @@ import json
 from http import HTTPStatus
 from pathlib import Path
 
-from flask import Blueprint, current_app, jsonify, render_template, request
+from flask import Blueprint, current_app, jsonify, render_template, request, send_file
 from flask_login import current_user, login_required
 
 from flask_app.importer.celery_app import DEFAULT_QUEUE_NAME, get_celery_app
-from flask_app.importer.utils import allowed_file, cleanup_upload, persist_upload
+from flask_app.importer.pipeline.run_service import ImportRunService
+from flask_app.importer.utils import allowed_file, cleanup_upload, persist_upload, resolve_upload_directory
 from flask_app.models import AdminLog, db
 from flask_app.models.importer.schema import ImportRun, ImportRunStatus
 from flask_app.utils.importer import is_importer_enabled
@@ -20,6 +21,7 @@ from flask_app.utils.permissions import permission_required
 
 
 admin_importer_blueprint = Blueprint("admin_importer", __name__, url_prefix="/admin/imports")
+_run_service = ImportRunService()
 
 
 def _ensure_importer_enabled():
@@ -105,6 +107,49 @@ def importer_dashboard():
         recent_runs=recent_runs,
         max_upload_mb=current_app.config.get("IMPORTER_MAX_UPLOAD_MB", 25),
         default_queue=DEFAULT_QUEUE_NAME,
+    )
+
+
+@admin_importer_blueprint.get("/runs/dashboard")
+@login_required
+@permission_required("manage_imports", org_context=False)
+def importer_runs_dashboard_page():
+    if not _ensure_importer_enabled():
+        return render_template("errors/404.html"), HTTPStatus.NOT_FOUND
+
+    status_options = [status.value for status in ImportRunStatus]
+    status_badges = {
+        "pending": "warning",
+        "running": "info",
+        "succeeded": "success",
+        "failed": "danger",
+        "partially_failed": "secondary",
+        "cancelled": "secondary",
+    }
+    default_page_size = current_app.config.get("IMPORTER_RUNS_PAGE_SIZE_DEFAULT", 25)
+    allowed_page_sizes = list(current_app.config.get("IMPORTER_RUNS_PAGE_SIZES", (25, 50, 100)))
+    auto_refresh_seconds = current_app.config.get("IMPORTER_RUNS_AUTO_REFRESH_SECONDS", 30)
+    sources = _run_service.list_sources()
+    if not sources:
+        sources = sorted({adapter.name for adapter in current_app.extensions.get("importer", {}).get("active_adapters", ())})
+
+    current_app.logger.info(
+        "Importer runs dashboard page rendered",
+        extra={
+            "user_id": current_user.id,
+            "importer_status_options": status_options,
+            "importer_allowed_page_sizes": allowed_page_sizes,
+        },
+    )
+
+    return render_template(
+        "importer/runs.html",
+        status_options=status_options,
+        status_badges=status_badges,
+        default_page_size=default_page_size,
+        allowed_page_sizes=allowed_page_sizes,
+        auto_refresh_seconds=auto_refresh_seconds,
+        source_options=sources,
     )
 
 
@@ -366,6 +411,55 @@ def importer_run_retry(run_id: int):
             ),
             HTTPStatus.INTERNAL_SERVER_ERROR,
         )
+
+
+@admin_importer_blueprint.get("/<int:run_id>/download")
+@login_required
+@permission_required("manage_imports", org_context=False)
+def importer_run_download(run_id: int):
+    if not _ensure_importer_enabled():
+        return render_template("errors/404.html"), HTTPStatus.NOT_FOUND
+
+    run = db.session.get(ImportRun, run_id)
+    if run is None or not run.ingest_params_json:
+        return jsonify({"error": f"Import run {run_id} not found or missing ingest metadata."}), HTTPStatus.NOT_FOUND
+
+    params = run.ingest_params_json
+    file_path = params.get("file_path")
+    keep_file = params.get("keep_file", False)
+    if not keep_file or not file_path:
+        return jsonify({"error": f"Import run {run_id} has no retained upload for download."}), HTTPStatus.NOT_FOUND
+
+    path = Path(file_path)
+    upload_root = resolve_upload_directory(current_app)
+    try:
+        resolved_path = path.resolve(strict=False)
+        root_resolved = upload_root.resolve(strict=False)
+    except Exception as exc:  # pragma: no cover - defensive
+        current_app.logger.warning("Failed to resolve importer download path for run %s: %s", run_id, exc)
+        return jsonify({"error": "Unable to locate upload on disk."}), HTTPStatus.NOT_FOUND
+
+    if not resolved_path.exists():
+        return jsonify({"error": "Upload file no longer exists on disk."}), HTTPStatus.NOT_FOUND
+
+    try:
+        if root_resolved not in resolved_path.parents and resolved_path != root_resolved:
+            raise PermissionError("Path escapes upload directory.")
+    except PermissionError:
+        current_app.logger.error(
+            "Importer download path validation failed for run %s: %s not under %s",
+            run_id,
+            resolved_path,
+            root_resolved,
+        )
+        return jsonify({"error": "Upload file location invalid."}), HTTPStatus.NOT_FOUND
+
+    download_name = f"import_run_{run_id}{resolved_path.suffix or '.csv'}"
+    current_app.logger.info(
+        "Importer upload download served",
+        extra={"importer_run_id": run_id, "download_path": str(resolved_path), "user_id": current_user.id},
+    )
+    return send_file(resolved_path, as_attachment=True, download_name=download_name)
 
 
 def register_importer_admin_routes(app):

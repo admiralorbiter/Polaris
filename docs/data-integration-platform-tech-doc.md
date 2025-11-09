@@ -293,6 +293,18 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
   - Links to DQ violations count (deep-link to inbox filtered by run_id)
   - Download original upload (if `keep_file=True`)
   - Retry button (if failed/pending and retry-capable)
+- **Dashboard polish**:
+  - Topline summary cards (runs in view, health breakdown, leading source, auto-refresh cadence)
+  - Auto-refresh toggle (default 30s) with manual refresh button and spinner feedback
+  - Bootstrap toasts for error/success feedback, copy-to-clipboard for counts digest
+  - Graceful empty states, filter/reset UX, pagination summary `x–y of z`
+  - Accessible modal with `aria-live` updates, keyboard focus management, responsive table
+- **Actions & safeguards**:
+  - Retry action posts to `/admin/imports/<run_id>/retry` with optimistic toast
+  - Download original upload via `/admin/imports/<run_id>/download` with path whitelisting
+  - Copy JSON quick action (counts digest) for incident triage
+  - Audit log entry (`IMPORT_RUN_VIEW` / `IMPORT_RUN_DETAIL_VIEW`) on every interaction
+  - 401/403 JSON responses for API calls (no redirects), consistent error envelope `{"error": "..."}`
 
 **Access Control**:
 - Route: `/importer/runs` (or `/admin/imports/runs` if namespaced)
@@ -304,6 +316,11 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Track filter/pagination interactions (client-side events)
 - Expose run counts via API endpoint for external monitoring: `GET /importer/runs/stats?source=csv&status=succeeded&days=7`
 - Dashboard should render within 2s for 1000 runs (indexed queries, pagination)
+- Prometheus metrics exposed via `ImporterMonitoring`:
+  - `importer_runs_list_requests_total`, `importer_runs_list_request_seconds`, `importer_runs_list_result_size`
+  - `importer_runs_detail_requests_total`, latency histogram, and stats variants
+- Structured logs attach `importer_*` fields (status, source, response_time_ms, run_id)
+- Client telemetry hooks via `data-component`/`data-action` attributes for future instrumentation
 
 **Testing Expectations**:
 - **Unit tests**: Dashboard route handlers, filter/pagination logic, JSON serialization
@@ -311,6 +328,9 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - **Golden data**: Use existing runs from Sprint 1 test fixtures; create test runs with various statuses
 - **UI tests**: Verify status badge colors, filter dropdowns, pagination controls (HTML structure)
 - **Performance tests**: Load dashboard with 1000 runs, verify <2s render time
+- **Telemetry verification**: Assert Prometheus counters increment (smoke), audit log entries persisted
+- **Download security**: Ensure upload download path is constrained to `import_uploads/` root, 404 on tampering
+- **Accessibility checks**: axe-core pass for modal/table, keyboard navigation validated manually
 
 ### IMP-21 — DQ inbox (basic) with export _(8 pts)_
 **User story**: As a steward, I can filter violations and export them.  

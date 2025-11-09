@@ -1,0 +1,276 @@
+{% extends "base.html" %}
+
+{% block title %}Importer Runs{% endblock %}
+
+{% block extra_css %}
+<style>
+  .importer-runs-dashboard {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .importer-runs-dashboard .card {
+    width: 100%;
+  }
+
+  @media (min-width: 992px) {
+    .importer-runs-dashboard {
+      padding-left: 1.5rem;
+      padding-right: 1.5rem;
+    }
+
+    .importer-runs-table-responsive {
+      overflow-x: visible;
+    }
+
+    .importer-runs-table-responsive .table th,
+    .importer-runs-table-responsive .table td {
+      white-space: normal;
+      padding-left: 0.75rem;
+      padding-right: 0.75rem;
+    }
+
+    .importer-runs-dashboard .card-header,
+    .importer-runs-dashboard .card-body,
+    .importer-runs-dashboard .card-footer {
+      padding-left: 1.5rem;
+      padding-right: 1.5rem;
+    }
+
+    .importer-runs-dashboard .card-body {
+      padding-top: 1.25rem;
+      padding-bottom: 1.25rem;
+    }
+
+    .importer-runs-dashboard .card-header {
+      padding-top: 1.25rem;
+      padding-bottom: 1.25rem;
+    }
+
+    .importer-runs-dashboard .card-footer {
+      padding-top: 1rem;
+      padding-bottom: 1rem;
+    }
+
+    .importer-runs-dashboard .btn {
+      padding: 0.5rem 1rem;
+      min-width: 0;
+    }
+
+    .importer-runs-dashboard .btn.btn-outline-primary,
+    .importer-runs-dashboard .btn.btn-outline-secondary {
+      border-width: 1px;
+    }
+  }
+
+  @media (min-width: 1400px) {
+    .importer-runs-dashboard {
+      padding-left: 0;
+      padding-right: 0;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid importer-runs-dashboard py-4" data-component="importer-runs-dashboard">
+  <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4">
+    <div>
+      <h1 class="h3 mb-1">Importer Runs Dashboard</h1>
+      <p class="text-muted mb-0">Monitor run throughput, drill into counts, and keep CSV pipelines healthy.</p>
+    </div>
+    <div class="d-flex gap-2 mt-3 mt-md-0">
+      <button class="btn btn-outline-primary" id="runs-refresh-btn" data-action="refresh">
+        <span class="spinner-border spinner-border-sm d-none" id="runs-refresh-spinner" role="status" aria-hidden="true"></span>
+        Refresh
+      </button>
+      <button class="btn btn-outline-secondary" id="runs-auto-refresh-toggle" data-action="auto-refresh">
+        Auto Refresh
+      </button>
+    </div>
+  </div>
+
+  <div class="card shadow-sm mb-4">
+    <div class="card-header">
+      <h2 class="h5 mb-0">Filters</h2>
+    </div>
+    <div class="card-body">
+      <form id="runs-filter-form" class="row g-3 align-items-end" autocomplete="off">
+        <div class="col-sm-6 col-lg-3">
+          <label for="filter-source" class="form-label">Source</label>
+          <select class="form-select" id="filter-source" name="source">
+            <option value="">All sources</option>
+            {% for source in source_options %}
+            <option value="{{ source }}">{{ source|capitalize }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-sm-6 col-lg-3">
+          <label for="filter-status" class="form-label">Status</label>
+          <select class="form-select" id="filter-status" name="status">
+            <option value="">All statuses</option>
+            {% for status in status_options %}
+            <option value="{{ status }}">{{ status.replace("_", " ")|title }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-sm-6 col-lg-3">
+          <label for="filter-start-date" class="form-label">Started After</label>
+          <input type="date" class="form-control" id="filter-start-date" name="started_from">
+        </div>
+        <div class="col-sm-6 col-lg-3">
+          <label for="filter-end-date" class="form-label">Started Before</label>
+          <input type="date" class="form-control" id="filter-end-date" name="started_to">
+        </div>
+        <div class="col-sm-6 col-lg-3">
+          <label for="filter-search" class="form-label">Search</label>
+          <input type="search" class="form-control" id="filter-search" placeholder="Run ID, source, adapter">
+        </div>
+        <div class="col-sm-6 col-lg-2">
+          <div class="form-check mt-4">
+            <input class="form-check-input" type="checkbox" value="1" id="filter-include-dry-runs" checked>
+            <label class="form-check-label" for="filter-include-dry-runs">
+              Include dry runs
+            </label>
+          </div>
+        </div>
+        <div class="col-sm-12 col-lg-4">
+          <label for="filter-page-size" class="form-label">Rows per page</label>
+          <select class="form-select" id="filter-page-size" name="page_size">
+            {% for size in allowed_page_sizes %}
+            <option value="{{ size }}" {% if size == default_page_size %}selected{% endif %}>{{ size }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-12">
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary">Apply Filters</button>
+            <button type="reset" class="btn btn-outline-secondary" id="runs-reset-btn">Reset</button>
+            <small class="text-muted ms-auto">
+              Status badges use Bootstrap contextual colors; hover a row for quick actions.
+            </small>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-4" id="runs-summary-cards" aria-live="polite">
+    <!-- Summary cards rendered via JS -->
+  </div>
+
+  <div class="card shadow-sm">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <h2 class="h5 mb-0">Runs</h2>
+      <div id="runs-last-updated" class="text-muted small" aria-live="polite"></div>
+    </div>
+    <div class="table-responsive position-relative importer-runs-table-responsive">
+      <div id="runs-loading-overlay" class="position-absolute top-0 start-0 w-100 h-100 bg-white bg-opacity-75 d-flex align-items-center justify-content-center d-none">
+        <div class="text-center">
+          <div class="spinner-border text-primary mb-2" role="status" aria-hidden="true"></div>
+          <div>Loading runs...</div>
+        </div>
+      </div>
+      <table class="table table-hover align-middle mb-0" id="runs-table" data-table="runs">
+        <thead class="table-light">
+          <tr>
+            <th scope="col" data-sort="run_id">Run ID</th>
+            <th scope="col" data-sort="source">Source</th>
+            <th scope="col" data-sort="status">Status</th>
+            <th scope="col" data-sort="started_at">Started</th>
+            <th scope="col" data-sort="finished_at">Finished</th>
+            <th scope="col">Rows (staged/validated/quarantined)</th>
+            <th scope="col">Core (inserted/duplicates)</th>
+            <th scope="col">Duration</th>
+            <th scope="col" class="text-end">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="runs-table-body">
+          <tr>
+            <td colspan="9" class="text-center py-5 text-muted">Use the filters above and refresh to load importer runs.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card-footer d-flex flex-column flex-lg-row justify-content-between gap-2">
+      <div id="runs-pagination-summary" class="text-muted small"></div>
+      <nav id="runs-pagination" aria-label="Runs pagination"></nav>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="run-detail-modal" tabindex="-1" aria-hidden="true" aria-labelledby="run-detail-title">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title h5" id="run-detail-title">Run Detail</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div id="run-detail-loader" class="d-flex align-items-center justify-content-center py-5 d-none">
+          <div class="spinner-border text-primary me-2" role="status" aria-hidden="true"></div>
+          Loading run detail...
+        </div>
+        <div id="run-detail-content" class="d-none">
+          <dl class="row mb-0">
+            <dt class="col-sm-3">Run ID</dt>
+            <dd class="col-sm-9" data-field="run_id"></dd>
+            <dt class="col-sm-3">Source</dt>
+            <dd class="col-sm-9" data-field="source"></dd>
+            <dt class="col-sm-3">Status</dt>
+            <dd class="col-sm-9" data-field="status_badge"></dd>
+            <dt class="col-sm-3">Duration</dt>
+            <dd class="col-sm-9" data-field="duration"></dd>
+            <dt class="col-sm-3">Counts</dt>
+            <dd class="col-sm-9">
+              <details class="mb-2">
+                <summary>Counts JSON</summary>
+                <pre class="bg-light border rounded p-3 mb-0 small" data-field="counts_json"></pre>
+              </details>
+              <details>
+                <summary>Metrics JSON</summary>
+                <pre class="bg-light border rounded p-3 mb-0 small" data-field="metrics_json"></pre>
+              </details>
+            </dd>
+            <dt class="col-sm-3">Error Summary</dt>
+            <dd class="col-sm-9">
+              <pre class="bg-light border rounded p-3 small" data-field="error_summary"></pre>
+            </dd>
+            <dt class="col-sm-3">Triggered By</dt>
+            <dd class="col-sm-9" data-field="triggered_by"></dd>
+          </dl>
+        </div>
+      </div>
+      <div class="modal-footer justify-content-between">
+        <div class="text-muted small" id="run-detail-updated"></div>
+        <div class="d-flex gap-2">
+          <a class="btn btn-outline-secondary d-none" id="run-detail-download" download>Download original file</a>
+          <button class="btn btn-outline-primary d-none" id="run-detail-retry-btn">Retry run</button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  window.IMPORTER_RUNS_CONFIG = {
+    api: {
+      list: "{{ url_for('importer.importer_runs_list') }}",
+      detailBase: "{{ url_for('importer.importer_runs_list') }}",
+      stats: "{{ url_for('importer.importer_runs_stats') }}",
+      adminBase: "{{ url_for('admin_importer.importer_dashboard').rstrip('/') }}"
+    },
+    defaults: {
+      pageSize: {{ default_page_size }},
+      autoRefreshSeconds: {{ auto_refresh_seconds }}
+    },
+    statusBadges: {{ status_badges | tojson }},
+    statusOptions: {{ status_options | tojson }},
+    sourceOptions: {{ source_options | tojson }},
+    allowedPageSizes: {{ allowed_page_sizes | tojson }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/importer_runs.js') }}" defer></script>
+{% endblock %}
+
