@@ -165,6 +165,11 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Inserts succeed; exact-email duplicates skipped; counters recorded in `counts_json`.  
 - Batch transactions; no deadlocks.  
 **Dependencies**: IMP-11.  
+**Implementation Notes**
+- Validated staging rows promote into `clean_volunteers` with normalized payloads, stable checksum (`staging_volunteers.checksum` copy), and provenance (`load_action`, core IDs when inserted).  
+- Core load runs synchronously today, inserts `contacts`/`volunteers` plus primary `contact_emails`/`contact_phones`. Duplicate emails stay in clean w/ `load_action="skipped_duplicate"` and mark staging rows `LOADED` with explanatory `last_error`.  
+- `ImportRun.counts_json.core.volunteers` tracks `{rows_processed, rows_inserted, rows_skipped_duplicates, dry_run}` while `metrics_json` mirrors attempted inserts for dry-runs. Logger emits per-run summaries and duplicate email list for observability.  
+- CLI/worker paths emit combined summaries; `flask importer run --summary-json` outputs machine-readable stats for automation/regression scripts. Golden data includes `volunteers_duplicate_skip.csv` to verify skip behavior.
 
 ### IMP-13 — CLI & admin action: start a run _(3 pts)_
 **User story**: As an admin, I can start an import via CLI and UI.  

@@ -19,8 +19,12 @@ from flask.cli import ScriptInfo
 
 from flask_app.importer.celery_app import DEFAULT_QUEUE_NAME, get_celery_app
 from flask_app.importer.pipeline import (
+    CleanPromotionSummary,
+    CoreLoadSummary,
     DQProcessingSummary,
     StagingSummary,
+    load_core_volunteers,
+    promote_clean_volunteers,
     run_minimal_dq,
     stage_volunteers_from_csv,
 )
@@ -93,7 +97,7 @@ def _execute_csv_inline(
     *,
     dry_run: bool,
     source_system: str,
-) -> tuple[StagingSummary, DQProcessingSummary]:
+) -> tuple[StagingSummary, DQProcessingSummary, CleanPromotionSummary, CoreLoadSummary]:
     run_id = run.id
     run.status = ImportRunStatus.RUNNING
     run.started_at = datetime.now(timezone.utc)
@@ -108,10 +112,16 @@ def _execute_csv_inline(
                 dry_run=dry_run,
             )
         dq_summary = run_minimal_dq(run, dry_run=dry_run, csv_rows=staging_summary.dry_run_rows)
+        clean_summary = promote_clean_volunteers(run, dry_run=dry_run)
+        core_summary = load_core_volunteers(
+            run,
+            dry_run=dry_run,
+            clean_candidates=clean_summary.candidates,
+        )
         run.status = ImportRunStatus.SUCCEEDED
         run.finished_at = datetime.now(timezone.utc)
         db.session.commit()
-        return staging_summary, dq_summary
+        return staging_summary, dq_summary, clean_summary, core_summary
     except Exception as exc:
         db.session.rollback()
         recovery_run = ImportRun.query.get(run_id)
@@ -125,7 +135,11 @@ def _execute_csv_inline(
 
 
 def _format_summary(
-    run: ImportRun, staging_summary: StagingSummary, dq_summary: DQProcessingSummary
+    run: ImportRun,
+    staging_summary: StagingSummary,
+    dq_summary: DQProcessingSummary,
+    clean_summary: CleanPromotionSummary,
+    core_summary: CoreLoadSummary,
 ) -> str:
     header_preview = ", ".join(staging_summary.header) if staging_summary.header else "n/a"
     status_value = run.status.value if hasattr(run.status, "value") else str(run.status)
@@ -144,8 +158,52 @@ def _format_summary(
         f"  dq_rows_evaluated  : {dq_summary.rows_evaluated}\n"
         f"  dq_rows_validated  : {dq_summary.rows_validated}\n"
         f"  dq_rows_quarantined: {dq_summary.rows_quarantined}\n"
-        f"  dq_rule_counts     : {rule_counts_display}"
+        f"  dq_rule_counts     : {rule_counts_display}\n"
+        f"  clean_promoted     : {clean_summary.rows_promoted if not clean_summary.dry_run else clean_summary.rows_considered}\n"
+        f"  clean_skipped      : {clean_summary.rows_skipped}\n"
+        f"  core_inserted      : {core_summary.rows_inserted if not core_summary.dry_run else core_summary.rows_processed}\n"
+        f"  core_duplicates    : {core_summary.rows_skipped_duplicates}"
     )
+
+
+def _build_summary_payload(
+    run: ImportRun,
+    staging_summary: StagingSummary,
+    dq_summary: DQProcessingSummary,
+    clean_summary: CleanPromotionSummary,
+    core_summary: CoreLoadSummary,
+) -> dict[str, object]:
+    return {
+        "run_id": run.id,
+        "dry_run": staging_summary.dry_run,
+        "staging": {
+            "rows_processed": staging_summary.rows_processed,
+            "rows_staged": staging_summary.rows_staged,
+            "rows_skipped_blank": staging_summary.rows_skipped_blank,
+            "headers": list(staging_summary.header),
+            "dry_run": staging_summary.dry_run,
+        },
+        "dq": {
+            "rows_evaluated": dq_summary.rows_evaluated,
+            "rows_validated": dq_summary.rows_validated,
+            "rows_quarantined": dq_summary.rows_quarantined,
+            "rule_counts": dict(dq_summary.rule_counts),
+            "dry_run": dq_summary.dry_run,
+        },
+        "clean": {
+            "rows_considered": clean_summary.rows_considered,
+            "rows_promoted": clean_summary.rows_promoted,
+            "rows_skipped": clean_summary.rows_skipped,
+            "dry_run": clean_summary.dry_run,
+        },
+        "core": {
+            "rows_processed": core_summary.rows_processed,
+            "rows_inserted": core_summary.rows_inserted,
+            "rows_skipped_duplicates": core_summary.rows_skipped_duplicates,
+            "duplicate_emails": list(core_summary.duplicate_emails),
+            "dry_run": core_summary.dry_run,
+        },
+    }
 
 
 @importer_cli.group(name="worker")
@@ -237,8 +295,20 @@ def worker_ping(ctx, timeout: float):
 )
 @click.option("--dry-run", is_flag=True, help="Execute pipeline without writing to staging tables.")
 @click.option("--enqueue", is_flag=True, help="Send the run to the importer worker instead of running inline.")
+@click.option(
+    "--summary-json",
+    is_flag=True,
+    help="Emit a machine-readable summary payload after completion.",
+)
 @click.pass_context
-def importer_run(ctx, source: str, file_path: Optional[Path], dry_run: bool, enqueue: bool):
+def importer_run(
+    ctx,
+    source: str,
+    file_path: Optional[Path],
+    dry_run: bool,
+    enqueue: bool,
+    summary_json: bool,
+):
     """Execute an importer run for the provided source."""
     info = ctx.ensure_object(ScriptInfo)
     app = info.load_app()
@@ -276,10 +346,20 @@ def importer_run(ctx, source: str, file_path: Optional[Path], dry_run: bool, enq
     if run is None:
         raise click.ClickException(f"Import run {run_id} could not be reloaded before execution.")
 
-    staging_summary, dq_summary = _execute_csv_inline(
+    staging_summary, dq_summary, clean_summary, core_summary = _execute_csv_inline(
         run,
         csv_path,
         dry_run=dry_run,
         source_system=normalized_source,
     )
-    click.echo(_format_summary(run, staging_summary, dq_summary))
+    click.echo(_format_summary(run, staging_summary, dq_summary, clean_summary, core_summary))
+    if summary_json:
+        click.echo(
+            json.dumps(
+                _build_summary_payload(
+                    run, staging_summary, dq_summary, clean_summary, core_summary
+                ),
+                indent=2,
+                sort_keys=True,
+            )
+        )

@@ -67,6 +67,12 @@ class ImportRun(BaseModel):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+    clean_volunteers = relationship(
+        "CleanVolunteer",
+        back_populates="import_run",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
     dedupe_suggestions = relationship(
         "DedupeSuggestion",
         back_populates="import_run",
@@ -150,6 +156,13 @@ class StagingVolunteer(BaseModel):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+    clean_record = relationship(
+        "CleanVolunteer",
+        back_populates="staging_row",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        uselist=False,
+    )
     dedupe_suggestions = relationship(
         "DedupeSuggestion",
         back_populates="staging_row",
@@ -231,6 +244,51 @@ class DataQualityViolation(BaseModel):
 
     __table_args__ = (
         Index("idx_dq_violations_run_rule", "run_id", "rule_code"),
+    )
+
+
+class CleanVolunteer(BaseModel):
+    """Normalized volunteer rows promoted from staging prior to core load."""
+
+    __tablename__ = "clean_volunteers"
+
+    id: Mapped[int] = mapped_column(db.Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("import_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    staging_volunteer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("staging_volunteers.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    external_system: Mapped[str] = mapped_column(db.String(100), nullable=False, index=True)
+    external_id: Mapped[str | None] = mapped_column(db.String(255), nullable=True, index=True)
+    first_name: Mapped[str] = mapped_column(db.String(255), nullable=False)
+    last_name: Mapped[str] = mapped_column(db.String(255), nullable=False)
+    email: Mapped[str | None] = mapped_column(db.String(320), nullable=True, index=True)
+    phone_e164: Mapped[str | None] = mapped_column(db.String(20), nullable=True, index=True)
+    checksum: Mapped[str | None] = mapped_column(db.String(64), nullable=True, index=True)
+    payload_json: Mapped[dict] = mapped_column(db.JSON, nullable=False)
+    promoted_at: Mapped[datetime] = mapped_column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    load_action: Mapped[str | None] = mapped_column(db.String(50), nullable=True)
+    core_contact_id: Mapped[int | None] = mapped_column(db.Integer, nullable=True, index=True)
+    core_volunteer_id: Mapped[int | None] = mapped_column(db.Integer, nullable=True, index=True)
+
+    import_run = relationship("ImportRun", back_populates="clean_volunteers")
+    staging_row = relationship("StagingVolunteer", back_populates="clean_record")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "staging_volunteer_id",
+            name="uq_clean_volunteers_run_staging",
+        ),
     )
 
 

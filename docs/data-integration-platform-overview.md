@@ -81,6 +81,7 @@
 ### 3.3 Clean layer (normalized views/tables)
 
 - Normalize/validate from staging to “clean” equivalents (`clean_*`) using rules. Records failing rules remain in quarantine.
+- `clean_volunteers` stores normalized payloads, staging back-references, row checksums (future idempotency drift detection), and eventual load actions (`inserted`, `skipped_duplicate`, etc.) to give operators lineage into core.
 
 ### 3.4 Core domain
 
@@ -127,6 +128,7 @@ Define **canonical fields** per entity. Examples (select highlights):
     - Always update `external_id_map`.
 5. **Load (Upsert to Core)**
     - Idempotent upserts keyed by `(external_system, external_id)` **or** resolved `core_id`.
+    - Create-only v1 skips exact-email duplicates, records metrics (`rows_skipped_duplicates`, duplicate email roster), and annotates clean/staging rows for observability.
     - **Field survivorship** policies (see §7.4).
 6. **Reconcile (Leak detection)**
     - Compare source vs loaded counts; drift/anomalies; **freshness**; hashes of canonical payloads.
@@ -262,6 +264,7 @@ Each rule has: `rule_code`, `severity` (error/warn/info), remediation hints, and
 - **CSV-first**: ship sample CSV templates & a CSV adapter so anyone can use the importer without Salesforce.
 - **Extension points**: adapters registered via entry points; DQ rules and dedupe features support plug-in registration.
 - **Documentation**: quickstart for CSV, separate guide for Salesforce.
+- CLI supports `--summary-json` to emit machine-readable run statistics for automation harnesses and regression scripts.
 
 ## 11) Security, Privacy, Compliance
 
@@ -279,6 +282,7 @@ Each rule has: `rule_code`, `severity` (error/warn/info), remediation hints, and
 - **Metrics** (per run and over time):
     - Extracted vs loaded counts by entity
     - Reject rate, duplicate rate (auto vs manual)
+    - Clean promotion vs core insert counts, duplicate skips, and duplicate email roster
     - Freshness lag (now − max source timestamp)
     - Anomaly flags (delta/null drift)
     - Task durations & queue latency

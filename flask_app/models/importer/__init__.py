@@ -7,8 +7,10 @@ external ID mapping, merge history, and change history.
 
 from .schema import (
     ChangeLogEntry,
+    CleanVolunteer,
     DataQualitySeverity,
     DataQualityStatus,
+    DataQualityViolation,
     DedupeDecision,
     DedupeSuggestion,
     ExternalIdMap,
@@ -17,11 +19,11 @@ from .schema import (
     MergeLog,
     StagingRecordStatus,
     StagingVolunteer,
-    DataQualityViolation,
 )
 
 __all__ = [
     "ChangeLogEntry",
+    "CleanVolunteer",
     "DataQualitySeverity",
     "DataQualityStatus",
     "DedupeDecision",

@@ -14,7 +14,12 @@ from typing import Any
 
 from celery import shared_task
 
-from flask_app.importer.pipeline import run_minimal_dq, stage_volunteers_from_csv
+from flask_app.importer.pipeline import (
+    load_core_volunteers,
+    promote_clean_volunteers,
+    run_minimal_dq,
+    stage_volunteers_from_csv,
+)
 from flask_app.models.base import db
 from flask_app.models.importer.schema import ImportRun, ImportRunStatus
 
@@ -80,6 +85,12 @@ def ingest_csv(
                 dry_run=dry_run,
             )
         dq_summary = run_minimal_dq(run, dry_run=dry_run, csv_rows=staging_summary.dry_run_rows)
+        clean_summary = promote_clean_volunteers(run, dry_run=dry_run)
+        core_summary = load_core_volunteers(
+            run,
+            dry_run=dry_run,
+            clean_candidates=clean_summary.candidates,
+        )
         run.status = ImportRunStatus.SUCCEEDED
         run.finished_at = datetime.now(timezone.utc)
         db.session.commit()
@@ -93,6 +104,9 @@ def ingest_csv(
             "dq_rows_validated": dq_summary.rows_validated,
             "dq_rows_quarantined": dq_summary.rows_quarantined,
             "dq_rule_counts": dict(dq_summary.rule_counts),
+            "clean_rows_promoted": clean_summary.rows_promoted,
+            "core_rows_inserted": core_summary.rows_inserted,
+            "core_rows_duplicates": core_summary.rows_skipped_duplicates,
         }
     except Exception as exc:  # pragma: no cover - defensive logging path
         db.session.rollback()

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from flask_app.importer import init_importer
@@ -51,6 +52,11 @@ def test_importer_run_cli_stages_data_inline(app, runner, tmp_path):
     assert dq_counts["rows_validated"] == 2
     assert dq_counts["rows_quarantined"] == 0
     assert dq_counts["rule_counts"] == {}
+    clean_counts = run.counts_json["clean"]["volunteers"]
+    assert clean_counts["rows_promoted"] == 2
+    core_counts = run.counts_json["core"]["volunteers"]
+    assert core_counts["rows_inserted"] == 2
+    assert core_counts["rows_skipped_duplicates"] == 0
 
     staged_rows = db.session.query(StagingVolunteer).all()
     assert len(staged_rows) == 2
@@ -85,4 +91,34 @@ def test_importer_run_cli_dry_run_skips_writes(app, runner, tmp_path):
     assert dq_counts["dry_run"] is True
     dq_metrics = run.metrics_json["dq"]["volunteers"]
     assert dq_metrics["rows_validated"] == 2
+    clean_counts = run.counts_json["clean"]["volunteers"]
+    assert clean_counts["rows_promoted"] == 0
+    assert clean_counts["dry_run"] is True
+    core_counts = run.counts_json["core"]["volunteers"]
+    assert core_counts["rows_inserted"] == 0
+    assert core_counts["dry_run"] is True
     assert db.session.query(StagingVolunteer).count() == 0
+
+
+def test_importer_run_cli_summary_json(app, runner, tmp_path):
+    _ensure_importer(app)
+    csv_path = _write_csv(tmp_path)
+
+    result = runner.invoke(
+        args=[
+            "importer",
+            "run",
+            "--source",
+            "csv",
+            "--file",
+            str(csv_path),
+            "--summary-json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    lines = result.output.splitlines()
+    json_start = next(i for i, line in enumerate(lines) if line.strip().startswith("{"))
+    summary_payload = json.loads("\n".join(lines[json_start:]))
+    assert summary_payload["core"]["rows_inserted"] == 2
+    assert summary_payload["core"]["rows_skipped_duplicates"] == 0

@@ -55,8 +55,10 @@ from .role import Permission, Role, RolePermission, UserOrganization
 from .user import User
 from .importer import (
     ChangeLogEntry,
+    CleanVolunteer,
     DataQualitySeverity,
     DataQualityStatus,
+    DataQualityViolation,
     DedupeDecision,
     DedupeSuggestion,
     ExternalIdMap,
@@ -65,7 +67,6 @@ from .importer import (
     MergeLog,
     StagingRecordStatus,
     StagingVolunteer,
-    DataQualityViolation,
 )
 
 __all__ = [
@@ -140,4 +141,5 @@ __all__ = [
     "ExternalIdMap",
     "MergeLog",
     "ChangeLogEntry",
+    "CleanVolunteer",
 ]

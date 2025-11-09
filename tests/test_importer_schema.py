@@ -26,6 +26,7 @@ def test_importer_tables_created(app):
     expected_tables = {
         "import_runs",
         "staging_volunteers",
+        "clean_volunteers",
         "dq_violations",
         "dedupe_suggestions",
         "external_id_map",

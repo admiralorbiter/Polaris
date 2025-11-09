@@ -1,0 +1,4 @@
+external_system,external_id,first_name,last_name,email,phone,source_updated_at
+legacy_csv,dup-001,Dolly,Hopkins,dolly.dup@example.org,+14155550555,2025-10-03T09:00:00Z
+legacy_csv,dup-002,Dolly,Hopkins,dolly.dup@example.org,+14155550555,2025-10-03T09:05:00Z
+
