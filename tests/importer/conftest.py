@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -34,7 +35,7 @@ def importer_app(app):
 
 @pytest.fixture
 def run_factory(importer_app, tmp_path):
-    created_runs: list[ImportRun] = []
+    created_run_ids: list[int] = []
 
     def _factory(
         *,
@@ -52,7 +53,7 @@ def run_factory(importer_app, tmp_path):
         if keep_file:
             with importer_app.app_context():
                 upload_root = resolve_upload_directory(importer_app)
-            upload_file = upload_root / f"run_{len(created_runs)}.csv"
+            upload_file = upload_root / f"run_{len(created_run_ids)}.csv"
             upload_file.write_text("id,name\n1,Alice\n")
             file_path = str(upload_file)
 
@@ -66,7 +67,18 @@ def run_factory(importer_app, tmp_path):
             counts_json={
                 "staging": {"volunteers": {"rows_staged": 50}},
                 "dq": {"volunteers": {"rows_validated": 48, "rows_quarantined": 2}},
-                "core": {"volunteers": {"rows_inserted": 45, "rows_skipped_duplicates": 3}},
+                "core": {
+                    "volunteers": {
+                        "rows_created": 45,
+                        "rows_updated": 0,
+                        "rows_reactivated": 0,
+                        "rows_changed": 0,
+                        "rows_skipped_duplicates": 3,
+                        "rows_skipped_no_change": 0,
+                        "rows_missing_external_id": 0,
+                        "rows_soft_deleted": 0,
+                    }
+                },
             },
             metrics_json={},
             ingest_params_json={
@@ -80,20 +92,24 @@ def run_factory(importer_app, tmp_path):
         )
         db.session.add(run)
         db.session.commit()
-        created_runs.append(run)
+        created_run_ids.append(run.id)
         return run
 
     yield _factory
 
-    for run in created_runs:
-        db.session.delete(run)
-    db.session.query(AdminLog).delete()
+    for run_id in created_run_ids:
+        existing = db.session.get(ImportRun, run_id)
+        if existing is None:
+            continue
+        db.session.delete(existing)
+    db.session.query(AdminLog).delete(synchronize_session=False)
     db.session.commit()
 
 
 @pytest.fixture
 def violation_factory(importer_app, run_factory):
     created: list[tuple[StagingVolunteer, DataQualityViolation]] = []
+    sequence = itertools.count(1)
 
     def _factory(
         *,
@@ -104,20 +120,27 @@ def violation_factory(importer_app, run_factory):
         run: ImportRun | None = None,
     ) -> DataQualityViolation:
         run_obj = run or run_factory()
+        seq = next(sequence)
+        external_id = f"ext-{run_obj.id}-{seq}"
         staging = StagingVolunteer(
             run_id=run_obj.id,
+            sequence_number=seq,
+            source_record_id=f"row-{seq}",
             external_system="csv",
+            external_id=external_id,
             payload_json={
                 "first_name": "Alice",
                 "last_name": "Example",
                 "email": "alice@example.com",
                 "phone": "+15555550123",
+                "external_id": external_id,
             },
             normalized_json={
                 "first_name": "Alice",
                 "last_name": "Example",
                 "email": "alice@example.com",
                 "phone_e164": "+15555550123",
+                "external_id": external_id,
             },
         )
         db.session.add(staging)
@@ -145,4 +168,3 @@ def violation_factory(importer_app, run_factory):
         db.session.delete(violation)
         db.session.delete(staging)
     db.session.commit()
-

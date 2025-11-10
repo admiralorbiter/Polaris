@@ -122,6 +122,7 @@ def test_importer_model_roundtrip(app):
     db.session.commit()
 
     db.session.refresh(run)
+    db.session.refresh(id_map)
     db.session.refresh(staging_row)
 
     # Relationships resolve correctly
@@ -147,6 +148,25 @@ def test_importer_model_roundtrip(app):
         db.session.commit()
     db.session.rollback()
 
+    # Soft delete lifecycle keeps history without hard deletes
+    assert id_map.is_active
+    assert id_map.deactivated_at is None
+    assert id_map.upstream_deleted_reason is None
+
+    id_map.soft_delete(reason="Removed upstream")
+    db.session.commit()
+
+    assert not id_map.is_active
+    assert id_map.deactivated_at is not None
+    assert id_map.upstream_deleted_reason == "Removed upstream"
+
+    id_map.mark_seen(run_id=run.id)
+    db.session.commit()
+
+    assert id_map.is_active
+    assert id_map.deactivated_at is None
+    assert id_map.upstream_deleted_reason is None
+
     # Check constraint on change logs (field_name cannot be empty)
     empty_field_change = ChangeLogEntry(
         run_id=run.id,
@@ -160,4 +180,3 @@ def test_importer_model_roundtrip(app):
     with pytest.raises(IntegrityError):
         db.session.commit()
     db.session.rollback()
-

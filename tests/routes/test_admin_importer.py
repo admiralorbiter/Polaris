@@ -412,20 +412,26 @@ def _create_open_violation(admin_user):
     db.session.add(run)
     db.session.commit()
 
+    external_id = f"route-ext-{run.id}"
     staging = StagingVolunteer(
         run_id=run.id,
+        sequence_number=1,
+        source_record_id="row-1",
         external_system="csv",
+        external_id=external_id,
         payload_json={
             "first_name": "Alice",
             "last_name": "Example",
             "email": "alice@example.org",
             "phone": "+15555550123",
+            "external_id": external_id,
         },
         normalized_json={
             "first_name": "Alice",
             "last_name": "Example",
             "email": "alice@example.org",
             "phone_e164": "+15555550123",
+            "external_id": external_id,
         },
     )
     db.session.add(staging)
@@ -574,4 +580,3 @@ def test_importer_admin_remediation_stats_endpoint(logged_in_admin, app, tmp_pat
     for obj in (violation, staging, original_run, second_violation, second_staging, second_run):
         db.session.delete(obj)
     db.session.commit()
-

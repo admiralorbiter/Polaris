@@ -8,21 +8,20 @@ logic to SQLAlchemy internals.
 
 from __future__ import annotations
 
+import csv
+import hashlib
+import json
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
 from io import StringIO
-from typing import Any, Iterable, Mapping, MutableMapping, Sequence
-
-import csv
-import json
-import hashlib
+from typing import Any, Iterable, Mapping, Sequence
 
 from sqlalchemy import and_, func
 from sqlalchemy.orm import Session, joinedload
 
 from flask_app.importer.pipeline.clean import promote_clean_volunteers
-from flask_app.importer.pipeline.dq import DQResult, evaluate_rules, run_minimal_dq
+from flask_app.importer.pipeline.dq import evaluate_rules, run_minimal_dq
 from flask_app.importer.pipeline.load_core import load_core_volunteers
 from flask_app.importer.utils import diff_payload, normalize_payload
 from flask_app.models import AdminLog, db
@@ -30,8 +29,8 @@ from flask_app.models.importer import (
     DataQualitySeverity,
     DataQualityStatus,
     DataQualityViolation,
-    ImportRunStatus,
     ImportRun,
+    ImportRunStatus,
     StagingRecordStatus,
     StagingVolunteer,
 )
@@ -90,7 +89,9 @@ class ViolationFilters:
         resolved_rule_codes = tuple(_normalize_string(code) for code in (rule_codes or ()) if _normalize_string(code))
         resolved_severities = tuple(_coerce_enum(DataQualitySeverity, value) for value in (severities or ()))
         resolved_statuses = tuple(_coerce_enum(DataQualityStatus, value) for value in (statuses or ()))
-        resolved_run_ids = tuple(_coerce_run_id(value) for value in (run_ids or ()) if _coerce_run_id(value) is not None)
+        resolved_run_ids = tuple(
+            _coerce_run_id(value) for value in (run_ids or ()) if _coerce_run_id(value) is not None
+        )
 
         resolved_created_from = _coerce_datetime(created_from, end_of_day=False)
         resolved_created_to = _coerce_datetime(created_to, end_of_day=True)
@@ -272,7 +273,9 @@ class DataQualityViolationService:
             serialized_errors = [
                 {
                     "rule_code": result.rule_code,
-                    "severity": result.severity.value if isinstance(result.severity, DataQualitySeverity) else str(result.severity),
+                    "severity": result.severity.value
+                    if isinstance(result.severity, DataQualitySeverity)
+                    else str(result.severity),
                     "message": result.message,
                     "details": dict(result.details),
                 }
@@ -307,7 +310,9 @@ class DataQualityViolationService:
                 serialized_errors = [
                     {
                         "rule_code": result.rule_code,
-                        "severity": result.severity.value if isinstance(result.severity, DataQualitySeverity) else str(result.severity),
+                        "severity": result.severity.value
+                        if isinstance(result.severity, DataQualitySeverity)
+                        else str(result.severity),
                         "message": result.message,
                         "details": dict(result.details),
                     }
@@ -386,7 +391,10 @@ class DataQualityViolationService:
                 "rows_skipped": clean_summary.rows_skipped,
             },
             core_summary={
-                "rows_inserted": core_summary.rows_inserted,
+                "rows_created": core_summary.rows_created,
+                "rows_updated": core_summary.rows_updated,
+                "rows_reactivated": core_summary.rows_reactivated,
+                "rows_skipped_no_change": core_summary.rows_skipped_no_change,
                 "rows_skipped_duplicates": core_summary.rows_skipped_duplicates,
             },
         )
@@ -429,11 +437,7 @@ class DataQualityViolationService:
         window_days = max(1, int(days))
         cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
 
-        query = (
-            self._base_query()
-            .options()
-            .filter(DataQualityViolation.remediation_audit_json.isnot(None))
-        )
+        query = self._base_query().options().filter(DataQualityViolation.remediation_audit_json.isnot(None))
 
         attempts = 0
         successes = 0
@@ -475,20 +479,30 @@ class DataQualityViolationService:
             field_counts=dict(field_counter),
             rule_counts=dict(rule_counter),
         )
+
     def summarize(self, violation: DataQualityViolation) -> ViolationSummary:
         return self._summarize(violation)
 
     def get_stats(self, filters: ViolationFilters) -> ViolationStats:
         query = self._apply_filters(self._base_query(), filters, include_sort=False)
 
-        by_rule_code = {rule_code: count for rule_code, count in query.with_entities(DataQualityViolation.rule_code, func.count()).group_by(DataQualityViolation.rule_code).all()}
+        by_rule_code = {
+            rule_code: count
+            for rule_code, count in query.with_entities(DataQualityViolation.rule_code, func.count())
+            .group_by(DataQualityViolation.rule_code)
+            .all()
+        }
         by_severity = {
             severity.value if isinstance(severity, DataQualitySeverity) else str(severity): count
-            for severity, count in query.with_entities(DataQualityViolation.severity, func.count()).group_by(DataQualityViolation.severity).all()
+            for severity, count in query.with_entities(DataQualityViolation.severity, func.count())
+            .group_by(DataQualityViolation.severity)
+            .all()
         }
         by_status = {
             status.value if isinstance(status, DataQualityStatus) else str(status): count
-            for status, count in query.with_entities(DataQualityViolation.status, func.count()).group_by(DataQualityViolation.status).all()
+            for status, count in query.with_entities(DataQualityViolation.status, func.count())
+            .group_by(DataQualityViolation.status)
+            .all()
         }
 
         total = sum(by_rule_code.values())
@@ -540,7 +554,12 @@ class DataQualityViolationService:
         return filename, buffer.getvalue()
 
     def list_rule_codes(self) -> list[str]:
-        rows = self.session.query(DataQualityViolation.rule_code).distinct().order_by(DataQualityViolation.rule_code.asc()).all()
+        rows = (
+            self.session.query(DataQualityViolation.rule_code)
+            .distinct()
+            .order_by(DataQualityViolation.rule_code.asc())
+            .all()
+        )
         return [row[0] for row in rows if row and row[0]]
 
     # ------------------------------------------------------------------
@@ -574,7 +593,9 @@ class DataQualityViolationService:
         import_run = violation.import_run
         preview = _build_preview(staging)
         source = import_run.source if import_run else None
-        severity = violation.severity.value if isinstance(violation.severity, DataQualitySeverity) else str(violation.severity)
+        severity = (
+            violation.severity.value if isinstance(violation.severity, DataQualitySeverity) else str(violation.severity)
+        )
         status = violation.status.value if isinstance(violation.status, DataQualityStatus) else str(violation.status)
         return ViolationSummary(
             id=violation.id,
@@ -672,7 +693,9 @@ def _build_preview(staging: StagingVolunteer | None) -> str:
     phone = normalized.get("phone_e164") or payload.get("phone")
 
     if first_name or last_name:
-        preview_parts.append(" ".join(filter(None, (str(first_name or "").strip(), str(last_name or "").strip()))).strip())
+        preview_parts.append(
+            " ".join(filter(None, (str(first_name or "").strip(), str(last_name or "").strip()))).strip()
+        )
     if email:
         preview_parts.append(str(email).strip())
     if phone:
@@ -850,7 +873,10 @@ def _update_remediation_run_metrics(
         }
     if core_summary is not None:
         remediation_metrics["core"] = {
-            "rows_inserted": getattr(core_summary, "rows_inserted", 0),
+            "rows_created": getattr(core_summary, "rows_created", 0),
+            "rows_updated": getattr(core_summary, "rows_updated", 0),
+            "rows_reactivated": getattr(core_summary, "rows_reactivated", 0),
+            "rows_skipped_no_change": getattr(core_summary, "rows_skipped_no_change", 0),
             "rows_skipped_duplicates": getattr(core_summary, "rows_skipped_duplicates", 0),
         }
     if errors:
@@ -895,5 +921,3 @@ def _flatten_mapping(candidate: object) -> str:
             value_str = f"'{value_str}"
         parts.append(f"{key}={value_str}")
     return "; ".join(parts)
-
-

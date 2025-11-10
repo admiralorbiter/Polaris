@@ -190,7 +190,7 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 **Implementation Notes**
 - Validated staging rows promote into `clean_volunteers` with normalized payloads, stable checksum (`staging_volunteers.checksum` copy), and provenance (`load_action`, core IDs when inserted).  
 - Core load runs synchronously today, inserts `contacts`/`volunteers` plus primary `contact_emails`/`contact_phones`. Duplicate emails stay in clean w/ `load_action="skipped_duplicate"` and mark staging rows `LOADED` with explanatory `last_error`.  
-- `ImportRun.counts_json.core.volunteers` tracks `{rows_processed, rows_inserted, rows_skipped_duplicates, dry_run}` while `metrics_json` mirrors attempted inserts for dry-runs. Logger emits per-run summaries and duplicate email list for observability.  
+- `ImportRun.counts_json.core.volunteers` tracks `{rows_processed, rows_created, rows_updated, rows_reactivated, rows_changed, rows_skipped_duplicates, rows_skipped_no_change, rows_missing_external_id, rows_soft_deleted, dry_run}` while `metrics_json` mirrors attempted creations during dry-runs. Logger emits per-run summaries and duplicate email/no-change lists for observability.  
 - CLI/worker paths emit combined summaries; `flask importer run --summary-json` outputs machine-readable stats for automation/regression scripts. Golden data includes `volunteers_duplicate_skip.csv` to verify skip behavior.
 
 ### IMP-13 — CLI & admin action: start a run _(3 pts)_
@@ -283,7 +283,7 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 **Status**: ✅ Delivered in Sprint 2 — Dashboard lists runs with summary cards, auto-refresh, drill-down modal, retry/download, and dry-run indicators.
 
 **UI Wireframe & Layout**:
-- **Main table**: Sortable columns (run_id, source, status badge, started_at, ended_at, duration, rows_staged, rows_validated, rows_quarantined, rows_inserted, rows_skipped_duplicates)
+- **Main table**: Sortable columns (run_id, source, status badge, started_at, ended_at, duration, rows_staged, rows_validated, rows_quarantined, rows_created, rows_updated, rows_skipped_no_change, rows_skipped_duplicates)
 - **Status badges**: Color-coded (pending=yellow, running=blue, succeeded=green, failed=red, partially_failed=orange)
 - **Filters**: Dropdowns for source (`csv`, future adapters), status (all/pending/running/succeeded/failed), date range picker (last 7/30/90 days, custom)
 - **Pagination**: 25/50/100 rows per page; total count displayed
@@ -509,15 +509,17 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 **Status**: 🚧 Planned for Sprint 3 kickoff.
 **Implementation Notes (Sprint 3 prep)**:
 - Reuse `external_id_map` schema from IMP-2; ensure staging rows populate `external_system`/`external_id` before promotion.
+- Add soft-delete columns (`deactivated_at`, `upstream_deleted_reason`) and normalize `is_active` semantics so loader/reactivation logic can avoid destructive deletes while preserving history.
 - Loader should lookup `external_id_map` to decide between `UPDATE` vs `INSERT`, writing outcomes to `counts_json.core.volunteers`.
 - Persist provenance in `change_log` when updates occur; include `ingest_version` for conflict tracking.
-- Expose run-level metrics: `rows_updated`, `rows_created`, `rows_skipped_no_change`.
+- Expose run-level metrics: `rows_updated`, `rows_created`, `rows_skipped_no_change`, `rows_missing_external_id`, `rows_reactivated`.
 
 **Implementation Outline**:
 - Introduce shared `resolve_import_target(volunteer_row)` wrapping normalization and `external_id_map` lookup for loader + remediation reuse.
 - On misses, create core person and seed `external_id_map` with `first_seen_at`; on hits, route to update workflow and bump `last_seen_at`.
 - Update promotion job to persist `ingest_version` on `external_id_map` and tie `change_log` entries back to the triggering run.
 - Adjust retry controller to short-circuit inserts when `external_id_map` already links a core record.
+- Surface actionable errors when incoming payloads omit `external_id`; quarantine those rows with descriptive remediation guidance.
 
 **Data Model & Storage**:
 - Add covering index on `external_id_map(external_system, external_id, core_person_id)`.
@@ -525,18 +527,18 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Append nullable `ingest_version` column (Alembic) populated from run metadata.
 
 **Metrics & Telemetry**:
-- Emit Prometheus counters `importer_idempotent_rows_created`, `importer_idempotent_rows_updated`, `importer_idempotent_rows_skipped`.
-- Log `idempotency_action` and `external_id_hit` fields for each loader decision.
-- Surface counters in run summary payloads for dashboard consumption.
+- Emit Prometheus counters `importer_idempotent_rows_created_total`, `importer_idempotent_rows_updated_total`, `importer_idempotent_rows_skipped_total` (labeled by source system).
+- Log `idempotency_action` and `external_id_hit` fields for each loader decision alongside soft-delete transitions.
+- Surface counters (`rows_created`, `rows_updated`, `rows_reactivated`, `rows_skipped_no_change`, `rows_missing_external_id`, `rows_skipped_duplicates`) in run summary payloads for dashboard consumption.
 
 **Testing Expectations**:
 - **Unit**: `resolve_import_target`, loader branching, change-log serialization.
 - **Integration**: Replay same file after success + after payload change; assert no duplicate inserts and counters update correctly.
-- **Regression**: Verify imports missing external IDs fail fast with actionable errors.
+- **Regression**: Verify imports missing external IDs fail fast with actionable errors and surface quarantine status.
 - **Golden data**: Extend dataset with repeated external IDs covering insert/update/skip cases.
 
 **Open Questions / Clarifications**:
-- Do we support soft deletes or reassignments in `external_id_map` when a record is removed upstream?
+- ✅ Soft deletes handled: `external_id_map` retains inactive links (`is_active=false`, `deactivated_at`, `upstream_deleted_reason`) and loader reactivates them on reappearance.
 - Should modified retries increment a distinct `rows_changed` counter?
 - Who will implement FE changes for the new idempotency counters in dashboards?
 

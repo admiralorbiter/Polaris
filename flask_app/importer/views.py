@@ -13,10 +13,7 @@ from flask_login import current_user
 from sqlalchemy.exc import NoResultFound
 
 from config.monitoring import ImporterMonitoring
-from flask_app.importer.pipeline.dq_service import (
-    DataQualityViolationService,
-    ViolationFilters,
-)
+from flask_app.importer.pipeline.dq_service import DataQualityViolationService, ViolationFilters
 from flask_app.importer.pipeline.run_service import ImportRunService, RunFilters
 from flask_app.utils.importer import is_importer_enabled
 from flask_app.utils.permissions import has_permission
@@ -176,8 +173,14 @@ def _serialize_summary(summary):
         "rows_staged": summary.rows_staged,
         "rows_validated": summary.rows_validated,
         "rows_quarantined": summary.rows_quarantined,
-        "rows_inserted": summary.rows_inserted,
+        "rows_created": summary.rows_created,
+        "rows_updated": summary.rows_updated,
+        "rows_reactivated": summary.rows_reactivated,
+        "rows_changed": summary.rows_changed,
         "rows_skipped_duplicates": summary.rows_skipped_duplicates,
+        "rows_skipped_no_change": summary.rows_skipped_no_change,
+        "rows_missing_external_id": summary.rows_missing_external_id,
+        "rows_soft_deleted": summary.rows_soft_deleted,
         "triggered_by": summary.triggered_by,
         "can_retry": summary.can_retry,
         "counts_digest": summary.counts_digest,
@@ -241,7 +244,9 @@ def importer_runs_list():
         result = _run_service.list_runs(filters)
     except Exception as exc:  # pragma: no cover - defensive logging
         current_app.logger.exception("Importer runs list failed.", exc_info=exc)
-        ImporterMonitoring.record_runs_list(duration_seconds=time.perf_counter() - start_time, status="error", result_count=0)
+        ImporterMonitoring.record_runs_list(
+            duration_seconds=time.perf_counter() - start_time, status="error", result_count=0
+        )
         return _json_error("Failed to load runs.", HTTPStatus.INTERNAL_SERVER_ERROR)
 
     duration = time.perf_counter() - start_time
@@ -482,7 +487,9 @@ def importer_violations_list():
         result = _dq_service.list_violations(filters)
     except Exception as exc:  # pragma: no cover - defensive logging
         current_app.logger.exception("Importer violations list failed.", exc_info=exc)
-        ImporterMonitoring.record_dq_list(duration_seconds=time.perf_counter() - start_time, status="error", result_count=0)
+        ImporterMonitoring.record_dq_list(
+            duration_seconds=time.perf_counter() - start_time, status="error", result_count=0
+        )
         return _json_error("Failed to load violations.", HTTPStatus.INTERNAL_SERVER_ERROR)
 
     duration = time.perf_counter() - start_time
@@ -620,7 +627,9 @@ def importer_violations_export():
         filename, csv_content = _dq_service.export_csv(filters)
     except Exception as exc:  # pragma: no cover - defensive logging
         current_app.logger.exception("Importer violations export failed.", exc_info=exc)
-        ImporterMonitoring.record_dq_export(duration_seconds=time.perf_counter() - start_time, status="error", row_count=0)
+        ImporterMonitoring.record_dq_export(
+            duration_seconds=time.perf_counter() - start_time, status="error", row_count=0
+        )
         return _json_error("Failed to export violations.", HTTPStatus.INTERNAL_SERVER_ERROR)
 
     duration = time.perf_counter() - start_time

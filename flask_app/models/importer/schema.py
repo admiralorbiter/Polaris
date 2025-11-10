@@ -45,16 +45,16 @@ class ImportRun(BaseModel):
     dry_run: Mapped[bool] = mapped_column(db.Boolean, nullable=False, default=False)
     started_at: Mapped[datetime | None] = mapped_column(db.DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(db.DateTime(timezone=True))
-    triggered_by_user_id: Mapped[int | None] = mapped_column(
-        ForeignKey("users.id"), nullable=True
-    )
+    triggered_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     counts_json: Mapped[dict | None] = mapped_column(db.JSON, nullable=True)
     metrics_json: Mapped[dict | None] = mapped_column(db.JSON, nullable=True)
     anomaly_flags: Mapped[dict | None] = mapped_column(db.JSON, nullable=True)
     error_summary: Mapped[str | None] = mapped_column(db.Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(db.Text, nullable=True)
     ingest_params_json: Mapped[dict | None] = mapped_column(
-        db.JSON, nullable=True, comment="Stored parameters for retry support (file_path, source_system, dry_run, keep_file)"
+        db.JSON,
+        nullable=True,
+        comment="Stored parameters for retry support (file_path, source_system, dry_run, keep_file)",
     )
 
     triggered_by_user = relationship("User", foreign_keys=[triggered_by_user_id])
@@ -101,9 +101,7 @@ class ImportRun(BaseModel):
         passive_deletes=True,
     )
 
-    __table_args__ = (
-        Index("idx_import_runs_source_status", "source", "status"),
-    )
+    __table_args__ = (Index("idx_import_runs_source_status", "source", "status"),)
 
 
 class StagingRecordStatus(str, enum.Enum):
@@ -248,9 +246,7 @@ class DataQualityViolation(BaseModel):
     staging_row = relationship("StagingVolunteer", back_populates="dq_violations")
     remediated_by_user = relationship("User", foreign_keys=[remediated_by_user_id])
 
-    __table_args__ = (
-        Index("idx_dq_violations_run_rule", "run_id", "rule_code"),
-    )
+    __table_args__ = (Index("idx_dq_violations_run_rule", "run_id", "rule_code"),)
 
 
 class CleanVolunteer(BaseModel):
@@ -388,6 +384,8 @@ class ExternalIdMap(BaseModel):
         default=lambda: datetime.now(timezone.utc),
     )
     is_active: Mapped[bool] = mapped_column(db.Boolean, nullable=False, default=True)
+    deactivated_at: Mapped[datetime | None] = mapped_column(db.DateTime(timezone=True), nullable=True)
+    upstream_deleted_reason: Mapped[str | None] = mapped_column(db.String(255), nullable=True)
     metadata_json: Mapped[dict | None] = mapped_column(db.JSON, nullable=True)
 
     import_run = relationship("ImportRun", back_populates="external_ids")
@@ -404,7 +402,52 @@ class ExternalIdMap(BaseModel):
             "external_system",
             "external_id",
         ),
+        Index(
+            "idx_external_id_map_active_entity",
+            "entity_type",
+            "entity_id",
+            "is_active",
+        ),
     )
+
+    def mark_seen(
+        self,
+        *,
+        run_id: int | None = None,
+        seen_at: datetime | None = None,
+    ) -> None:
+        """
+        Update bookkeeping for an external identifier that was observed again.
+
+        If the identifier had been soft-deleted previously, it is automatically
+        reactivated so downstream consumers do not treat the record as removed.
+        """
+
+        now = seen_at or datetime.now(timezone.utc)
+        self.last_seen_at = now
+        if run_id is not None:
+            self.run_id = run_id
+        if not self.is_active:
+            self.is_active = True
+            self.deactivated_at = None
+            self.upstream_deleted_reason = None
+
+    def soft_delete(
+        self,
+        *,
+        reason: str | None = None,
+        deactivated_at: datetime | None = None,
+    ) -> None:
+        """
+        Mark the external identifier as inactive without removing history.
+        """
+
+        if self.is_active:
+            self.is_active = False
+            self.deactivated_at = deactivated_at or datetime.now(timezone.utc)
+        else:
+            self.deactivated_at = self.deactivated_at or datetime.now(timezone.utc)
+        self.upstream_deleted_reason = reason
 
 
 class MergeLog(BaseModel):
@@ -479,4 +522,3 @@ class ChangeLogEntry(BaseModel):
         Index("idx_change_log_entity", "entity_type", "entity_id"),
         CheckConstraint("field_name <> ''", name="ck_change_log_field_non_empty"),
     )
-

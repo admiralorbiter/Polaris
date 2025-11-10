@@ -180,8 +180,12 @@
           </td>
           <td>
             <div class="small">
-              <span class="text-success">${run.rows_inserted}</span> inserted /
-              <span class="text-muted">${run.rows_skipped_duplicates}</span> dupes
+              <span class="text-success">${run.rows_created}</span> created /
+              <span class="text-primary">${run.rows_updated}</span> updated /
+              <span class="text-muted">${run.rows_skipped_no_change}</span> no change
+            </div>
+            <div class="small text-muted">
+              ${run.rows_skipped_duplicates} dupes · ${run.rows_missing_external_id} missing IDs
             </div>
           </td>
           <td>${formatDuration(run.duration_seconds)}</td>
@@ -620,4 +624,3 @@
     loadRuns();
   });
 })();
-

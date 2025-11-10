@@ -50,7 +50,7 @@ def test_run_detail(importer_app, client, run_factory):
     assert response.status_code == 200
     detail = response.get_json()
     assert detail["run_id"] == run.id
-    assert detail["counts_json"]["core"]["volunteers"]["rows_inserted"] == 45
+    assert detail["counts_json"]["core"]["volunteers"]["rows_created"] == 45
 
 
 def test_run_stats(importer_app, client, run_factory):
@@ -107,4 +107,3 @@ def test_admin_nav_hides_importer_runs_when_disabled(app, client):
     assert response.status_code == 200
     html = response.data.decode("utf-8")
     assert "/admin/imports/runs/dashboard" not in html
-

@@ -1,5 +1,4 @@
 import io
-
 from pathlib import Path
 
 from flask_app.importer.pipeline import (
@@ -92,7 +91,7 @@ def test_full_pipeline_dry_run_with_golden_dataset(app):
     assert dq_summary.dry_run is True
     assert clean_summary.dry_run is True
     assert core_summary.dry_run is True
-    assert core_summary.rows_inserted == 0
+    assert core_summary.rows_created == 0
     assert CleanVolunteer.query.count() == 0
     metrics_core = run.metrics_json["core"]["volunteers"]
-    assert metrics_core["rows_inserted"] == 0
+    assert metrics_core["rows_created"] == 0

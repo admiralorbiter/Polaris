@@ -40,7 +40,7 @@ To inspect duplicate skips in the core load stage:
 flask importer run --source csv --file ops/testdata/importer_golden_dataset_v0/volunteers_duplicate_skip.csv --summary-json
 ```
 
-The table output will show `core_duplicates: 1`, and the emitted JSON summary will include `"core": {"rows_inserted": 1, "rows_skipped_duplicates": 1, ...}` for automation or regression assertions.
+The table output will show `core_duplicates: 1`, and the emitted JSON summary will include `"core": {"rows_created": 1, "rows_updated": 0, "rows_skipped_duplicates": 1, ...}` for automation or regression assertions.
 
 ## Extending the Dataset
 
@@ -54,4 +54,3 @@ The table output will show `core_duplicates: 1`, and the emitted JSON summary wi
 - **`volunteers_changed_payload.csv` (planned)** — same `external_id` with updated contact details to exercise update-vs-insert survivorship logic.
 - **`volunteers_email_vs_phone.csv` (planned)** — conflicting records where email matches but phone differs and vice versa; validates deterministic dedupe paths.
 - Update this README with expected counters once Sprint 3 implementation lands, including `rows_updated`, `dedupe.decisions`, and change-log assertions.
-

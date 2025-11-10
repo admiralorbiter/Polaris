@@ -20,9 +20,7 @@ class MonitoringConfig:
     # Error Alerting Configuration
     ERROR_ALERTING_ENABLED = os.environ.get("ERROR_ALERTING_ENABLED", "false").lower() == "true"
     ERROR_EMAIL_RECIPIENTS = (
-        os.environ.get("ERROR_EMAIL_RECIPIENTS", "").split(",")
-        if os.environ.get("ERROR_EMAIL_RECIPIENTS")
-        else []
+        os.environ.get("ERROR_EMAIL_RECIPIENTS", "").split(",") if os.environ.get("ERROR_EMAIL_RECIPIENTS") else []
     )
 
     # Logging Configuration
@@ -44,9 +42,7 @@ class MonitoringConfig:
     MAIL_USERNAME = os.environ.get("MAIL_USERNAME")
     MAIL_PASSWORD = os.environ.get("MAIL_PASSWORD")
     MAIL_FROM = os.environ.get("MAIL_FROM", "noreply@example.com")
-    ADMIN_EMAILS = (
-        os.environ.get("ADMIN_EMAILS", "").split(",") if os.environ.get("ADMIN_EMAILS") else []
-    )
+    ADMIN_EMAILS = os.environ.get("ADMIN_EMAILS", "").split(",") if os.environ.get("ADMIN_EMAILS") else []
 
     # Rate Limiting for Alerts
     EMAIL_ALERT_RATE_LIMIT = int(os.environ.get("EMAIL_ALERT_RATE_LIMIT", 5))
@@ -286,6 +282,33 @@ class ImporterMonitoring:
         if Histogram
         else None
     )
+    IDEMPOTENT_ROWS_CREATED = (
+        Counter(
+            "importer_idempotent_rows_created_total",
+            "Total rows created by the importer idempotent loader.",
+            labelnames=("source",),
+        )
+        if Counter
+        else None
+    )
+    IDEMPOTENT_ROWS_UPDATED = (
+        Counter(
+            "importer_idempotent_rows_updated_total",
+            "Total rows updated by the importer idempotent loader.",
+            labelnames=("source",),
+        )
+        if Counter
+        else None
+    )
+    IDEMPOTENT_ROWS_SKIPPED = (
+        Counter(
+            "importer_idempotent_rows_skipped_total",
+            "Total rows skipped with no changes by the importer idempotent loader.",
+            labelnames=("source",),
+        )
+        if Counter
+        else None
+    )
     RUNS_ENQUEUE_COUNTER = (
         Counter(
             "importer_runs_enqueued_total",
@@ -367,3 +390,20 @@ class ImporterMonitoring:
             cls.RUNS_ENQUEUE_COUNTER.labels(dry_run=dry_run_label).inc()
         if cls.RUNS_ENQUEUE_BY_USER_COUNTER:
             cls.RUNS_ENQUEUE_BY_USER_COUNTER.labels(user_id=str(user_id), dry_run=dry_run_label).inc()
+
+    @classmethod
+    def record_idempotent_outcomes(
+        cls,
+        *,
+        source: str | None,
+        created: int,
+        updated: int,
+        skipped: int,
+    ) -> None:
+        label = source or "unknown"
+        if cls.IDEMPOTENT_ROWS_CREATED and created:
+            cls.IDEMPOTENT_ROWS_CREATED.labels(source=label).inc(max(created, 0))
+        if cls.IDEMPOTENT_ROWS_UPDATED and updated:
+            cls.IDEMPOTENT_ROWS_UPDATED.labels(source=label).inc(max(updated, 0))
+        if cls.IDEMPOTENT_ROWS_SKIPPED and skipped:
+            cls.IDEMPOTENT_ROWS_SKIPPED.labels(source=label).inc(max(skipped, 0))

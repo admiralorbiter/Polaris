@@ -11,7 +11,9 @@ from flask_app.models.importer.schema import ImportRun, ImportRunStatus, Staging
 def _write_csv(tmp_path: Path) -> Path:
     csv_file = tmp_path / "volunteers.csv"
     csv_file.write_text(
-        "first_name,last_name,email\n" "Ada,Lovelace,ada@example.org\n" "Grace,Hopper,grace@example.org\n",
+        "external_id,first_name,last_name,email\n"
+        "vol-1,Ada,Lovelace,ada@example.org\n"
+        "vol-2,Grace,Hopper,grace@example.org\n",
         encoding="utf-8",
     )
     return csv_file
@@ -144,7 +146,8 @@ def test_importer_run_cli_stages_data_inline(app, runner, tmp_path):
     clean_counts = run.counts_json["clean"]["volunteers"]
     assert clean_counts["rows_promoted"] == 2
     core_counts = run.counts_json["core"]["volunteers"]
-    assert core_counts["rows_inserted"] == 2
+    assert core_counts["rows_created"] == 2
+    assert core_counts["rows_updated"] == 0
     assert core_counts["rows_skipped_duplicates"] == 0
 
     staged_rows = db.session.query(StagingVolunteer).all()
@@ -185,7 +188,8 @@ def test_importer_run_cli_dry_run_skips_writes(app, runner, tmp_path):
     assert clean_counts["rows_promoted"] == 0
     assert clean_counts["dry_run"] is True
     core_counts = run.counts_json["core"]["volunteers"]
-    assert core_counts["rows_inserted"] == 0
+    assert core_counts["rows_created"] == 0
+    assert core_counts["rows_updated"] == 0
     assert core_counts["dry_run"] is True
     assert db.session.query(StagingVolunteer).count() == 0
 
@@ -211,7 +215,8 @@ def test_importer_run_cli_summary_json(app, runner, tmp_path):
     lines = result.output.splitlines()
     json_start = next(i for i, line in enumerate(lines) if line.strip().startswith("{"))
     summary_payload = json.loads("\n".join(lines[json_start:]))
-    assert summary_payload["core"]["rows_inserted"] == 2
+    assert summary_payload["core"]["rows_created"] == 2
+    assert summary_payload["core"]["rows_updated"] == 0
     assert summary_payload["core"]["rows_skipped_duplicates"] == 0
 
 

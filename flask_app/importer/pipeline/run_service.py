@@ -123,8 +123,14 @@ class RunSummary:
     rows_staged: int
     rows_validated: int
     rows_quarantined: int
-    rows_inserted: int
+    rows_created: int
+    rows_updated: int
+    rows_reactivated: int
+    rows_changed: int
     rows_skipped_duplicates: int
+    rows_skipped_no_change: int
+    rows_missing_external_id: int
+    rows_soft_deleted: int
     triggered_by: Mapping[str, Any] | None
     can_retry: bool
     counts_digest: Mapping[str, Any]
@@ -181,7 +187,9 @@ class ImportRunService:
         summaries = [self._summarize_run(run) for run in paginated]
 
         total_pages = (total + filters.page_size - 1) // filters.page_size
-        return RunListResult(items=summaries, total=total, page=filters.page, page_size=filters.page_size, total_pages=total_pages)
+        return RunListResult(
+            items=summaries, total=total, page=filters.page, page_size=filters.page_size, total_pages=total_pages
+        )
 
     def get_run(self, run_id: int) -> ImportRun:
         run = self._base_query().filter(ImportRun.id == run_id).one_or_none()
@@ -201,11 +209,12 @@ class ImportRunService:
 
         status_counts = {
             status.value if isinstance(status, ImportRunStatus) else str(status): count
-            for status, count in (
-                query.with_entities(ImportRun.status, func.count()).group_by(ImportRun.status).all()
-            )
+            for status, count in (query.with_entities(ImportRun.status, func.count()).group_by(ImportRun.status).all())
         }
-        source_counts = {source: count for source, count in (query.with_entities(ImportRun.source, func.count()).group_by(ImportRun.source).all())}
+        source_counts = {
+            source: count
+            for source, count in (query.with_entities(ImportRun.source, func.count()).group_by(ImportRun.source).all())
+        }
         dry_run_counts = {"true": 0, "false": 0}
         for dry_run_value, count in (
             query.with_entities(ImportRun.dry_run, func.count()).group_by(ImportRun.dry_run).all()
@@ -217,16 +226,13 @@ class ImportRunService:
         return RunStats(total=total, statuses=status_counts, sources=source_counts, dry_runs=dry_run_counts)
 
     def list_sources(self) -> list[str]:
-        rows = (
-            self.session.query(ImportRun.source)
-            .distinct()
-            .order_by(ImportRun.source.asc())
-            .all()
-        )
+        rows = self.session.query(ImportRun.source).distinct().order_by(ImportRun.source.asc()).all()
         return [row[0] for row in rows if row and row[0]]
 
     @staticmethod
-    def record_audit_view(user_id: int, run_id: int | None, *, ip_address: str | None = None, user_agent: str | None = None) -> None:
+    def record_audit_view(
+        user_id: int, run_id: int | None, *, ip_address: str | None = None, user_agent: str | None = None
+    ) -> None:
         """Persist an audit trail entry for dashboard interactions."""
 
         AdminLog.log_action(
@@ -304,6 +310,15 @@ class ImportRunService:
 
         can_retry = _can_retry(run)
 
+        rows_created = int(core_counts.get("rows_created", 0) or 0)
+        rows_updated = int(core_counts.get("rows_updated", 0) or 0)
+        rows_reactivated = int(core_counts.get("rows_reactivated", 0) or 0)
+        rows_changed = int(core_counts.get("rows_changed", rows_updated) or 0)
+        rows_skipped_duplicates = int(core_counts.get("rows_skipped_duplicates", 0) or 0)
+        rows_skipped_no_change = int(core_counts.get("rows_skipped_no_change", 0) or 0)
+        rows_missing_external_id = int(core_counts.get("rows_missing_external_id", 0) or 0)
+        rows_soft_deleted = int(core_counts.get("rows_soft_deleted", 0) or 0)
+
         return RunSummary(
             id=run.id,
             source=run.source,
@@ -316,8 +331,14 @@ class ImportRunService:
             rows_staged=int(staging_counts.get("rows_staged", 0) or 0),
             rows_validated=int(dq_counts.get("rows_validated", 0) or 0),
             rows_quarantined=int(dq_counts.get("rows_quarantined", 0) or 0),
-            rows_inserted=int(core_counts.get("rows_inserted", 0) or 0),
-            rows_skipped_duplicates=int(core_counts.get("rows_skipped_duplicates", 0) or 0),
+            rows_created=rows_created,
+            rows_updated=rows_updated,
+            rows_reactivated=rows_reactivated,
+            rows_changed=rows_changed,
+            rows_skipped_duplicates=rows_skipped_duplicates,
+            rows_skipped_no_change=rows_skipped_no_change,
+            rows_missing_external_id=rows_missing_external_id,
+            rows_soft_deleted=rows_soft_deleted,
             triggered_by=triggered_by_user,
             can_retry=can_retry,
             counts_digest=summary_counts,
@@ -428,5 +449,3 @@ def _can_retry(run: ImportRun) -> bool:
         return Path(file_path).exists()
     except (TypeError, ValueError):
         return False
-
-

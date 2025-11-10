@@ -142,13 +142,12 @@ def _format_summary(
     clean_summary: CleanPromotionSummary,
     core_summary: CoreLoadSummary,
 ) -> str:
+    clean_promoted_value = clean_summary.rows_promoted if not clean_summary.dry_run else clean_summary.rows_considered
     header_preview = ", ".join(staging_summary.header) if staging_summary.header else "n/a"
     status_value = run.status.value if hasattr(run.status, "value") else str(run.status)
     rule_counts = dq_summary.rule_counts
     rule_counts_display = (
-        ", ".join(f"{code}={count}" for code, count in sorted(rule_counts.items()))
-        if rule_counts
-        else "none"
+        ", ".join(f"{code}={count}" for code, count in sorted(rule_counts.items())) if rule_counts else "none"
     )
     return (
         f"Run {run.id} completed with status {status_value} (dry_run={staging_summary.dry_run}).\n"
@@ -160,10 +159,14 @@ def _format_summary(
         f"  dq_rows_validated  : {dq_summary.rows_validated}\n"
         f"  dq_rows_quarantined: {dq_summary.rows_quarantined}\n"
         f"  dq_rule_counts     : {rule_counts_display}\n"
-        f"  clean_promoted     : {clean_summary.rows_promoted if not clean_summary.dry_run else clean_summary.rows_considered}\n"
+        f"  clean_promoted     : {clean_promoted_value}\n"
         f"  clean_skipped      : {clean_summary.rows_skipped}\n"
-        f"  core_inserted      : {core_summary.rows_inserted if not core_summary.dry_run else core_summary.rows_processed}\n"
-        f"  core_duplicates    : {core_summary.rows_skipped_duplicates}"
+        f"  core_created       : {core_summary.rows_created}\n"
+        f"  core_updated       : {core_summary.rows_updated}\n"
+        f"  core_reactivated   : {core_summary.rows_reactivated}\n"
+        f"  core_no_change     : {core_summary.rows_skipped_no_change}\n"
+        f"  core_duplicates    : {core_summary.rows_skipped_duplicates}\n"
+        f"  core_missing_ids   : {core_summary.rows_missing_external_id}"
     )
 
 
@@ -199,8 +202,14 @@ def _build_summary_payload(
         },
         "core": {
             "rows_processed": core_summary.rows_processed,
-            "rows_inserted": core_summary.rows_inserted,
+            "rows_created": core_summary.rows_created,
+            "rows_updated": core_summary.rows_updated,
+            "rows_reactivated": core_summary.rows_reactivated,
+            "rows_changed": core_summary.rows_changed,
             "rows_skipped_duplicates": core_summary.rows_skipped_duplicates,
+            "rows_skipped_no_change": core_summary.rows_skipped_no_change,
+            "rows_missing_external_id": core_summary.rows_missing_external_id,
+            "rows_soft_deleted": core_summary.rows_soft_deleted,
             "duplicate_emails": list(core_summary.duplicate_emails),
             "dry_run": core_summary.dry_run,
         },
@@ -407,9 +416,7 @@ def importer_run(
     if summary_json:
         click.echo(
             json.dumps(
-                _build_summary_payload(
-                    run, staging_summary, dq_summary, clean_summary, core_summary
-                ),
+                _build_summary_payload(run, staging_summary, dq_summary, clean_summary, core_summary),
                 indent=2,
                 sort_keys=True,
             )

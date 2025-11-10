@@ -12,8 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from flask import current_app
 from celery import shared_task
+from flask import current_app
 
 from flask_app.importer.pipeline import (
     load_core_volunteers,
@@ -105,7 +105,10 @@ def ingest_csv(
                 "importer_run_id": run_id,
                 "importer_status": run.status.value,
                 "importer_rows_processed": staging_summary.rows_processed,
-                "importer_rows_inserted": core_summary.rows_inserted,
+                "importer_rows_created": core_summary.rows_created,
+                "importer_rows_updated": core_summary.rows_updated,
+                "importer_rows_skipped_no_change": core_summary.rows_skipped_no_change,
+                "importer_rows_reactivated": core_summary.rows_reactivated,
                 "importer_rows_quarantined": dq_summary.rows_quarantined,
                 "importer_dry_run": staging_summary.dry_run,
             },
@@ -121,8 +124,12 @@ def ingest_csv(
             "dq_rows_quarantined": dq_summary.rows_quarantined,
             "dq_rule_counts": dict(dq_summary.rule_counts),
             "clean_rows_promoted": clean_summary.rows_promoted,
-            "core_rows_inserted": core_summary.rows_inserted,
+            "core_rows_created": core_summary.rows_created,
+            "core_rows_updated": core_summary.rows_updated,
+            "core_rows_reactivated": core_summary.rows_reactivated,
+            "core_rows_skipped_no_change": core_summary.rows_skipped_no_change,
             "core_rows_duplicates": core_summary.rows_skipped_duplicates,
+            "core_rows_missing_external_id": core_summary.rows_missing_external_id,
         }
     except Exception as exc:  # pragma: no cover - defensive logging path
         db.session.rollback()
