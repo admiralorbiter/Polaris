@@ -17,8 +17,8 @@ Each CSV includes a header row. Use these files with `flask importer run --sourc
 |------------------------|---------|----------------------------------------------------------------------------------|
 | `volunteers_valid.csv`   | 3       | All rows land in `staging_volunteers`, pass validation, and appear in counts.    |
 | `volunteers_invalid.csv` | 3       | Rows land but are quarantined with rule codes (`VOL_CONTACT_REQUIRED`, `VOL_EMAIL_FORMAT`, `VOL_PHONE_E164`). |
-| `volunteers_duplicates.csv` | 2   | Both rows land; deterministic dedupe should flag them as a potential duplicate. |
-| `volunteers_duplicate_skip.csv` | 2 | First row inserts into core; second auto-resolves against the existing record (`core.rows_deduped_auto=1`, `dedupe_suggestions.decision=AUTO_MERGED`). |
+| `volunteers_duplicates.csv` | 2   | First row inserts; second deterministically merges into the same volunteer (`core.rows_deduped_auto=1`, dashboard auto-resolved card increments). |
+| `volunteers_duplicate_skip.csv` | 2 | First row inserts into core; second auto-resolves against the existing record (`core.rows_deduped_auto=1`, `dedupe_suggestions.decision=AUTO_MERGED`, dashboard card + row badge reflect the merge). |
 
 Document additional nuances (DQ messages, counts, etc.) as the importer matures. For IMP-11, expect the invalid CSV to yield the following per-rule counts when run via CLI or worker:
 
@@ -40,7 +40,7 @@ To inspect duplicate skips in the core load stage:
 flask importer run --source csv --file ops/testdata/importer_golden_dataset_v0/volunteers_duplicate_skip.csv --summary-json
 ```
 
-The emitted JSON summary now includes `"core": {"rows_created": 0, "rows_updated": 1, "rows_deduped_auto": 1, ...}` plus a `dedupe_suggestions` record with `decision="auto_merged"` and `match_type="email"`.
+The emitted JSON summary now includes `"core": {"rows_created": 0, "rows_updated": 1, "rows_deduped_auto": 1, ...}` plus a `dedupe_suggestions` record with `decision="auto_merged"` and `match_type="email"`. In the Importer Runs dashboard, the "Auto-resolved duplicates" summary card and per-run badge should reflect the deterministic merge count, and the run detail modal will display "1 row auto-resolved."
 
 ## Extending the Dataset
 

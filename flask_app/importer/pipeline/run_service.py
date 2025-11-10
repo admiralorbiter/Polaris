@@ -129,6 +129,7 @@ class RunSummary:
     rows_changed: int
     rows_skipped_duplicates: int
     rows_skipped_no_change: int
+    rows_deduped_auto: int
     rows_missing_external_id: int
     rows_soft_deleted: int
     triggered_by: Mapping[str, Any] | None
@@ -314,6 +315,7 @@ class ImportRunService:
         rows_updated = int(core_counts.get("rows_updated", 0) or 0)
         rows_reactivated = int(core_counts.get("rows_reactivated", 0) or 0)
         rows_changed = int(core_counts.get("rows_changed", rows_updated) or 0)
+        rows_deduped_auto = int(core_counts.get("rows_deduped_auto", 0) or 0)
         rows_skipped_duplicates = int(core_counts.get("rows_skipped_duplicates", 0) or 0)
         rows_skipped_no_change = int(core_counts.get("rows_skipped_no_change", 0) or 0)
         rows_missing_external_id = int(core_counts.get("rows_missing_external_id", 0) or 0)
@@ -337,6 +339,7 @@ class ImportRunService:
             rows_changed=rows_changed,
             rows_skipped_duplicates=rows_skipped_duplicates,
             rows_skipped_no_change=rows_skipped_no_change,
+            rows_deduped_auto=rows_deduped_auto,
             rows_missing_external_id=rows_missing_external_id,
             rows_soft_deleted=rows_soft_deleted,
             triggered_by=triggered_by_user,

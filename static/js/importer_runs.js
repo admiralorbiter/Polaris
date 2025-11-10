@@ -44,6 +44,12 @@
       isLoading: false,
       lastResponse: null,
       modalInstance: bootstrapModal ? bootstrapModal.getOrCreateInstance(elements.modalElement) : null,
+      dedupeSummary: {
+        totalRows: 0,
+        runsWithAuto: 0,
+        topRunId: null,
+        topRunCount: 0,
+      },
     };
 
     function withLoading(callback) {
@@ -58,6 +64,29 @@
         elements.loadingOverlay.classList.add("d-none");
         elements.refreshSpinner.classList.add("d-none");
       });
+    }
+
+    function summarizeDedupe(runs) {
+      return runs.reduce(
+        (acc, run) => {
+          const value = Number(run.rows_deduped_auto || 0);
+          if (value > 0) {
+            acc.totalRows += value;
+            acc.runsWithAuto += 1;
+            if (value > acc.topRunCount) {
+              acc.topRunCount = value;
+              acc.topRunId = run.id;
+            }
+          }
+          return acc;
+        },
+        {
+          totalRows: 0,
+          runsWithAuto: 0,
+          topRunId: null,
+          topRunCount: 0,
+        },
+      );
     }
 
     function buildQuery() {
@@ -184,6 +213,9 @@
               <span class="text-primary">${run.rows_updated}</span> updated /
               <span class="text-muted">${run.rows_skipped_no_change}</span> no change
             </div>
+            <div class="small text-info">
+              ${run.rows_deduped_auto ?? 0} auto-resolved duplicates
+            </div>
             <div class="small text-muted">
               ${run.rows_skipped_duplicates} dupes · ${run.rows_missing_external_id} missing IDs
             </div>
@@ -256,7 +288,7 @@
       elements.paginationSummary.textContent = `Showing ${from}–${to} of ${meta.total} runs`;
     }
 
-    function renderSummaryCards(stats) {
+    function renderSummaryCards(stats, dedupeSummary = state.dedupeSummary) {
       if (!elements.summaryCards) return;
       elements.summaryCards.innerHTML = "";
 
@@ -323,10 +355,32 @@
         </div>
       `;
 
+      const dedupeCard = document.createElement("div");
+      dedupeCard.className = "col-sm-6 col-lg-3";
+      const hasAuto = dedupeSummary.totalRows > 0;
+      const topRunLabel = hasAuto
+        ? `Top run ${dedupeSummary.topRunId} resolved ${dedupeSummary.topRunCount} duplicate${dedupeSummary.topRunCount === 1 ? "" : "s"}`
+        : "No deterministic merges yet";
+      dedupeCard.innerHTML = `
+        <div class="card shadow-sm h-100 border-info">
+          <div class="card-body">
+            <h3 class="card-title h6 text-muted mb-2">Auto-resolved duplicates</h3>
+            <p class="mb-1">
+              <span class="display-6 text-info fw-semibold">${dedupeSummary.totalRows}</span> rows
+            </p>
+            <p class="mb-0 small text-muted">
+              ${dedupeSummary.runsWithAuto} run${dedupeSummary.runsWithAuto === 1 ? "" : "s"} with deterministic merges.<br>
+              ${topRunLabel}
+            </p>
+          </div>
+        </div>
+      `;
+
       elements.summaryCards.appendChild(totalCard);
       elements.summaryCards.appendChild(healthCard);
       elements.summaryCards.appendChild(sourceCard);
       elements.summaryCards.appendChild(dryRunCard);
+      elements.summaryCards.appendChild(dedupeCard);
     }
 
     function updateLastUpdated() {
@@ -337,7 +391,7 @@
 
     function loadStats(params) {
       fetchJSON(config.api.stats, params)
-        .then((stats) => renderSummaryCards(stats))
+        .then((stats) => renderSummaryCards(stats, state.dedupeSummary))
         .catch((error) => {
           // eslint-disable-next-line no-console
           console.error("Failed to load run stats", error);
@@ -350,6 +404,7 @@
         return fetchJSON(config.api.list, params)
           .then((data) => {
             state.lastResponse = data;
+            state.dedupeSummary = summarizeDedupe(data.runs || []);
             renderRunsTable(data.runs || []);
             renderPagination({
               page: data.page,
@@ -435,6 +490,14 @@
       elements.modalContent.querySelector('[data-field="counts_json"]').textContent = JSON.stringify(detail.counts_json || {}, null, 2);
       elements.modalContent.querySelector('[data-field="metrics_json"]').textContent = JSON.stringify(detail.metrics_json || {}, null, 2);
       elements.modalContent.querySelector('[data-field="error_summary"]').textContent = detail.error_summary || "—";
+      const dedupeField = elements.modalContent.querySelector('[data-field="rows_deduped_auto"]');
+      if (dedupeField) {
+        const value = Number(detail.rows_deduped_auto ?? detail.counts_json?.core?.volunteers?.rows_deduped_auto ?? 0);
+        dedupeField.textContent =
+          value > 0
+            ? `${value} row${value === 1 ? "" : "s"} auto-resolved`
+            : "No deterministic duplicates resolved";
+      }
 
       const triggered = detail.triggered_by;
       const triggeredField = elements.modalContent.querySelector('[data-field="triggered_by"]');

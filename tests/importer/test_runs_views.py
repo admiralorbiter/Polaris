@@ -38,6 +38,9 @@ def test_runs_list_success(importer_app, client, run_factory):
     assert len(payload["runs"]) == 2
     dry_flags = {run["run_id"]: run["dry_run"] for run in payload["runs"]}
     assert any(dry_flags.values())
+    for run in payload["runs"]:
+        assert "rows_deduped_auto" in run
+        assert isinstance(run["rows_deduped_auto"], int)
 
     audit_entries = AdminLog.query.filter_by(action="IMPORT_RUN_VIEW").all()
     assert audit_entries
@@ -51,6 +54,7 @@ def test_run_detail(importer_app, client, run_factory):
     detail = response.get_json()
     assert detail["run_id"] == run.id
     assert detail["counts_json"]["core"]["volunteers"]["rows_created"] == 45
+    assert detail["rows_deduped_auto"] == 4
 
 
 def test_run_stats(importer_app, client, run_factory):

@@ -73,6 +73,7 @@ def run_factory(importer_app, tmp_path):
                         "rows_updated": 0,
                         "rows_reactivated": 0,
                         "rows_changed": 0,
+                        "rows_deduped_auto": 4,
                         "rows_skipped_duplicates": 3,
                         "rows_skipped_no_change": 0,
                         "rows_missing_external_id": 0,

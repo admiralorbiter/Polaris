@@ -550,12 +550,13 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - `dedupe_suggestions` captures `decision="auto_resolved"` for deterministic matches.  
 - `counts_json.core.volunteers` increments `rows_deduped_auto`.  
 **Dependencies**: IMP-30.
-**Status**: 🟡 Pending IMP-30 delivery.
+**Status**: 🟢 Delivered (Nov 2025) — gated on IMP-30 rollout.
 **Implementation Notes (Sprint 3 prep)**:
 - Normalize inputs with existing helper (`normalize_contact_fields`) prior to lookup.
 - Priority: email match → phone match → combined heuristics; flag ambiguous cases for future FUZZY dedupe.
 - Record dedupe decisions in `dedupe_suggestions` with `decision="auto_resolved"` for audit.
 - Update UI summaries to highlight when runs resolve duplicates vs create new contacts.
+- Runs dashboard exposes `rows_deduped_auto` in the list view (auto-resolved card + per-row badge) and detail modal for steward confirmation.
 - Rows lacking both email and phone remain manual remediation; deterministic flow requires at least one normalized key.
 
 **Implementation Outline**:
