@@ -154,6 +154,12 @@ VOLUNTEER_CANONICAL_FIELDS: Tuple[FieldSpec, ...] = (
         required=False,
     ),
     FieldSpec(
+        name="notes",
+        description="Free-form notes supplied by the source system.",
+        required=False,
+        aliases=("volunteer_notes", "public_notes"),
+    ),
+    FieldSpec(
         name="school_affiliation",
         description="School or educational affiliation.",
         required=False,

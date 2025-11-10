@@ -1,6 +1,7 @@
 # config/monitoring.py
 
 import os
+from typing import Mapping
 
 try:  # pragma: no cover - optional dependency at runtime
     from prometheus_client import Counter, Histogram
@@ -318,6 +319,24 @@ class ImporterMonitoring:
         if Counter
         else None
     )
+    SURVIVORSHIP_DECISIONS_TOTAL = (
+        Counter(
+            "importer_survivorship_decisions_total",
+            "Total survivorship decision counts by category.",
+            labelnames=("category",),
+        )
+        if Counter
+        else None
+    )
+    SURVIVORSHIP_WARNINGS_TOTAL = (
+        Counter(
+            "importer_survivorship_manual_override_warnings_total",
+            "Count of survivorship outcomes overriding manual edits.",
+            labelnames=("category",),
+        )
+        if Counter
+        else None
+    )
     RUNS_ENQUEUE_COUNTER = (
         Counter(
             "importer_runs_enqueued_total",
@@ -422,3 +441,15 @@ class ImporterMonitoring:
         label = match_type or "unknown"
         if cls.DEDUPE_AUTO_TOTAL:
             cls.DEDUPE_AUTO_TOTAL.labels(match_type=label).inc()
+
+    @classmethod
+    def record_survivorship_decisions(cls, *, stats: Mapping[str, int]) -> None:
+        if not cls.SURVIVORSHIP_DECISIONS_TOTAL:
+            return
+        for key, value in stats.items():
+            cls.SURVIVORSHIP_DECISIONS_TOTAL.labels(category=key).inc(int(value))
+
+    @classmethod
+    def record_survivorship_warnings(cls, *, count: int, category: str = "manual_override") -> None:
+        if cls.SURVIVORSHIP_WARNINGS_TOTAL and count:
+            cls.SURVIVORSHIP_WARNINGS_TOTAL.labels(category=category).inc(int(count))

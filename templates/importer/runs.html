@@ -152,6 +152,17 @@
           </div>
         </div>
       </form>
+      <div class="alert alert-info mt-3 d-flex flex-column flex-md-row gap-3 align-items-md-center" id="survivorship-profile-alert">
+        <div class="flex-grow-1">
+          <span class="fw-semibold">Survivorship profile:</span>
+          <span data-profile-label>{{ survivorship_profile.label }}</span>
+          <div class="small text-muted mt-1" data-profile-description>{{ survivorship_profile.description }}</div>
+          <div class="survivorship-profile-groups small text-muted mt-2"></div>
+        </div>
+        <div class="text-md-end">
+          <button type="button" class="btn btn-sm btn-outline-secondary" id="survivorship-profile-manage" title="Profile management coming soon" disabled>Manage profiles</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -237,6 +248,12 @@
                 <pre class="bg-light border rounded p-3 mb-0 small" data-field="metrics_json"></pre>
               </details>
             </dd>
+          <dt class="col-sm-3">Survivorship summary</dt>
+          <dd class="col-sm-9">
+            <div class="border rounded p-3 bg-light small" data-field="survivorship">
+              <em>No survivorship decisions recorded for this run.</em>
+            </div>
+          </dd>
             <dt class="col-sm-3">Auto-resolved duplicates</dt>
             <dd class="col-sm-9" data-field="rows_deduped_auto"></dd>
             <dt class="col-sm-3">Error Summary</dt>
@@ -275,7 +292,8 @@
     statusBadges: {{ status_badges | tojson }},
     statusOptions: {{ status_options | tojson }},
     sourceOptions: {{ source_options | tojson }},
-    allowedPageSizes: {{ allowed_page_sizes | tojson }}
+    allowedPageSizes: {{ allowed_page_sizes | tojson }},
+    survivorshipProfile: {{ survivorship_profile | tojson }}
   };
 </script>
 <script src="{{ url_for('static', filename='js/importer_runs.js') }}" defer></script>

@@ -5,19 +5,23 @@ Create-only upsert helpers that load clean volunteers into the core schema.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import os
 from datetime import datetime, timezone
-from typing import Iterable, MutableMapping, Sequence
+from functools import lru_cache
+from typing import Any, Iterable, Mapping, MutableMapping, Sequence
 
 from flask import current_app, has_app_context
 from sqlalchemy import func
 
 from config.monitoring import ImporterMonitoring
+from config.survivorship import SurvivorshipProfile, load_profile
 from flask_app.models import ContactEmail, ContactPhone, EmailType, PhoneType, Volunteer, db
 from flask_app.models.importer.schema import (
     ChangeLogEntry,
     CleanVolunteer,
     DedupeDecision,
     DedupeSuggestion,
+    DataQualityViolation,
     ExternalIdMap,
     StagingRecordStatus,
     StagingVolunteer,
@@ -26,6 +30,7 @@ from flask_app.models.importer.schema import (
 from .clean import CleanVolunteerPayload
 from .deterministic import match_volunteer_by_contact
 from .idempotency import MissingExternalIdentifier, resolve_import_target
+from .survivorship import SurvivorshipResult, apply_survivorship, summarize_decisions
 
 
 @dataclass
@@ -64,6 +69,15 @@ class CoreLoadSummary:
         """
 
         return self.rows_updated
+
+
+@lru_cache(maxsize=1)
+def _get_active_survivorship_profile() -> SurvivorshipProfile:
+    """
+    Load and cache the survivorship profile for importer runs.
+    """
+
+    return load_profile(dict(os.environ))
 
 
 def load_core_volunteers(
@@ -230,7 +244,14 @@ def load_core_volunteers(
             id_map.entity_id = volunteer.id
             id_map.mark_seen(run_id=import_run.id)
 
-            changes = _apply_updates(volunteer, candidate)
+            profile = _get_active_survivorship_profile()
+            changes, survivorship = _apply_survivorship_updates(
+                volunteer,
+                candidate,
+                import_run=import_run,
+                staging_row=staging_row,
+                profile=profile,
+            )
 
             if target.action == "reactivate":
                 rows_reactivated += 1
@@ -248,7 +269,9 @@ def load_core_volunteers(
                     idempotency_action=target.action,
                     external_system=candidate.external_system,
                     external_id=candidate.external_id,
+                    survivorship=survivorship,
                 )
+                _record_survivorship_metrics(import_run, survivorship)
 
             clean_row.core_contact_id = volunteer.id
             clean_row.core_volunteer_id = volunteer.id
@@ -259,7 +282,14 @@ def load_core_volunteers(
             if volunteer is None:
                 continue
 
-            changes = _apply_updates(volunteer, candidate)
+            profile = _get_active_survivorship_profile()
+            changes, survivorship = _apply_survivorship_updates(
+                volunteer,
+                candidate,
+                import_run=import_run,
+                staging_row=staging_row,
+                profile=profile,
+            )
             rows_deduped_auto += 1
 
             if not changes:
@@ -275,7 +305,9 @@ def load_core_volunteers(
                     idempotency_action="deterministic_update",
                     external_system=candidate.external_system,
                     external_id=candidate.external_id,
+                    survivorship=survivorship,
                 )
+                _record_survivorship_metrics(import_run, survivorship)
 
             clean_row.core_contact_id = volunteer.id
             clean_row.core_volunteer_id = volunteer.id
@@ -480,76 +512,305 @@ def _create_volunteer_from_candidate(candidate: CleanVolunteerPayload) -> Volunt
     return volunteer
 
 
-def _apply_updates(
+def _apply_survivorship_updates(
     volunteer: Volunteer,
     candidate: CleanVolunteerPayload,
-) -> dict[str, tuple[object | None, object | None]]:
+    *,
+    import_run,
+    staging_row: StagingVolunteer | None,
+    profile: SurvivorshipProfile,
+) -> tuple[dict[str, tuple[object | None, object | None]], SurvivorshipResult]:
+    field_names = _profile_field_names(profile)
+    core_snapshot = _build_core_snapshot(volunteer, field_names)
+    incoming_payload = _build_incoming_payload(candidate, field_names)
+    manual_overrides = _resolve_manual_overrides(import_run, staging_row, field_names)
+    verified_snapshot = _build_verified_snapshot(volunteer, field_names)
+    incoming_provenance = _build_incoming_provenance(import_run, candidate, staging_row)
+
+    survivorship = apply_survivorship(
+        profile=profile,
+        incoming_payload=incoming_payload,
+        core_snapshot=core_snapshot,
+        manual_overrides=manual_overrides,
+        verified_snapshot=verified_snapshot,
+        incoming_provenance=incoming_provenance,
+    )
+
     changes: dict[str, tuple[object | None, object | None]] = {}
 
-    def _update_attr(attr: str, new_value: object | None) -> None:
-        current = getattr(volunteer, attr)
-        if current != new_value:
-            setattr(volunteer, attr, new_value)
-            changes[attr] = (current, new_value)
+    for field_name, final_value in survivorship.resolved_values.items():
+        if field_name == "email":
+            before, after, changed = _apply_email_change(volunteer, final_value)
+            if changed:
+                changes[field_name] = (before, after)
+        elif field_name == "phone_e164":
+            before, after, changed = _apply_phone_change(volunteer, final_value)
+            if changed:
+                changes[field_name] = (before, after)
+        elif hasattr(volunteer, field_name):
+            before = getattr(volunteer, field_name)
+            if before != final_value:
+                setattr(volunteer, field_name, final_value)
+                changes[field_name] = (before, final_value)
 
-    _update_attr("first_name", candidate.first_name)
-    _update_attr("last_name", candidate.last_name)
-    _update_attr("preferred_name", _coerce_string(candidate.normalized_payload.get("preferred_name")))
-    _update_attr("middle_name", _coerce_string(candidate.normalized_payload.get("middle_name")))
-    _update_attr("source", candidate.external_system)
+    if volunteer.source != candidate.external_system:
+        previous_source = volunteer.source
+        volunteer.source = candidate.external_system
+        if previous_source != candidate.external_system:
+            changes.setdefault("source", (previous_source, candidate.external_system))
 
-    primary_email = _get_primary_email(volunteer)
-    normalized_candidate_email = candidate.email.lower() if candidate.email else None
-    if candidate.email:
-        if primary_email is None:
-            new_email = ContactEmail(
-                contact_id=volunteer.id,
-                email=candidate.email,
-                email_type=EmailType.PERSONAL,
-                is_primary=True,
-                is_verified=False,
+    return changes, survivorship
+
+
+def _profile_field_names(profile: SurvivorshipProfile) -> set[str]:
+    names = {rule.field_name for group in profile.field_groups for rule in group.fields}
+    # Ensure standard fields are included.
+    names.update(
+        {
+            "email",
+            "phone_e164",
+            "first_name",
+            "last_name",
+            "middle_name",
+            "preferred_name",
+            "notes",
+            "internal_notes",
+        }
+    )
+    return names
+
+
+def _build_core_snapshot(volunteer: Volunteer, field_names: set[str]) -> Mapping[str, Any]:
+    snapshot: dict[str, Any] = {}
+    for field in field_names:
+        if field == "email":
+            email = _get_primary_email(volunteer)
+            snapshot[field] = email.email if email else None
+        elif field == "phone_e164":
+            phone = _get_primary_phone(volunteer)
+            snapshot[field] = phone.phone_number if phone else None
+        elif hasattr(volunteer, field):
+            snapshot[field] = getattr(volunteer, field)
+    return snapshot
+
+
+def _build_incoming_payload(candidate: CleanVolunteerPayload, field_names: set[str]) -> Mapping[str, Any]:
+    payload: dict[str, Any] = {}
+    normalized_payload = candidate.normalized_payload or {}
+    for field in field_names:
+        if field == "first_name":
+            payload[field] = candidate.first_name
+        elif field == "last_name":
+            payload[field] = candidate.last_name
+        elif field == "middle_name":
+            payload[field] = _coerce_string(normalized_payload.get("middle_name"))
+        elif field == "preferred_name":
+            payload[field] = _coerce_string(normalized_payload.get("preferred_name"))
+        elif field == "email":
+            payload[field] = candidate.email
+        elif field == "phone_e164":
+            payload[field] = candidate.phone_e164
+        else:
+            payload[field] = normalized_payload.get(field)
+    return payload
+
+
+def _resolve_manual_overrides(
+    import_run,
+    staging_row: StagingVolunteer | None,
+    field_names: set[str],
+) -> Mapping[str, Mapping[str, Any]]:
+    overrides: dict[str, Mapping[str, Any]] = {}
+    violation_candidates: list[Any] = []
+    if staging_row is not None:
+        violation_candidates.extend(getattr(staging_row, "dq_violations", []) or [])
+
+    if not violation_candidates and import_run is not None:
+        ingest_params = getattr(import_run, "ingest_params_json", {}) or {}
+        remediation = ingest_params.get("remediation", {}) if isinstance(ingest_params, Mapping) else {}
+        violation_id = remediation.get("violation_id") if isinstance(remediation, Mapping) else None
+        if violation_id is not None:
+            violation = db.session.get(DataQualityViolation, violation_id)
+            if violation is not None:
+                violation_candidates.append(violation)
+
+    for violation in violation_candidates:
+        diff = violation.edited_fields_json or {}
+        if isinstance(diff, Mapping) and diff:
+            source_fields = diff.items()
+        else:
+            payload = violation.edited_payload_json or {}
+            source_fields = payload.items() if isinstance(payload, Mapping) else ()
+
+        for field_name, details in source_fields:
+            if field_name not in field_names:
+                continue
+            if isinstance(details, Mapping):
+                after_value = details.get("after")
+                before_value = details.get("before")
+            else:
+                after_value = details
+                before_value = None
+
+            data = {
+                "value": after_value,
+                "before": before_value,
+                "violation_id": violation.id,
+                "remediation_notes": violation.remediation_notes,
+                "user_id": violation.remediated_by_user_id,
+                "verified_at": violation.remediated_at.isoformat() if violation.remediated_at else None,
+                "source": "manual",
+            }
+            overrides[field_name] = data
+    return overrides
+
+
+def _build_verified_snapshot(volunteer: Volunteer, field_names: set[str]) -> Mapping[str, Mapping[str, Any]]:
+    snapshot: dict[str, Mapping[str, Any]] = {}
+    if "email" in field_names:
+        email = _get_primary_email(volunteer)
+        if email and getattr(email, "is_verified", False):
+            snapshot["email"] = {
+                "value": email.email,
+                "verified": True,
+            }
+    return snapshot
+
+
+def _build_incoming_provenance(
+    import_run,
+    candidate: CleanVolunteerPayload,
+    staging_row: StagingVolunteer | None,
+) -> Mapping[str, Any]:
+    provenance = {
+        "source_run_id": getattr(import_run, "id", None),
+        "external_system": candidate.external_system,
+        "ingest_version": candidate.normalized_payload.get("ingest_version"),
+    }
+    if staging_row is not None:
+        provenance["staging_volunteer_id"] = staging_row.id
+    return {key: value for key, value in provenance.items() if value is not None}
+
+
+def _apply_email_change(
+    volunteer: Volunteer,
+    final_value: object | None,
+) -> tuple[object | None, object | None, bool]:
+    normalized_value = _coerce_string(final_value)
+    primary = _get_primary_email(volunteer)
+
+    before = primary.email if primary else None
+    after = normalized_value
+
+    if normalized_value is None:
+        return before, after, False
+
+    if primary is None:
+        new_email = ContactEmail(
+            contact_id=volunteer.id,
+            email=normalized_value,
+            email_type=EmailType.PERSONAL,
+            is_primary=True,
+            is_verified=False,
+        )
+        volunteer.emails.append(new_email)
+        db.session.add(new_email)
+        for email in volunteer.emails:
+            if email is not new_email:
+                email.is_primary = False
+        return before, normalized_value, True
+
+    if primary.email.lower() != normalized_value.lower():
+        primary.email = normalized_value
+        primary.is_verified = False
+        return before, normalized_value, True
+
+    return before, normalized_value, False
+
+
+def _apply_phone_change(
+    volunteer: Volunteer,
+    final_value: object | None,
+) -> tuple[object | None, object | None, bool]:
+    normalized_value = _coerce_string(final_value)
+    primary = _get_primary_phone(volunteer)
+
+    before = primary.phone_number if primary else None
+    after = normalized_value
+
+    if normalized_value is None:
+        return before, after, False
+
+    if primary is None:
+        new_phone = ContactPhone(
+            contact_id=volunteer.id,
+            phone_number=normalized_value,
+            phone_type=PhoneType.MOBILE,
+            is_primary=True,
+            can_text=True,
+        )
+        volunteer.phones.append(new_phone)
+        db.session.add(new_phone)
+        for phone in volunteer.phones:
+            if phone is not new_phone:
+                phone.is_primary = False
+        return before, normalized_value, True
+
+    if primary.phone_number != normalized_value:
+        primary.phone_number = normalized_value
+        primary.can_text = True
+        return before, normalized_value, True
+
+    return before, normalized_value, False
+
+
+def _record_survivorship_metrics(import_run, survivorship: SurvivorshipResult) -> None:
+    stats = survivorship.stats or {}
+    if not stats:
+        return
+
+    counts = dict(import_run.counts_json or {})
+    core_counts = counts.setdefault("core", {}).setdefault("volunteers", {})
+    survivorship_counts = core_counts.setdefault("survivorship", {"stats": {}, "groups": {}})
+
+    stats_bucket = survivorship_counts.setdefault("stats", {})
+    for key, value in stats.items():
+        stats_bucket[key] = int(stats_bucket.get(key, 0) or 0) + int(value)
+
+    group_summary = summarize_decisions(survivorship.decisions)
+    groups_bucket = survivorship_counts.setdefault("groups", {})
+    for group_name, data in group_summary.items():
+        group_target = groups_bucket.setdefault(group_name, {})
+        for metric, value in data.items():
+            group_target[metric] = int(group_target.get(metric, 0) or 0) + int(value)
+
+    core_counts["survivorship"] = survivorship_counts
+    import_run.counts_json = counts
+
+    metrics = dict(import_run.metrics_json or {})
+    core_metrics = metrics.setdefault("core", {}).setdefault("volunteers", {})
+    survivorship_metrics = core_metrics.setdefault("survivorship", {})
+    for key, value in stats.items():
+        survivorship_metrics[key] = int(survivorship_metrics.get(key, 0) or 0) + int(value)
+    core_metrics["survivorship"] = survivorship_metrics
+    import_run.metrics_json = metrics
+
+    manual_overridden = [
+        decision.field_name
+        for decision in survivorship.decisions
+        if any(candidate.tier == "manual" for candidate in decision.losers)
+        and decision.winner.tier != "manual"
+    ]
+    if manual_overridden:
+        ImporterMonitoring.record_survivorship_warnings(count=len(manual_overridden))
+        if has_app_context():
+            current_app.logger.warning(
+                "Importer run %s survivorship overrides manual edits for fields: %s",
+                getattr(import_run, "id", "unknown"),
+                ", ".join(sorted(manual_overridden)),
             )
-            volunteer.emails.append(new_email)
-            db.session.add(new_email)
-            for email in volunteer.emails:
-                if email is not new_email:
-                    email.is_primary = False
-            changes["email"] = (None, candidate.email)
-        elif primary_email.email.lower() != normalized_candidate_email:
-            before = primary_email.email
-            primary_email.email = candidate.email
-            primary_email.is_verified = False
-            changes["email"] = (before, candidate.email)
-    elif primary_email is not None and primary_email.email:
-        # No new email provided; leave existing primary in place.
-        pass
 
-    primary_phone = _get_primary_phone(volunteer)
-    if candidate.phone_e164:
-        if primary_phone is None:
-            new_phone = ContactPhone(
-                contact_id=volunteer.id,
-                phone_number=candidate.phone_e164,
-                phone_type=PhoneType.MOBILE,
-                is_primary=True,
-                can_text=True,
-            )
-            volunteer.phones.append(new_phone)
-            db.session.add(new_phone)
-            for phone in volunteer.phones:
-                if phone is not new_phone:
-                    phone.is_primary = False
-            changes["phone_e164"] = (None, candidate.phone_e164)
-        elif primary_phone.phone_number != candidate.phone_e164:
-            before = primary_phone.phone_number
-            primary_phone.phone_number = candidate.phone_e164
-            primary_phone.can_text = True
-            changes["phone_e164"] = (before, candidate.phone_e164)
-    elif primary_phone is not None and primary_phone.phone_number:
-        # Keep existing phone when no new number supplied.
-        pass
-
-    return changes
+    ImporterMonitoring.record_survivorship_decisions(stats=stats)
 
 
 def _get_primary_email(volunteer: Volunteer) -> ContactEmail | None:
@@ -574,15 +835,38 @@ def _persist_change_log(
     idempotency_action: str,
     external_system: str,
     external_id: str | None,
+    survivorship: SurvivorshipResult | None = None,
 ) -> None:
-    metadata = {
-        "idempotency_action": idempotency_action,
-        "external_system": external_system,
-    }
-    if external_id:
-        metadata["external_id"] = external_id
+    decision_lookup = {decision.field_name: decision for decision in survivorship.decisions} if survivorship else {}
 
     for field_name, (before, after) in changes.items():
+        metadata = {
+            "idempotency_action": idempotency_action,
+            "external_system": external_system,
+        }
+        if external_id:
+            metadata["external_id"] = external_id
+
+        decision = decision_lookup.get(field_name)
+        if decision:
+            metadata["survivorship"] = {
+                "winner": {
+                    "tier": decision.winner.tier,
+                    "value": _serialize_change_value(decision.winner.value),
+                    "metadata": decision.winner.metadata,
+                },
+                "losers": [
+                    {
+                        "tier": candidate.tier,
+                        "value": _serialize_change_value(candidate.value),
+                        "metadata": candidate.metadata,
+                    }
+                    for candidate in decision.losers
+                ],
+                "manual_override": decision.manual_override,
+                "reason": decision.reason,
+            }
+
         entry = ChangeLogEntry(
             run_id=import_run_id,
             entity_type="volunteer",

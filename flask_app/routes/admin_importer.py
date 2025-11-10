@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 from http import HTTPStatus
+import os
 from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, render_template, request, send_file
@@ -30,6 +31,7 @@ from flask_app.models.importer.schema import (
 from flask_app.utils.importer import is_importer_enabled
 from flask_app.utils.permissions import permission_required
 from config.monitoring import ImporterMonitoring
+from config.survivorship import load_profile
 
 
 admin_importer_blueprint = Blueprint("admin_importer", __name__, url_prefix="/admin/imports")
@@ -147,6 +149,21 @@ def importer_runs_dashboard_page():
     if not sources:
         sources = sorted({adapter.name for adapter in current_app.extensions.get("importer", {}).get("active_adapters", ())})
 
+    profile = load_profile(dict(os.environ))
+    survivorship_profile = {
+        "key": profile.key,
+        "label": profile.label,
+        "description": profile.description,
+        "field_groups": [
+            {
+                "name": group.name,
+                "display_name": group.display_name,
+                "fields": [rule.field_name for rule in group.fields],
+            }
+            for group in profile.field_groups
+        ],
+    }
+
     current_app.logger.info(
         "Importer runs dashboard page rendered",
         extra={
@@ -164,6 +181,7 @@ def importer_runs_dashboard_page():
         allowed_page_sizes=allowed_page_sizes,
         auto_refresh_seconds=auto_refresh_seconds,
         source_options=sources,
+        survivorship_profile=survivorship_profile,
     )
 
 

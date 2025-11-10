@@ -1,0 +1,4 @@
+external_system,external_id,first_name,last_name,email,phone,notes,source_updated_at
+legacy_csv,vol-surv-001,Jordan,Parker,jordan.updated@example.org,+14155552999,"Fresh CRM sync – new email + phone",2025-10-05T12:00:00Z
+legacy_csv,vol-surv-002,Taylor,Nash,taylor@example.org,,"Source system cleared phone number",2025-10-05T12:05:00Z
+

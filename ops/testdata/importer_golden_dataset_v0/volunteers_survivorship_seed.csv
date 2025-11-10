@@ -1,0 +1,4 @@
+external_system,external_id,first_name,last_name,email,phone,notes,source_updated_at
+legacy_csv,vol-surv-001,Jordan,Parker,jordan.orig@example.org,+14155552001,"Manual profile verified by steward",2025-10-05T09:00:00Z
+legacy_csv,vol-surv-002,Taylor,Nash,taylor@example.org,+14155552002,"Initial contact imported from CRM",2025-10-05T09:05:00Z
+

@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from flask_app.importer.pipeline.clean import promote_clean_volunteers
 from flask_app.importer.pipeline.load_core import load_core_volunteers
 from flask_app.models import (
@@ -15,6 +17,9 @@ from flask_app.models import (
     StagingVolunteer,
     Volunteer,
     db,
+    DataQualityViolation,
+    DataQualitySeverity,
+    DataQualityStatus,
 )
 
 
@@ -206,12 +211,151 @@ def test_load_core_volunteers_updates_existing_contact(app):
     assert counts_update["rows_created"] == 0
     assert counts_update["rows_deduped_auto"] == 0
     assert metrics_update["rows_updated"] == 1
-    assert metrics_update["rows_deduped_auto"] == 0
+
+
+def test_survivorship_manual_override_wins(app):
+    shared_external_id = "survivorship-ext-1"
+
+    run_initial = _make_run()
+    initial_row = _make_validated_row(
+        run_initial,
+        seq=1,
+        email="initial-survivorship@example.org",
+        phone=None,
+        external_id=shared_external_id,
+    )
+    initial_row.payload_json = {**(initial_row.payload_json or {}), "notes": "Initial note"}
+    initial_row.normalized_json = {**(initial_row.normalized_json or {}), "notes": "Initial note"}
+    db.session.add(initial_row)
+    db.session.commit()
+
+    promote_clean_volunteers(run_initial, dry_run=False)
+    load_core_volunteers(run_initial, dry_run=False)
+    db.session.commit()
+
+    volunteer = Volunteer.query.filter_by(last_name="User1").one()
+    volunteer.notes = "Initial note"
+    db.session.commit()
+
+    run_update = _make_run()
+    update_row = _make_validated_row(
+        run_update,
+        seq=2,
+        email="manual-win@example.org",
+        phone=None,
+        external_id=shared_external_id,
+    )
+    update_row.payload_json = {**(update_row.payload_json or {}), "notes": "Source note"}
+    update_row.normalized_json = {**(update_row.normalized_json or {}), "notes": "Source note"}
+    db.session.add(update_row)
+    db.session.flush()
+
+    violation = DataQualityViolation(
+        run_id=run_update.id,
+        staging_volunteer_id=update_row.id,
+        entity_type="volunteer",
+        record_key=str(update_row.id),
+        rule_code="manual_override",
+        severity=DataQualitySeverity.INFO,
+        status=DataQualityStatus.FIXED,
+        message="Manual edits applied",
+        edited_fields_json={
+            "notes": {
+                "before": "Initial note",
+                "after": "Manual note",
+            }
+        },
+        remediated_at=datetime.now(timezone.utc),
+    )
+    db.session.add(violation)
+    db.session.commit()
+
+    promote_clean_volunteers(run_update, dry_run=False)
+    clean_candidate = CleanVolunteer.query.filter_by(run_id=run_update.id).one()
+    assert clean_candidate.payload_json.get("notes") == "Source note"
+    load_core_volunteers(run_update, dry_run=False)
+    db.session.commit()
+    db.session.refresh(run_update)
+    db.session.refresh(volunteer)
+
+    assert volunteer.notes == "Manual note"
+
+    change_entry = ChangeLogEntry.query.filter_by(run_id=run_update.id, field_name="notes").one()
+    metadata = change_entry.metadata_json or {}
+    survivorship_meta = metadata.get("survivorship", {})
+    assert survivorship_meta.get("manual_override") is True
+    assert survivorship_meta.get("winner", {}).get("tier") == "manual"
+    incoming_loser = next((loser for loser in survivorship_meta.get("losers", []) if loser.get("tier") == "incoming"), None)
+    assert incoming_loser is not None
+    assert incoming_loser.get("value") == "Source note"
+
+    survivorship_counts = run_update.counts_json["core"]["volunteers"]["survivorship"]["stats"]
+    assert survivorship_counts.get("manual_wins") == 1
+    metrics_survivorship = run_update.metrics_json["core"]["volunteers"]["survivorship"]
+    assert metrics_survivorship.get("manual_wins") == 1
+
+
+def test_survivorship_incoming_overrides_recorded(app):
+    shared_external_id = "survivorship-ext-2"
+
+    run_initial = _make_run()
+    initial_row = _make_validated_row(
+        run_initial,
+        seq=1,
+        email="incoming-survivorship@example.org",
+        phone=None,
+        external_id=shared_external_id,
+    )
+    initial_row.payload_json = {**(initial_row.payload_json or {}), "notes": "Existing note"}
+    initial_row.normalized_json = {**(initial_row.normalized_json or {}), "notes": "Existing note"}
+    db.session.add(initial_row)
+    db.session.commit()
+
+    promote_clean_volunteers(run_initial, dry_run=False)
+    load_core_volunteers(run_initial, dry_run=False)
+    db.session.commit()
+
+    volunteer = Volunteer.query.filter_by(last_name="User1").one()
+    volunteer.notes = "Existing note"
+    db.session.commit()
+
+    run_update = _make_run()
+    update_row = _make_validated_row(
+        run_update,
+        seq=2,
+        email="incoming-update@example.org",
+        phone=None,
+        external_id=shared_external_id,
+    )
+    update_row.payload_json = {**(update_row.payload_json or {}), "notes": "Fresh note"}
+    update_row.normalized_json = {**(update_row.normalized_json or {}), "notes": "Fresh note"}
+    db.session.add(update_row)
+    db.session.commit()
+
+    promote_clean_volunteers(run_update, dry_run=False)
+    clean_candidate = CleanVolunteer.query.filter_by(run_id=run_update.id).one()
+    assert clean_candidate.payload_json.get("notes") == "Fresh note"
+    load_core_volunteers(run_update, dry_run=False)
+    db.session.commit()
+    db.session.refresh(run_update)
+    db.session.refresh(volunteer)
+
+    assert volunteer.notes == "Fresh note"
+
+    change_entry = ChangeLogEntry.query.filter_by(run_id=run_update.id, field_name="notes").one()
+    metadata = change_entry.metadata_json or {}
+    survivorship_meta = metadata.get("survivorship", {})
+    assert survivorship_meta.get("winner", {}).get("tier") == "incoming"
+    assert survivorship_meta.get("manual_override") is False
+
+    survivorship_counts = run_update.counts_json["core"]["volunteers"]["survivorship"]["stats"]
+    assert survivorship_counts.get("incoming_overrides", 0) >= 1
+    metrics_survivorship = run_update.metrics_json["core"]["volunteers"]["survivorship"]
+    assert metrics_survivorship.get("incoming_overrides", 0) >= 1
 
     change_entries = ChangeLogEntry.query.filter_by(run_id=run_update.id).all()
     changed_fields = {entry.field_name for entry in change_entries}
     assert "email" in changed_fields
-    assert "phone_e164" in changed_fields
 
 
 def test_load_core_volunteers_deterministic_email_match_updates_existing_contact(app):

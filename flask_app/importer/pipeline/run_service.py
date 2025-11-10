@@ -135,6 +135,7 @@ class RunSummary:
     triggered_by: Mapping[str, Any] | None
     can_retry: bool
     counts_digest: Mapping[str, Any]
+    survivorship: Mapping[str, Any]
 
 
 @dataclass(slots=True)
@@ -292,6 +293,7 @@ class ImportRunService:
             "dq": dq_counts,
             "core": core_counts,
         }
+        survivorship_counts = dict(core_counts.get("survivorship", {}))
 
         duration_seconds: float | None = None
         if run.started_at:
@@ -345,6 +347,7 @@ class ImportRunService:
             triggered_by=triggered_by_user,
             can_retry=can_retry,
             counts_digest=summary_counts,
+            survivorship=survivorship_counts,
         )
 
 

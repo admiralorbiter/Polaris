@@ -33,6 +33,11 @@
       modalUpdated: document.getElementById("run-detail-updated"),
       modalDownload: document.getElementById("run-detail-download"),
       modalRetry: document.getElementById("run-detail-retry-btn"),
+      profileAlert: document.getElementById("survivorship-profile-alert"),
+      profileLabel: document.querySelector("[data-profile-label]"),
+      profileDescription: document.querySelector("[data-profile-description]"),
+      profileGroups: document.querySelector(".survivorship-profile-groups"),
+      profileManageButton: document.getElementById("survivorship-profile-manage"),
     };
 
     const state = {
@@ -479,6 +484,85 @@
       return `${config.api.adminBase}/${runId}/download`;
     }
 
+    function renderSurvivorshipSummary(data) {
+      if (!elements.modalContent) return;
+      const container = elements.modalContent.querySelector('[data-field="survivorship"]');
+      if (!container) return;
+      container.innerHTML = "";
+
+      const stats = (data && typeof data === "object" && data.stats) || {};
+      const groups = (data && typeof data === "object" && data.groups) || {};
+      const hasStats = Object.keys(stats).length > 0;
+      const hasGroups = Object.keys(groups).length > 0;
+
+      if (!hasStats && !hasGroups) {
+        container.innerHTML = "<em>No survivorship decisions recorded for this run.</em>";
+        return;
+      }
+
+      if (hasStats) {
+        const badges = document.createElement("div");
+        badges.className = "mb-2";
+        const badgeConfig = [
+          { key: "fields_changed", label: "Fields changed", variant: "primary" },
+          { key: "fields_unchanged", label: "Unchanged", variant: "secondary" },
+          { key: "manual_wins", label: "Manual wins", variant: "success" },
+          { key: "incoming_overrides", label: "Incoming overrides", variant: "warning" },
+          { key: "core_wins", label: "Core wins", variant: "info" },
+        ];
+        badgeConfig.forEach(({ key, label, variant }) => {
+          const value = Number(stats[key] ?? 0);
+          if (value <= 0) return;
+          const badge = document.createElement("span");
+          badge.className = `badge bg-${variant} me-2 mb-1`;
+          badge.textContent = `${label}: ${value}`;
+          badges.appendChild(badge);
+        });
+        if (badges.children.length > 0) {
+          container.appendChild(badges);
+        }
+      }
+
+      if (hasGroups) {
+        const table = document.createElement("table");
+        table.className = "table table-sm table-striped mb-0";
+        table.innerHTML = `
+          <thead>
+            <tr>
+              <th scope="col">Group</th>
+              <th scope="col">Fields</th>
+              <th scope="col">Changed</th>
+              <th scope="col">Manual wins</th>
+              <th scope="col">Incoming wins</th>
+            </tr>
+          </thead>
+        `;
+
+        const tbody = document.createElement("tbody");
+        Object.entries(groups).forEach(([groupName, values]) => {
+          const total = Number(values.total ?? 0);
+          const changed = Number(values.changed ?? 0);
+          const manualWins = Number(values.manual_wins ?? 0);
+          const incomingWins = Number(values.incoming_wins ?? 0);
+          const row = document.createElement("tr");
+          row.innerHTML = `
+            <th scope="row">${groupName.replace(/_/g, " ")}</th>
+            <td>${total}</td>
+            <td>${changed}</td>
+            <td>${manualWins}</td>
+            <td>${incomingWins}</td>
+          `;
+          tbody.appendChild(row);
+        });
+        table.appendChild(tbody);
+        container.appendChild(table);
+      }
+
+      if (!container.textContent.trim() && container.children.length === 0) {
+        container.innerHTML = "<em>No survivorship decisions recorded for this run.</em>";
+      }
+    }
+
     function updateModalFields(detail) {
       if (!elements.modalContent) return;
       elements.modalTitle.textContent = `Run ${detail.run_id}`;
@@ -498,6 +582,8 @@
             ? `${value} row${value === 1 ? "" : "s"} auto-resolved`
             : "No deterministic duplicates resolved";
       }
+
+      renderSurvivorshipSummary(detail.survivorship);
 
       const triggered = detail.triggered_by;
       const triggeredField = elements.modalContent.querySelector('[data-field="triggered_by"]');
@@ -529,6 +615,34 @@
       } else {
         elements.modalRetry.classList.add("d-none");
         delete elements.modalRetry.dataset.runId;
+      }
+    }
+
+    function initializeProfileBanner() {
+      if (!config.survivorshipProfile || !elements.profileLabel) return;
+      const profile = config.survivorshipProfile;
+      elements.profileLabel.textContent = profile.label || "Default survivorship";
+      if (elements.profileDescription) {
+        elements.profileDescription.textContent = profile.description || "";
+      }
+      if (elements.profileGroups) {
+        elements.profileGroups.innerHTML = "";
+        const groups = Array.isArray(profile.field_groups) ? profile.field_groups : [];
+        if (groups.length > 0) {
+          const list = document.createElement("ul");
+          list.className = "mb-0 ps-3";
+          groups.forEach((group) => {
+            const item = document.createElement("li");
+            const displayName = group.display_name || group.name || "Group";
+            const fields = Array.isArray(group.fields) ? group.fields.join(", ") : "";
+            item.innerHTML = fields ? `<span class="fw-semibold">${displayName}</span> — ${fields}` : `<span class="fw-semibold">${displayName}</span>`;
+            list.appendChild(item);
+          });
+          elements.profileGroups.appendChild(list);
+        }
+      }
+      if (elements.profileAlert) {
+        elements.profileAlert.classList.remove("d-none");
       }
     }
 
@@ -679,8 +793,16 @@
           }
         });
       }
+
+      if (elements.profileManageButton) {
+        elements.profileManageButton.addEventListener("click", (event) => {
+          event.preventDefault();
+          showToast("Profile management will be available in a future release.", "info");
+        });
+      }
     }
 
+    initializeProfileBanner();
     attachEventListeners();
     updateAutoRefreshButton();
     setupAutoRefresh();

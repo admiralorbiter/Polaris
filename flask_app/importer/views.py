@@ -185,6 +185,7 @@ def _serialize_summary(summary):
         "triggered_by": summary.triggered_by,
         "can_retry": summary.can_retry,
         "counts_digest": summary.counts_digest,
+        "survivorship": summary.survivorship,
     }
 
 
@@ -202,6 +203,7 @@ def _serialize_detail(run, *, summary):
         "counts_json": run.counts_json or {},
         "metrics_json": run.metrics_json or {},
         "counts_digest": summary.counts_digest,
+        "survivorship": summary.survivorship,
         "error_summary": run.error_summary,
         "rows_deduped_auto": summary.rows_deduped_auto,
         "notes": run.notes,

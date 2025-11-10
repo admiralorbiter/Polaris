@@ -596,16 +596,16 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 **Dependencies**: IMP-31.
 **Status**: ⚪ Discovery in progress — precedence matrix pending sign-off.
 **Implementation Notes (Sprint 3 prep)**:
-- Define field precedence tables (manual remediation > source freshest > existing core).
-- Store per-field decisions in `change_log` with before/after payloads and `source_run_id`.
-- Provide helper for comparing timestamps/verified flags; reuse in remediation success analytics.
-- Update admin UI messaging to surface survivorship outcomes when viewing run detail.
+- Define field precedence tables (manual remediation > source freshest > existing core). Final implementation lives in `config/survivorship.py` with per-field-group profiles and optional overrides via `IMPORTER_SURVIVORSHIP_PROFILE_PATH`.
+- Store per-field decisions in `change_log` with before/after payloads, winner/loser sources, and `source_run_id` where available.
+- Provide helper for comparing timestamps/verified flags; reuse in remediation success analytics. When timestamps tie, the engine keeps the prior core value so results remain deterministic.
+- Update admin UI messaging to surface survivorship outcomes when viewing run detail and surface the active profile summary in the dashboard header.
 
 **Implementation Outline**:
 - Implement `apply_survivorship(core_person, incoming_payload, context)` returning merged record plus decision log.
-- Persist change-log entries with per-field provenance, including `ingest_version` and verification timestamps.
-- Update run detail API to expose survivorship breakdown (counts and notable overrides) for the UI.
-- Coordinate with remediation tooling so manual edits register as highest-precedence inputs.
+- Persist change-log entries with per-field provenance, including `ingest_version` and verification timestamps (when present), plus manual override provenance.
+- Update run detail API to expose survivorship breakdown (counts and notable overrides) for the UI and provide summary counters for dashboard cards.
+- Coordinate with remediation tooling so manual edits register as highest-precedence inputs (leveraging `edited_fields_json` / `edited_payload_json` on violations and remediation run metadata).
 
 **Data Model & Storage**:
 - Extend `change_log` with `field_name`, `provenance_json`, and `verified_at` metadata if missing.
@@ -615,18 +615,18 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 **Metrics & Telemetry**:
 - Add `importer_survivorship_decisions_total{decision}` counter capturing override vs keep scenarios.
 - Log warnings when survivorship overrides recent manual remediation to flag potential misconfigurations.
-- Include survivorship summary in dashboard/API payloads for transparency.
+- Include survivorship summary in dashboard/API payloads for transparency and surface the active profile metadata in the admin dashboard.
 
 **Testing Expectations**:
 - **Unit**: Precedence matrix permutations, helper comparisons for timestamps/verified flags.
 - **Integration**: Conflict imports verifying change-log entries and UI payload updates.
 - **Golden data**: Scenarios where verified data should prevail vs newest but unverified data.
-- **Regression**: Ensure survivorship honors dry-run mode and remediation flows.
+- **Regression**: Ensure survivorship honors dry-run mode and remediation flows. Extend golden dataset fixtures with conflict rows covering manual wins vs. incoming overrides.
 
 **Open Questions / Clarifications**:
-- What is the tie-breaker when timestamps share identical precision?
-- Should precedence be configurable per field group (contact vs address vs notes)?
-- Who drafts admin UI copy explaining survivorship decisions to stewards?
+- ✅ Tie-breaker when timestamps share identical precision: keep the pre-existing core value so results remain deterministic.
+- ✅ Precedence configurable per field group via profiles (contact identity, communication, notes).
+- ✅ Admin UI copy handled within importer dashboard (profile banner + run detail summary).
 
 ### IMP-33 — Idempotency regression tests _(3 pts)_
 **User story**: As QA, running the same file twice yields no net new records.  
