@@ -331,6 +331,8 @@ class DedupeSuggestion(BaseModel):
         index=True,
     )
     score: Mapped[float | None] = mapped_column(db.Numeric(5, 4), nullable=True)
+    match_type: Mapped[str | None] = mapped_column(db.String(32), nullable=True, index=True)
+    confidence_score: Mapped[float | None] = mapped_column(db.Numeric(5, 4), nullable=True)
     features_json: Mapped[dict | None] = mapped_column(db.JSON, nullable=True)
     decision: Mapped[DedupeDecision] = mapped_column(
         Enum(DedupeDecision, name="dedupe_decision_enum"),

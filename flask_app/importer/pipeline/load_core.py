@@ -16,12 +16,15 @@ from flask_app.models import ContactEmail, ContactPhone, EmailType, PhoneType, V
 from flask_app.models.importer.schema import (
     ChangeLogEntry,
     CleanVolunteer,
+    DedupeDecision,
+    DedupeSuggestion,
     ExternalIdMap,
     StagingRecordStatus,
     StagingVolunteer,
 )
 
 from .clean import CleanVolunteerPayload
+from .deterministic import match_volunteer_by_contact
 from .idempotency import MissingExternalIdentifier, resolve_import_target
 
 
@@ -33,6 +36,7 @@ class CoreLoadSummary:
     rows_created: int
     rows_updated: int
     rows_reactivated: int
+    rows_deduped_auto: int
     rows_skipped_duplicates: int
     rows_skipped_no_change: int
     rows_missing_external_id: int
@@ -106,6 +110,7 @@ def load_core_volunteers(
             rows_created=0,
             rows_updated=0,
             rows_reactivated=0,
+            rows_deduped_auto=0,
             rows_skipped_duplicates=rows_skipped_duplicates,
             rows_skipped_no_change=0,
             rows_missing_external_id=rows_missing_external_id,
@@ -124,6 +129,7 @@ def load_core_volunteers(
     rows_created = 0
     rows_updated = 0
     rows_reactivated = 0
+    rows_deduped_auto = 0
     rows_skipped_duplicates = 0
     rows_skipped_no_change = 0
     rows_missing_external_id = 0
@@ -150,7 +156,31 @@ def load_core_volunteers(
                 _mark_staging_error(staging_row, message=str(exc))
             continue
 
+        dedupe_result = None
+        deterministic_volunteer = None
+        current_action = target.action
+
         if target.action == "create":
+            dedupe_result = match_volunteer_by_contact(
+                session=session,
+                email=candidate.email,
+                phone=candidate.phone_e164,
+            )
+            if dedupe_result.is_match:
+                deterministic_volunteer = session.get(Volunteer, dedupe_result.volunteer_id)
+                if deterministic_volunteer is not None:
+                    current_action = "deterministic_update"
+            elif dedupe_result and dedupe_result.outcome == "ambiguous" and staging_row is not None:
+                _record_ambiguous_dedupe(
+                    run_id=import_run.id,
+                    staging_row=staging_row,
+                    match_result=dedupe_result,
+                )
+
+        if current_action == "deterministic_update" and deterministic_volunteer is None:
+            current_action = "create"
+
+        if current_action == "create":
             if candidate.email and _email_exists(candidate.email):
                 rows_skipped_duplicates += 1
                 if candidate.email:
@@ -183,7 +213,7 @@ def load_core_volunteers(
                 _mark_staging_loaded(staging_row, duplicate=False)
 
             rows_created += 1
-        else:
+        elif current_action in {"update", "reactivate"}:
             volunteer = target.volunteer
             id_map = target.id_map
 
@@ -224,6 +254,40 @@ def load_core_volunteers(
             clean_row.core_volunteer_id = volunteer.id
             if staging_row is not None:
                 _mark_staging_loaded(staging_row, duplicate=False)
+        elif current_action == "deterministic_update":
+            volunteer = deterministic_volunteer
+            if volunteer is None:
+                continue
+
+            changes = _apply_updates(volunteer, candidate)
+            rows_deduped_auto += 1
+
+            if not changes:
+                rows_skipped_no_change += 1
+                clean_row.load_action = "deterministic_no_change"
+            else:
+                rows_updated += 1
+                clean_row.load_action = "deterministic_update"
+                _persist_change_log(
+                    import_run_id=import_run.id,
+                    volunteer_id=volunteer.id,
+                    changes=changes,
+                    idempotency_action="deterministic_update",
+                    external_system=candidate.external_system,
+                    external_id=candidate.external_id,
+                )
+
+            clean_row.core_contact_id = volunteer.id
+            clean_row.core_volunteer_id = volunteer.id
+            if staging_row is not None:
+                _mark_staging_loaded(staging_row, duplicate=False)
+                if dedupe_result and dedupe_result.is_match:
+                    _record_auto_resolved_dedupe(
+                        run_id=import_run.id,
+                        staging_row=staging_row,
+                        volunteer=volunteer,
+                        match_result=dedupe_result,
+                    )
 
         processed_mutations = rows_created + rows_updated
         if processed_mutations and processed_mutations % batch_size == 0:
@@ -234,6 +298,7 @@ def load_core_volunteers(
         rows_created=rows_created,
         rows_updated=rows_updated,
         rows_reactivated=rows_reactivated,
+        rows_deduped_auto=rows_deduped_auto,
         rows_skipped_duplicates=rows_skipped_duplicates,
         rows_skipped_no_change=rows_skipped_no_change,
         rows_missing_external_id=rows_missing_external_id,
@@ -254,7 +319,7 @@ def load_core_volunteers(
             (
                 "Importer run %s loaded %s volunteers "
                 "(created=%s updated=%s reactivated=%s duplicates=%s "
-                "no_change=%s missing_external_id=%s)"
+                "no_change=%s missing_external_id=%s dedupe_auto=%s)"
             ),
             import_run.id,
             summary.rows_created + summary.rows_updated,
@@ -264,6 +329,7 @@ def load_core_volunteers(
             summary.rows_skipped_duplicates,
             summary.rows_skipped_no_change,
             summary.rows_missing_external_id,
+            summary.rows_deduped_auto,
         )
     return summary
 
@@ -334,12 +400,14 @@ def _update_core_counts(
     updated_count = summary.rows_updated if not summary.dry_run else 0
     reactivated_count = summary.rows_reactivated if not summary.dry_run else 0
     changed_count = summary.rows_changed if not summary.dry_run else 0
+    deduped_count = summary.rows_deduped_auto if not summary.dry_run else 0
     core_counts.update(
         {
             "rows_processed": summary.rows_processed,
             "rows_created": created_count,
             "rows_updated": updated_count,
             "rows_reactivated": reactivated_count,
+            "rows_deduped_auto": deduped_count,
             "rows_changed": changed_count,
             "rows_skipped_duplicates": summary.rows_skipped_duplicates,
             "rows_skipped_no_change": summary.rows_skipped_no_change,
@@ -359,6 +427,7 @@ def _update_core_counts(
             "rows_created": metrics_created,
             "rows_updated": summary.rows_updated,
             "rows_reactivated": summary.rows_reactivated,
+            "rows_deduped_auto": summary.rows_deduped_auto,
             "rows_changed": summary.rows_changed,
             "rows_skipped_duplicates": summary.rows_skipped_duplicates,
             "rows_skipped_no_change": summary.rows_skipped_no_change,
@@ -530,3 +599,60 @@ def _serialize_change_value(value: object | None) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _record_auto_resolved_dedupe(
+    *,
+    run_id: int,
+    staging_row: StagingVolunteer,
+    volunteer: Volunteer,
+    match_result,
+) -> None:
+    features = {
+        "match_type": match_result.outcome,
+        "email_matches": list(match_result.email_match_ids),
+        "phone_matches": list(match_result.phone_match_ids),
+        "normalized_email": match_result.normalized_email,
+        "normalized_phone": match_result.normalized_phone,
+    }
+    ImporterMonitoring.record_deterministic_dedupe(match_type=match_result.outcome)
+    suggestion = DedupeSuggestion(
+        run_id=run_id,
+        staging_volunteer_id=staging_row.id if staging_row else None,
+        primary_contact_id=volunteer.id,
+        candidate_contact_id=None,
+        score=1.0,
+        match_type=match_result.outcome,
+        confidence_score=1.0,
+        features_json=features,
+        decision=DedupeDecision.AUTO_MERGED,
+        decision_notes="Resolved deterministically by email/phone heuristic.",
+        decided_at=datetime.now(timezone.utc),
+    )
+    db.session.add(suggestion)
+
+
+def _record_ambiguous_dedupe(
+    *,
+    run_id: int,
+    staging_row: StagingVolunteer,
+    match_result,
+) -> None:
+    features = {
+        "match_type": match_result.outcome,
+        "email_matches": list(match_result.email_match_ids),
+        "phone_matches": list(match_result.phone_match_ids),
+        "normalized_email": match_result.normalized_email,
+        "normalized_phone": match_result.normalized_phone,
+    }
+    suggestion = DedupeSuggestion(
+        run_id=run_id,
+        staging_volunteer_id=staging_row.id if staging_row else None,
+        primary_contact_id=None,
+        candidate_contact_id=None,
+        score=None,
+        match_type=match_result.outcome,
+        features_json=features,
+        decision_notes="Multiple deterministic candidates detected; requires manual review.",
+    )
+    db.session.add(suggestion)

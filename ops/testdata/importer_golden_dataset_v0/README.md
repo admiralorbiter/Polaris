@@ -7,7 +7,7 @@ This directory contains sample inputs and expected outcomes for the volunteer im
 - `volunteers_valid.csv` — happy-path records that should stage and load successfully.
 - `volunteers_invalid.csv` — rows that trigger current validation rules (required contact info, format checks).
 - `volunteers_duplicates.csv` — rows representing deterministic duplicate scenarios (same email/phone).
-- `volunteers_duplicate_skip.csv` — demonstrates core upsert duplicate-skipping within a single run.
+- `volunteers_duplicate_skip.csv` — demonstrates deterministic auto-dedupe resolving an existing volunteer via email.
 
 Each CSV includes a header row. Use these files with `flask importer run --source csv --file <path>` (or future automation) to exercise the pipeline.
 
@@ -18,7 +18,7 @@ Each CSV includes a header row. Use these files with `flask importer run --sourc
 | `volunteers_valid.csv`   | 3       | All rows land in `staging_volunteers`, pass validation, and appear in counts.    |
 | `volunteers_invalid.csv` | 3       | Rows land but are quarantined with rule codes (`VOL_CONTACT_REQUIRED`, `VOL_EMAIL_FORMAT`, `VOL_PHONE_E164`). |
 | `volunteers_duplicates.csv` | 2   | Both rows land; deterministic dedupe should flag them as a potential duplicate. |
-| `volunteers_duplicate_skip.csv` | 2 | First row inserts into core; second is skipped by the create-only upsert (`core.rows_skipped_duplicates=1`). |
+| `volunteers_duplicate_skip.csv` | 2 | First row inserts into core; second auto-resolves against the existing record (`core.rows_deduped_auto=1`, `dedupe_suggestions.decision=AUTO_MERGED`). |
 
 Document additional nuances (DQ messages, counts, etc.) as the importer matures. For IMP-11, expect the invalid CSV to yield the following per-rule counts when run via CLI or worker:
 
@@ -40,7 +40,7 @@ To inspect duplicate skips in the core load stage:
 flask importer run --source csv --file ops/testdata/importer_golden_dataset_v0/volunteers_duplicate_skip.csv --summary-json
 ```
 
-The table output will show `core_duplicates: 1`, and the emitted JSON summary will include `"core": {"rows_created": 1, "rows_updated": 0, "rows_skipped_duplicates": 1, ...}` for automation or regression assertions.
+The emitted JSON summary now includes `"core": {"rows_created": 0, "rows_updated": 1, "rows_deduped_auto": 1, ...}` plus a `dedupe_suggestions` record with `decision="auto_merged"` and `match_type="email"`.
 
 ## Extending the Dataset
 
@@ -52,5 +52,5 @@ The table output will show `core_duplicates: 1`, and the emitted JSON summary wi
 
 - **`volunteers_idempotent_replay.csv` (planned)** — identical to `volunteers_valid.csv`; rerun after an initial import to confirm zero new inserts and `rows_updated` tracking.
 - **`volunteers_changed_payload.csv` (planned)** — same `external_id` with updated contact details to exercise update-vs-insert survivorship logic.
-- **`volunteers_email_vs_phone.csv` (planned)** — conflicting records where email matches but phone differs and vice versa; validates deterministic dedupe paths.
+- **`volunteers_email_vs_phone.csv` (planned)** — conflicting records where email matches but phone differs and vice versa; validates deterministic dedupe paths (expect `rows_deduped_auto` increments when heuristics are decisive).
 - Update this README with expected counters once Sprint 3 implementation lands, including `rows_updated`, `dedupe.decisions`, and change-log assertions.

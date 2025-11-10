@@ -82,6 +82,8 @@ def test_importer_model_roundtrip(app):
         primary_contact_id=volunteer_primary.id,
         candidate_contact_id=volunteer_candidate.id,
         score=0.95,
+        match_type="email",
+        confidence_score=0.95,
         features_json={"email": 1.0},
         decision=DedupeDecision.PENDING,
     )

@@ -309,6 +309,15 @@ class ImporterMonitoring:
         if Counter
         else None
     )
+    DEDUPE_AUTO_TOTAL = (
+        Counter(
+            "importer_dedupe_auto_total",
+            "Total deterministic dedupe matches resolved automatically.",
+            labelnames=("match_type",),
+        )
+        if Counter
+        else None
+    )
     RUNS_ENQUEUE_COUNTER = (
         Counter(
             "importer_runs_enqueued_total",
@@ -407,3 +416,9 @@ class ImporterMonitoring:
             cls.IDEMPOTENT_ROWS_UPDATED.labels(source=label).inc(max(updated, 0))
         if cls.IDEMPOTENT_ROWS_SKIPPED and skipped:
             cls.IDEMPOTENT_ROWS_SKIPPED.labels(source=label).inc(max(skipped, 0))
+
+    @classmethod
+    def record_deterministic_dedupe(cls, *, match_type: str) -> None:
+        label = match_type or "unknown"
+        if cls.DEDUPE_AUTO_TOTAL:
+            cls.DEDUPE_AUTO_TOTAL.labels(match_type=label).inc()

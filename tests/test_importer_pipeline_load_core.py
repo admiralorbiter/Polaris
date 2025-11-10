@@ -5,6 +5,8 @@ from flask_app.models import (
     CleanVolunteer,
     ContactEmail,
     ContactPhone,
+    DedupeDecision,
+    DedupeSuggestion,
     EmailType,
     ExternalIdMap,
     ImportRun,
@@ -80,6 +82,7 @@ def test_load_core_volunteers_inserts_contacts(app):
     )
 
     assert summary.rows_created == 1
+    assert summary.rows_deduped_auto == 0
     assert summary.rows_skipped_duplicates == 0
     assert row.status == StagingRecordStatus.LOADED
     assert email.is_primary is True
@@ -88,11 +91,13 @@ def test_load_core_volunteers_inserts_contacts(app):
     counts = run.counts_json["core"]["volunteers"]
     assert counts["rows_created"] == 1
     assert counts["rows_updated"] == 0
+    assert counts["rows_deduped_auto"] == 0
     assert counts["rows_skipped_duplicates"] == 0
     assert counts["rows_skipped_no_change"] == 0
     metrics = run.metrics_json["core"]["volunteers"]
     assert metrics["rows_created"] == 1
     assert metrics["rows_updated"] == 0
+    assert metrics["rows_deduped_auto"] == 0
 
 
 def test_load_core_volunteers_skips_duplicates(app):
@@ -118,14 +123,19 @@ def test_load_core_volunteers_skips_duplicates(app):
     db.session.commit()
 
     assert summary.rows_created == 0
-    assert summary.rows_skipped_duplicates == 1
+    assert summary.rows_updated == 1
+    assert summary.rows_deduped_auto == 1
     clean_row = CleanVolunteer.query.filter_by(run_id=run.id).one()
-    assert clean_row.load_action == "skipped_duplicate"
+    assert clean_row.load_action == "deterministic_update"
     assert StagingVolunteer.query.filter_by(run_id=run.id).one().status == StagingRecordStatus.LOADED
     counts = run.counts_json["core"]["volunteers"]
     assert counts["rows_created"] == 0
-    assert counts["rows_updated"] == 0
-    assert counts["rows_skipped_duplicates"] == 1
+    assert counts["rows_updated"] == 1
+    assert counts["rows_deduped_auto"] == 1
+    suggestion = DedupeSuggestion.query.filter_by(run_id=run.id).one()
+    assert suggestion.decision == DedupeDecision.AUTO_MERGED
+    assert suggestion.match_type == "email"
+    assert float(suggestion.confidence_score) == 1.0
 
 
 def test_load_core_volunteers_dry_run(app):
@@ -147,10 +157,12 @@ def test_load_core_volunteers_dry_run(app):
     counts = run.counts_json["core"]["volunteers"]
     assert counts["rows_created"] == 0
     assert counts["rows_updated"] == 0
+    assert counts["rows_deduped_auto"] == 0
     assert counts["dry_run"] is True
     metrics_core = run.metrics_json["core"]["volunteers"]
     assert metrics_core["rows_created"] == 1
     assert metrics_core["rows_updated"] == 0
+    assert metrics_core["rows_deduped_auto"] == 0
 
 
 def test_load_core_volunteers_updates_existing_contact(app):
@@ -192,12 +204,56 @@ def test_load_core_volunteers_updates_existing_contact(app):
     assert primary_phone.phone_number == "+14155550199"
     assert counts_update["rows_updated"] == 1
     assert counts_update["rows_created"] == 0
+    assert counts_update["rows_deduped_auto"] == 0
     assert metrics_update["rows_updated"] == 1
+    assert metrics_update["rows_deduped_auto"] == 0
 
     change_entries = ChangeLogEntry.query.filter_by(run_id=run_update.id).all()
     changed_fields = {entry.field_name for entry in change_entries}
     assert "email" in changed_fields
     assert "phone_e164" in changed_fields
+
+
+def test_load_core_volunteers_deterministic_email_match_updates_existing_contact(app):
+    seed_run = _make_run()
+    _make_validated_row(
+        seed_run, seq=1, email="deterministic@example.org", phone="+14155550000", external_id="seed-ext"
+    )
+    promote_clean_volunteers(seed_run, dry_run=False)
+    load_core_volunteers(seed_run, dry_run=False)
+    db.session.commit()
+
+    volunteer = Volunteer.query.filter_by(last_name="User1").one()
+
+    dedupe_run = _make_run()
+    _make_validated_row(
+        dedupe_run,
+        seq=2,
+        email="deterministic@example.org",
+        phone="+14155550099",
+        external_id="fresh-ext-1",
+    )
+    promote_clean_volunteers(dedupe_run, dry_run=False)
+    summary = load_core_volunteers(dedupe_run, dry_run=False)
+    db.session.commit()
+    db.session.refresh(dedupe_run)
+
+    phone_entry = ContactPhone.query.filter_by(contact_id=volunteer.id, is_primary=True).one()
+    clean_row = CleanVolunteer.query.filter_by(run_id=dedupe_run.id).one()
+    counts = dedupe_run.counts_json["core"]["volunteers"]
+    metrics = dedupe_run.metrics_json["core"]["volunteers"]
+    suggestion = DedupeSuggestion.query.filter_by(run_id=dedupe_run.id).one()
+
+    assert summary.rows_updated == 1
+    assert summary.rows_deduped_auto == 1
+    assert clean_row.load_action == "deterministic_update"
+    assert counts["rows_deduped_auto"] == 1
+    assert metrics["rows_deduped_auto"] == 1
+    assert suggestion.decision == DedupeDecision.AUTO_MERGED
+    assert suggestion.features_json["match_type"] == "email"
+    assert suggestion.match_type == "email"
+    assert float(suggestion.confidence_score) == 1.0
+    assert phone_entry.phone_number == "+14155550099"
 
 
 def test_load_core_volunteers_reactivates_soft_deleted_mapping(app):
@@ -239,6 +295,7 @@ def test_load_core_volunteers_reactivates_soft_deleted_mapping(app):
     assert refreshed_map.upstream_deleted_reason is None
     assert clean_row.load_action == "reactivated"
     assert counts_reactivate["rows_reactivated"] == 1
+    assert counts_reactivate["rows_deduped_auto"] == 0
 
 
 def test_load_core_volunteers_flags_missing_external_id(app):

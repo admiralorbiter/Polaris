@@ -556,6 +556,7 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Priority: email match → phone match → combined heuristics; flag ambiguous cases for future FUZZY dedupe.
 - Record dedupe decisions in `dedupe_suggestions` with `decision="auto_resolved"` for audit.
 - Update UI summaries to highlight when runs resolve duplicates vs create new contacts.
+- Rows lacking both email and phone remain manual remediation; deterministic flow requires at least one normalized key.
 
 **Implementation Outline**:
 - Layer deterministic checks immediately after external ID resolution: email → phone → combined heuristic.
@@ -580,9 +581,9 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - **UI**: Smoke-test dashboard summary for dedupe counts, ensure no regressions.
 
 **Open Questions / Clarifications**:
-- How do we handle contacts lacking both email and phone — defer entirely to Sprint 5 fuzzy dedupe?
-- Should deterministic dedupe treat case-insensitive emails with plus addressing as the same record?
-- Who approves dashboard UX changes for highlighting dedupe outcomes?
+- ❗ Contacts without email/phone remain manual until fuzzy dedupe work lands (no auto resolution).
+- ✅ Deterministic dedupe treats case-insensitive emails with plus addressing as the same record.
+- UX approvals handled by importer squad lead (no change to existing workflow).
 
 ### IMP-32 — Survivorship v1 _(5 pts)_
 **User story**: As a steward, conflicts resolve predictably.  
