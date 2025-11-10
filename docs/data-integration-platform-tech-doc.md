@@ -490,52 +490,178 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 **Epic**: EPIC-3  
 **Goal**: True idempotency via `external_id_map`; deterministic matching (email/phone); survivorship v1.
 
+### Sprint 3 Overview
+- **Theme**: Harden ingestion so repeated runs, deterministic identity decisions, and conflict resolution stay consistent without manual cleanup.
+- **Shared architecture work**: Align loader, dedupe, and survivorship stages around a common `resolve_import_target` helper backed by `external_id_map`.
+- **Data & schema**: Evaluate `external_id_map` index coverage, add `ingest_version`/`last_seen_at` defaults, and stage Alembic migrations ahead of dev work.
+- **Operational readiness**: Document retry behavior changes for support, define rollback steps if survivorship overwrites regress, and brief QA on new regression suites.
+- **Risks / assumptions**: Consistent normalization (email/phone), availability of external IDs in staging, and acceptable latency for repeated `external_id_map` lookups.
+- **Clarifications requested**: Confirm external system namespaces, whether survivorship precedence differs by field group, and who owns dashboard updates for new counters.
+
 ### IMP-30 — External ID map & idempotent upsert _(8 pts)_
 **User story**: As an operator, retries do not create duplicates.  
 **Acceptance Criteria**
 - `(external_system, external_id)` recorded; `first_seen_at`/`last_seen_at` maintained.  
 - Retries update not insert; counters reflect created/updated/skipped.  
+- `counts_json.core.volunteers` tracks `rows_created`, `rows_updated`, `rows_skipped_no_change`.  
+- DQ/retry flows respect external IDs and avoid duplicate staging promotions.  
 **Dependencies**: IMP-2, IMP-12.
+**Status**: 🚧 Planned for Sprint 3 kickoff.
 **Implementation Notes (Sprint 3 prep)**:
 - Reuse `external_id_map` schema from IMP-2; ensure staging rows populate `external_system`/`external_id` before promotion.
 - Loader should lookup `external_id_map` to decide between `UPDATE` vs `INSERT`, writing outcomes to `counts_json.core.volunteers`.
 - Persist provenance in `change_log` when updates occur; include `ingest_version` for conflict tracking.
 - Expose run-level metrics: `rows_updated`, `rows_created`, `rows_skipped_no_change`.
 
+**Implementation Outline**:
+- Introduce shared `resolve_import_target(volunteer_row)` wrapping normalization and `external_id_map` lookup for loader + remediation reuse.
+- On misses, create core person and seed `external_id_map` with `first_seen_at`; on hits, route to update workflow and bump `last_seen_at`.
+- Update promotion job to persist `ingest_version` on `external_id_map` and tie `change_log` entries back to the triggering run.
+- Adjust retry controller to short-circuit inserts when `external_id_map` already links a core record.
+
+**Data Model & Storage**:
+- Add covering index on `external_id_map(external_system, external_id, core_person_id)`.
+- Backfill missing `external_system` values and set default `last_seen_at` via migration.
+- Append nullable `ingest_version` column (Alembic) populated from run metadata.
+
+**Metrics & Telemetry**:
+- Emit Prometheus counters `importer_idempotent_rows_created`, `importer_idempotent_rows_updated`, `importer_idempotent_rows_skipped`.
+- Log `idempotency_action` and `external_id_hit` fields for each loader decision.
+- Surface counters in run summary payloads for dashboard consumption.
+
+**Testing Expectations**:
+- **Unit**: `resolve_import_target`, loader branching, change-log serialization.
+- **Integration**: Replay same file after success + after payload change; assert no duplicate inserts and counters update correctly.
+- **Regression**: Verify imports missing external IDs fail fast with actionable errors.
+- **Golden data**: Extend dataset with repeated external IDs covering insert/update/skip cases.
+
+**Open Questions / Clarifications**:
+- Do we support soft deletes or reassignments in `external_id_map` when a record is removed upstream?
+- Should modified retries increment a distinct `rows_changed` counter?
+- Who will implement FE changes for the new idempotency counters in dashboards?
+
 ### IMP-31 — Deterministic dedupe (email/phone) _(8 pts)_
 **User story**: As a steward, exact matches resolve to the same core person.  
 **Acceptance Criteria**
 - Blocking on normalized email & E.164 phone; updates instead of inserts.  
 - Counters for resolved vs inserted.  
+- `dedupe_suggestions` captures `decision="auto_resolved"` for deterministic matches.  
+- `counts_json.core.volunteers` increments `rows_deduped_auto`.  
 **Dependencies**: IMP-30.
+**Status**: 🟡 Pending IMP-30 delivery.
 **Implementation Notes (Sprint 3 prep)**:
 - Normalize inputs with existing helper (`normalize_contact_fields`) prior to lookup.
 - Priority: email match → phone match → combined heuristics; flag ambiguous cases for future FUZZY dedupe.
 - Record dedupe decisions in `dedupe_suggestions` with `decision="auto_resolved"` for audit.
 - Update UI summaries to highlight when runs resolve duplicates vs create new contacts.
 
+**Implementation Outline**:
+- Layer deterministic checks immediately after external ID resolution: email → phone → combined heuristic.
+- When match found, route to update path and pass normalized payload into survivorship helper.
+- Persist result in `dedupe_suggestions` with `match_type` (`email`, `phone`, `combined`) and provenance data.
+- Funnel ambiguous multi-match cases into backlog queue for future fuzzy dedupe flow.
+
+**Data Model & Storage**:
+- Add index on `core_people.normalized_email` and confirm E.164 storage for `normalized_phone`.
+- Extend `dedupe_suggestions` with `match_type` and optional `confidence_score` (default `1.0` for deterministic).
+- Ensure run summary schema supports `rows_deduped_auto`.
+
+**Metrics & Telemetry**:
+- Emit `importer_dedupe_auto_total{match_type}` and response-time histogram for deterministic checks.
+- Include dedupe outcomes in structured logs (`dedupe_decision`, `dedupe_match_type`).
+- Surface resolved vs inserted counts in dashboard summary cards.
+
+**Testing Expectations**:
+- **Unit**: Normalization pathways, deterministic match branching, audit writes.
+- **Integration**: Import duplicates across email/phone combos; confirm updates not inserts and counters accurate.
+- **Golden data**: Create fixtures for email-only, phone-only, and dual-match scenarios plus ambiguous matches.
+- **UI**: Smoke-test dashboard summary for dedupe counts, ensure no regressions.
+
+**Open Questions / Clarifications**:
+- How do we handle contacts lacking both email and phone — defer entirely to Sprint 5 fuzzy dedupe?
+- Should deterministic dedupe treat case-insensitive emails with plus addressing as the same record?
+- Who approves dashboard UX changes for highlighting dedupe outcomes?
+
 ### IMP-32 — Survivorship v1 _(5 pts)_
 **User story**: As a steward, conflicts resolve predictably.  
 **Acceptance Criteria**
 - Prefer non-null; prefer manual edits; prefer most-recent verified.  
 - Change log entries created.  
+- Per-field decisions include before/after payloads and `source_run_id`.  
+- Admin UI surfaces survivorship summary in run detail.  
 **Dependencies**: IMP-31.
+**Status**: ⚪ Discovery in progress — precedence matrix pending sign-off.
 **Implementation Notes (Sprint 3 prep)**:
 - Define field precedence tables (manual remediation > source freshest > existing core).
 - Store per-field decisions in `change_log` with before/after payloads and `source_run_id`.
 - Provide helper for comparing timestamps/verified flags; reuse in remediation success analytics.
 - Update admin UI messaging to surface survivorship outcomes when viewing run detail.
 
+**Implementation Outline**:
+- Implement `apply_survivorship(core_person, incoming_payload, context)` returning merged record plus decision log.
+- Persist change-log entries with per-field provenance, including `ingest_version` and verification timestamps.
+- Update run detail API to expose survivorship breakdown (counts and notable overrides) for the UI.
+- Coordinate with remediation tooling so manual edits register as highest-precedence inputs.
+
+**Data Model & Storage**:
+- Extend `change_log` with `field_name`, `provenance_json`, and `verified_at` metadata if missing.
+- Evaluate need for `core_people.last_verified_at` (or equivalent) to inform precedence.
+- Confirm migrations land prior to QA so fixtures stay consistent.
+
+**Metrics & Telemetry**:
+- Add `importer_survivorship_decisions_total{decision}` counter capturing override vs keep scenarios.
+- Log warnings when survivorship overrides recent manual remediation to flag potential misconfigurations.
+- Include survivorship summary in dashboard/API payloads for transparency.
+
+**Testing Expectations**:
+- **Unit**: Precedence matrix permutations, helper comparisons for timestamps/verified flags.
+- **Integration**: Conflict imports verifying change-log entries and UI payload updates.
+- **Golden data**: Scenarios where verified data should prevail vs newest but unverified data.
+- **Regression**: Ensure survivorship honors dry-run mode and remediation flows.
+
+**Open Questions / Clarifications**:
+- What is the tie-breaker when timestamps share identical precision?
+- Should precedence be configurable per field group (contact vs address vs notes)?
+- Who drafts admin UI copy explaining survivorship decisions to stewards?
+
 ### IMP-33 — Idempotency regression tests _(3 pts)_
 **User story**: As QA, running the same file twice yields no net new records.  
 **Acceptance Criteria**
 - Replay test passes; diffs only when payload changed.  
+- Metrics emitted for created vs updated vs skipped remain stable between runs.  
+- `idempotency_summary.json` artifact generated for dashboards.  
 **Dependencies**: IMP-30.
+**Status**: 🟢 Ready to start once IMP-30 lands.
 **Implementation Notes (Sprint 3 prep)**:
 - Extend golden dataset with duplicate IDs and changed payload revisions.
 - Add pytest fixture to run same CSV twice (dry-run + real run) asserting counts + external map stability.
 - Cover edge cases where contact data changes but dedupe path should update rather than insert.
 - Capture regression metrics via CI job (export `idempotency_summary.json`) for dashboards.
+
+**Implementation Outline**:
+- Build pytest scenario executing dry-run then real run with identical file, asserting zero net new core records.
+- Create helper assertions ensuring `external_id_map` entries remain stable apart from timestamp updates.
+- Integrate regression suite into CI, publishing `idempotency_summary.json` artifact for dashboards.
+
+**Data & Fixtures**:
+- Expand golden dataset with identical replays, changed payloads, and deterministic dedupe coverage.
+- Annotate fixtures with expected counters and survivorship outcomes for quick validation.
+- Document regeneration process when schema or counters evolve.
+
+**Metrics & Telemetry**:
+- Push synthetic metrics from regression suite into monitoring sandbox to validate dashboard ingestion.
+- Alert on deltas >0 in created rows between replay runs.
+- Log test run IDs and outcomes for traceability.
+
+**Testing Expectations**:
+- **Pytest**: Parametrize dry-run vs live run combos and multiple sources.
+- **CLI smoke**: Validate scripted replay via existing tooling (e.g. admin helpers).
+- **CI**: Ensure run completes in <5 minutes and blocks merge on regression.
+
+**Open Questions / Clarifications**:
+- Should suite also cover partial file replays or out-of-order retries?
+- Who triages regression failures surfaced via dashboards (QA vs Eng on-call)?
+- Do we need environment-specific toggles to keep regression metrics out of production dashboards?
 
 ---
 
