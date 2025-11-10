@@ -15,6 +15,8 @@
   Run the pipeline inline within the CLI process (useful for debugging and tests).
 - `flask importer run --source csv --file path/to/volunteers.csv --inline --summary-json`  
   Emit the full summary payload in JSON (only valid with `--inline`).
+- `flask importer run --source csv --file path/to/volunteers.csv --dry-run`  
+  Execute the full pipeline but skip core writes. `metrics_json` will contain would-be inserts/updates and the run is labeled DRY RUN in the dashboard.
 - `flask importer retry --run-id <id>`  
   Retry a failed or pending run using stored parameters. Requires the original upload file to still exist.
 
@@ -61,6 +63,13 @@ flask importer run --source csv --file <path> --inline --summary-json
 3. **Review worker logs**: If using async mode, check Celery worker logs for task execution details.
 4. **Validate CSV format**: Use golden dataset files as reference for canonical CSV format.
 5. **Test with dry-run**: Use `--dry-run` flag to validate pipeline without writing to core tables.
+
+### Admin UI Tips
+
+- **Dry-run toggle**: On `/admin/imports/`, select “Dry run (no writes to database)” to enqueue with `dry_run=true`. Successful runs show a yellow “DRY RUN” badge and detail banner clarifying no core writes occurred.
+- **Runs dashboard filters**: `/admin/imports/runs/dashboard` now includes an “Include dry runs” checkbox. Disable it to hide simulations from aggregate stats.
+- **Remediation stats**: DQ inbox fetches remediation outcomes from `GET /admin/imports/remediation/stats?days=<N>`; useful for tracking steward effectiveness.
+- **Runs stats API**: `GET /importer/runs/stats?include_dry_runs=0` surfaces aggregate counts for monitoring dashboards.
 
 ### Performance Considerations
 

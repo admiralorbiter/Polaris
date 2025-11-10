@@ -280,6 +280,7 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Drill-down shows `counts_json` & timestamps.  
 - Filters: source/status/date; pagination.  
 **Dependencies**: IMP-13.
+**Status**: ✅ Delivered in Sprint 2 — Dashboard lists runs with summary cards, auto-refresh, drill-down modal, retry/download, and dry-run indicators.
 
 **UI Wireframe & Layout**:
 - **Main table**: Sortable columns (run_id, source, status badge, started_at, ended_at, duration, rows_staged, rows_validated, rows_quarantined, rows_inserted, rows_skipped_duplicates)
@@ -319,6 +320,7 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Prometheus metrics exposed via `ImporterMonitoring`:
   - `importer_runs_list_requests_total`, `importer_runs_list_request_seconds`, `importer_runs_list_result_size`
   - `importer_runs_detail_requests_total`, latency histogram, and stats variants
+- **New counters (Sprint 2)**: `importer_runs_enqueued_total{status="success",dry_run="true|false"}`, `importer_dry_run_total{status}`, and `importer_dry_run_request_seconds` histogram record enqueue/dry-run telemetry.
 - Structured logs attach `importer_*` fields (status, source, response_time_ms, run_id)
 - Client telemetry hooks via `data-component`/`data-action` attributes for future instrumentation
 
@@ -338,6 +340,7 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Filter by rule/severity/run; row detail shows raw & normalized views.  
 - Export CSV of violations.  
 **Dependencies**: IMP-11.
+**Status**: ✅ Delivered in Sprint 2 — Inbox includes filters, CSV export, violation detail modal, remediation launcher, and remediation stats cards.
 
 **UI Wireframe & Layout**:
 - **Main table**: Columns (violation_id, run_id link, staging_volunteer_id, rule_code badge, severity badge, status badge, created_at, staging row preview)
@@ -401,12 +404,14 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Route: `POST /importer/violations/<id>/remediate`
 - Permission: `remediate_imports` or equivalent (stricter than view-only)
 - Audit: Log remediation events (violation_id, user_id, edited_fields JSON diff, timestamp, outcome)
+**Status**: ✅ Delivered in Sprint 2 — JSON edit modal with validation, single-row remediation run, audit trail, and remediation stats endpoint.
 
 **Metrics & Telemetry**:
 - Track remediation success rate (fixed vs still-quarantined)
 - Track common fixes (which fields edited most often, which rules resolved)
 - Expose remediation stats: `GET /importer/remediation/stats?days=30`
 - Re-queue should create a new mini-run (single-row import) or batch with other remediated rows
+- **New endpoints**: `/admin/imports/remediation/stats?days=<N>` powers DQ inbox summary cards; responses feed remediation success telemetry dashboards.
 
 **Testing Expectations**:
 - **Unit tests**: Edit form validation, DQ re-run logic, violation status transitions, audit logging
@@ -420,6 +425,7 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 **Acceptance Criteria**
 - `--dry-run`/UI toggle executes pipeline but skips core writes; run clearly labeled.  
 **Dependencies**: IMP-12, IMP-20.
+**Status**: ✅ Delivered in Sprint 2 — UI/CLI propagate `dry_run`, runs tagged with DRY RUN badges, detail messaging, Prometheus counters, and include-dry-runs filter.
 
 **UI Wireframe & Layout**:
 - **Upload form toggle**: Checkbox "Dry run (no writes to database)" above file upload
@@ -436,12 +442,47 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Track dry-run usage (frequency, user_id)
 - Dry-run runs should still populate `metrics_json` with full evaluation counts
 - Dashboard filter: "Include dry runs" toggle (default: show all)
+- `GET /importer/runs/stats?include_dry_runs=0|1` provides aggregate counts for monitoring dashboards; ensure API response labels dry-run state.
 
 **Testing Expectations**:
 - **Unit tests**: Dry-run flag propagation, core write skip logic, metrics_json population
 - **Integration tests**: Upload with dry-run toggle, verify no core inserts, verify metrics_json populated
 - **Golden data**: Run `volunteers_valid.csv` with dry-run, verify counts in metrics_json, verify no core records
 - **UI tests**: Verify dry-run checkbox, badge display, messaging (HTML structure)
+
+---
+
+### Sprint 2 Completion Status
+
+**Status**: ✅ **COMPLETE** — Dashboard, DQ inbox, remediation, and dry-run UX shipped.
+
+**Delivered Features**:
+- ✅ Runs dashboard with filters, auto-refresh, drill-down modal, retry/download, and dry-run labels (`IMP-20`)
+- ✅ DQ inbox with rule/severity filters, CSV export, remediation launcher, and stats cards (`IMP-21`)
+- ✅ Remediation workflow with steward edit modal, DQ re-run, audit logging, and remediation metrics endpoint (`IMP-22`)
+- ✅ Dry-run UI toggle, run badges, include-dry-runs filter, and telemetry counters (`IMP-23`)
+
+**Test Coverage**:
+- Unit tests: run filters & serialization, violation queries, remediation service, dry-run propagation
+- Integration tests: admin remediation API, runs list filters, dry-run pipeline behavior, CSV export
+- UI/JS tests: dashboard interactions, DQ inbox modal submission, dry-run checkbox/error handling
+- Golden data: `volunteers_invalid.csv` remediation fix, `volunteers_valid.csv` dry-run verification
+
+**Metrics & Observability**:
+- Added Prometheus counters/histograms for dry-run enqueue + latency (`importer_runs_enqueued_total`, `importer_dry_run_total`, `importer_dry_run_request_seconds`)
+- Remediation stats endpoint surfaces success/failure rates and common fixes
+- Dashboard includes dry-run filter state in API payloads for analytics
+
+**Known Limitations & Follow-ups**:
+- DQ inbox lacks bulk actions (suppress/mark won’t fix) — backlog for Sprint 3+
+- Remediation runs execute sequentially; batching noted for evaluation in Sprint 3
+- Need expanded golden dataset scenarios for idempotent replays and deterministic dedupe (Sprint 3 prep)
+
+**Next Steps for Sprint 3**:
+- Implement `external_id_map`-driven idempotent upsert and deterministic dedupe
+- Define survivorship rules and change log recording for updates
+- Extend golden dataset with replay + duplicate scenarios; add regression tests for idempotency (`IMP-33`)
+- Capture additional telemetry for update vs insert paths and dedupe outcomes
 
 ---
 
@@ -455,6 +496,11 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - `(external_system, external_id)` recorded; `first_seen_at`/`last_seen_at` maintained.  
 - Retries update not insert; counters reflect created/updated/skipped.  
 **Dependencies**: IMP-2, IMP-12.
+**Implementation Notes (Sprint 3 prep)**:
+- Reuse `external_id_map` schema from IMP-2; ensure staging rows populate `external_system`/`external_id` before promotion.
+- Loader should lookup `external_id_map` to decide between `UPDATE` vs `INSERT`, writing outcomes to `counts_json.core.volunteers`.
+- Persist provenance in `change_log` when updates occur; include `ingest_version` for conflict tracking.
+- Expose run-level metrics: `rows_updated`, `rows_created`, `rows_skipped_no_change`.
 
 ### IMP-31 — Deterministic dedupe (email/phone) _(8 pts)_
 **User story**: As a steward, exact matches resolve to the same core person.  
@@ -462,6 +508,11 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Blocking on normalized email & E.164 phone; updates instead of inserts.  
 - Counters for resolved vs inserted.  
 **Dependencies**: IMP-30.
+**Implementation Notes (Sprint 3 prep)**:
+- Normalize inputs with existing helper (`normalize_contact_fields`) prior to lookup.
+- Priority: email match → phone match → combined heuristics; flag ambiguous cases for future FUZZY dedupe.
+- Record dedupe decisions in `dedupe_suggestions` with `decision="auto_resolved"` for audit.
+- Update UI summaries to highlight when runs resolve duplicates vs create new contacts.
 
 ### IMP-32 — Survivorship v1 _(5 pts)_
 **User story**: As a steward, conflicts resolve predictably.  
@@ -469,12 +520,22 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Prefer non-null; prefer manual edits; prefer most-recent verified.  
 - Change log entries created.  
 **Dependencies**: IMP-31.
+**Implementation Notes (Sprint 3 prep)**:
+- Define field precedence tables (manual remediation > source freshest > existing core).
+- Store per-field decisions in `change_log` with before/after payloads and `source_run_id`.
+- Provide helper for comparing timestamps/verified flags; reuse in remediation success analytics.
+- Update admin UI messaging to surface survivorship outcomes when viewing run detail.
 
 ### IMP-33 — Idempotency regression tests _(3 pts)_
 **User story**: As QA, running the same file twice yields no net new records.  
 **Acceptance Criteria**
 - Replay test passes; diffs only when payload changed.  
 **Dependencies**: IMP-30.
+**Implementation Notes (Sprint 3 prep)**:
+- Extend golden dataset with duplicate IDs and changed payload revisions.
+- Add pytest fixture to run same CSV twice (dry-run + real run) asserting counts + external map stability.
+- Cover edge cases where contact data changes but dedupe path should update rather than insert.
+- Capture regression metrics via CI job (export `idempotency_summary.json`) for dashboards.
 
 ---
 

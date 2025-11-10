@@ -48,3 +48,10 @@ The table output will show `core_duplicates: 1`, and the emitted JSON summary wi
 2. Update the table above (or add a new section) with expected behavior after each importer enhancement (idempotency, fuzzy dedupe, etc.).
 3. Reference this dataset from story DoR/DoD checklists so every ticket identifies the scenarios it uses.
 
+### Sprint 3 Prep (Idempotency & Deterministic Dedupe)
+
+- **`volunteers_idempotent_replay.csv` (planned)** — identical to `volunteers_valid.csv`; rerun after an initial import to confirm zero new inserts and `rows_updated` tracking.
+- **`volunteers_changed_payload.csv` (planned)** — same `external_id` with updated contact details to exercise update-vs-insert survivorship logic.
+- **`volunteers_email_vs_phone.csv` (planned)** — conflicting records where email matches but phone differs and vice versa; validates deterministic dedupe paths.
+- Update this README with expected counters once Sprint 3 implementation lands, including `rows_updated`, `dedupe.decisions`, and change-log assertions.
+
