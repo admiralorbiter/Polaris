@@ -1,8 +1,15 @@
 import io
 
-from flask_app.importer.pipeline import stage_volunteers_from_csv
+from pathlib import Path
+
+from flask_app.importer.pipeline import (
+    load_core_volunteers,
+    promote_clean_volunteers,
+    run_minimal_dq,
+    stage_volunteers_from_csv,
+)
 from flask_app.models.base import db
-from flask_app.models.importer.schema import ImportRun, ImportRunStatus, StagingVolunteer
+from flask_app.models.importer.schema import CleanVolunteer, ImportRun, ImportRunStatus, StagingVolunteer
 
 
 def _make_csv_stream() -> io.StringIO:
@@ -65,3 +72,27 @@ def test_stage_volunteers_from_csv_dry_run_does_not_write(app):
     assert counts["rows_processed"] == 2
     assert counts["rows_staged"] == 0
     assert counts["dry_run"] is True
+
+
+def test_full_pipeline_dry_run_with_golden_dataset(app):
+    run = _create_import_run(dry_run=True)
+    csv_path = Path("ops/testdata/importer_golden_dataset_v0/volunteers_valid.csv")
+    with csv_path.open("r", encoding="utf-8", newline="") as handle:
+        stage_summary = stage_volunteers_from_csv(run, handle, source_system="csv", dry_run=True)
+    dq_summary = run_minimal_dq(run, dry_run=True)
+    clean_summary = promote_clean_volunteers(run, dry_run=True)
+    core_summary = load_core_volunteers(
+        run,
+        dry_run=True,
+        clean_candidates=clean_summary.candidates,
+    )
+    db.session.commit()
+
+    assert stage_summary.dry_run is True
+    assert dq_summary.dry_run is True
+    assert clean_summary.dry_run is True
+    assert core_summary.dry_run is True
+    assert core_summary.rows_inserted == 0
+    assert CleanVolunteer.query.count() == 0
+    metrics_core = run.metrics_json["core"]["volunteers"]
+    assert metrics_core["rows_inserted"] == 0

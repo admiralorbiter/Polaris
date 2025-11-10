@@ -29,6 +29,7 @@ from flask_app.models.importer.schema import (
 )
 from flask_app.utils.importer import is_importer_enabled
 from flask_app.utils.permissions import permission_required
+from config.monitoring import ImporterMonitoring
 
 
 admin_importer_blueprint = Blueprint("admin_importer", __name__, url_prefix="/admin/imports")
@@ -112,6 +113,7 @@ def importer_dashboard():
                 "finished_at": run.finished_at,
                 "notes": run.notes,
                 "can_retry": can_retry,
+                "dry_run": bool(run.dry_run),
             }
         )
     return render_template(
@@ -302,6 +304,8 @@ def importer_upload():
     except ValueError as exc:
         return jsonify({"error": str(exc)}), HTTPStatus.BAD_REQUEST
     source = (request.form.get("source") or "csv").lower()
+    dry_run_form = request.form.get("dry_run")
+    dry_run = str(dry_run_form).lower() in ("1", "true", "on", "yes")
     if source != "csv":
         return (
             jsonify({"error": "Only the CSV adapter is available at this time."}),
@@ -316,7 +320,7 @@ def importer_upload():
         run = ImportRun(
             source=source,
             adapter=source,
-            dry_run=False,
+            dry_run=dry_run,
             status=ImportRunStatus.PENDING,
             notes=f"Admin upload by user {current_user.id} ({file_storage.filename})",
             triggered_by_user_id=current_user.id,
@@ -325,7 +329,7 @@ def importer_upload():
             ingest_params_json={
                 "file_path": str(stored_path),
                 "source_system": source,
-                "dry_run": False,
+                "dry_run": dry_run,
                 "keep_file": True,  # Retain uploads for retry capability
             },
         )
@@ -336,15 +340,17 @@ def importer_upload():
         if celery_app is None:
             raise RuntimeError("Importer worker is not configured.")
 
+        task_kwargs = {
+            "run_id": run.id,
+            "file_path": str(stored_path),
+            "dry_run": dry_run,
+            "source_system": source,
+            "keep_file": True,
+        }
+
         async_result = celery_app.send_task(
             "importer.pipeline.ingest_csv",
-            kwargs={
-                "run_id": run.id,
-                "file_path": str(stored_path),
-                "dry_run": False,
-                "source_system": source,
-                "keep_file": True,
-            },
+            kwargs=task_kwargs,
         )
 
         AdminLog.log_action(
@@ -356,6 +362,7 @@ def importer_upload():
                     "task_id": async_result.id,
                     "filename": file_storage.filename,
                     "source": source,
+                    "dry_run": dry_run,
                 }
             ),
             ip_address=request.remote_addr,
@@ -369,8 +376,11 @@ def importer_upload():
                 "importer_task_id": async_result.id,
                 "importer_source": source,
                 "triggered_by_user_id": current_user.id,
+            "importer_dry_run": dry_run,
             },
         )
+
+        ImporterMonitoring.record_run_enqueued(user_id=current_user.id, dry_run=dry_run)
 
         return (
             jsonify(
@@ -464,6 +474,7 @@ def _retry_import_run_admin(run: ImportRun) -> tuple[str, str]:
     run.error_summary = None
     run.counts_json = {}
     run.metrics_json = {}
+    run.dry_run = bool(dry_run)
     db.session.commit()
 
     celery_app = get_celery_app(current_app)
@@ -489,6 +500,7 @@ def _retry_import_run_admin(run: ImportRun) -> tuple[str, str]:
                 "run_id": run.id,
                 "task_id": async_result.id,
                 "source": source_system,
+                "dry_run": dry_run,
             }
         ),
         ip_address=request.remote_addr,
@@ -502,8 +514,11 @@ def _retry_import_run_admin(run: ImportRun) -> tuple[str, str]:
             "importer_task_id": async_result.id,
             "importer_source": source_system,
             "triggered_by_user_id": current_user.id,
+            "importer_dry_run": dry_run,
         },
     )
+
+    ImporterMonitoring.record_run_enqueued(user_id=current_user.id, dry_run=dry_run)
 
     return async_result.id, "queued"
 

@@ -44,7 +44,7 @@ def test_list_runs_basic(importer_app, run_factory):
 
 
 def test_list_runs_filters_and_stats(importer_app, run_factory):
-    run_factory(source="csv", status=ImportRunStatus.SUCCEEDED, started_offset_minutes=30)
+    run_factory(source="csv", status=ImportRunStatus.SUCCEEDED, started_offset_minutes=30, dry_run=True)
     run_factory(source="crm", status=ImportRunStatus.FAILED, started_offset_minutes=20)
     run_factory(source="crm", status=ImportRunStatus.SUCCEEDED, started_offset_minutes=10)
 
@@ -59,6 +59,23 @@ def test_list_runs_filters_and_stats(importer_app, run_factory):
     assert stats.statuses[ImportRunStatus.SUCCEEDED.value] == 1
     assert stats.statuses[ImportRunStatus.FAILED.value] == 1
     assert stats.sources["crm"] == 2
+    assert stats.dry_runs.get("true", 0) == 0
+    assert stats.dry_runs.get("false", 0) == 2
+
+
+def test_list_runs_exclude_dry_runs(importer_app, run_factory):
+    run_factory(source="csv", status=ImportRunStatus.SUCCEEDED, dry_run=True)
+    run_factory(source="csv", status=ImportRunStatus.SUCCEEDED, dry_run=False)
+
+    service = ImportRunService()
+    filters = RunFilters.coerce(include_dry_runs="0")
+    result = service.list_runs(filters)
+    assert result.total == 1
+    assert all(not item.dry_run for item in result.items)
+
+    stats = service.get_stats(filters)
+    assert stats.dry_runs.get("true", 0) == 0
+    assert stats.dry_runs.get("false", 0) == 1
 
 
 def test_get_run_not_found(importer_app):

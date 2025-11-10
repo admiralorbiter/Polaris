@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -137,6 +138,41 @@ def test_importer_admin_upload_enqueues(logged_in_admin, app, tmp_path):
     assert stored_files, "Upload file should be persisted locally for worker access."
 
 
+def test_importer_admin_upload_dry_run(logged_in_admin, app, tmp_path):
+    client, admin_user = logged_in_admin
+    upload_dir = tmp_path / "uploads"
+    _enable_importer(app, upload_dir)
+
+    async_result = Mock()
+    async_result.id = "celery-task-dry-run"
+    celery_app = Mock()
+    celery_app.send_task.return_value = async_result
+
+    payload = BytesIO(b"first_name,last_name,email\nAda,Lovelace,ada@example.org\n")
+    with patch("flask_app.routes.admin_importer.get_celery_app", return_value=celery_app), patch(
+        "flask_app.routes.admin_importer.ImporterMonitoring.record_run_enqueued"
+    ) as record_metric:
+        response = client.post(
+            "/admin/imports/upload",
+            data={"file": (payload, "volunteers.csv"), "source": "csv", "dry_run": "1"},
+            content_type="multipart/form-data",
+        )
+
+    assert response.status_code == 202
+    data = response.get_json()
+    run = db.session.get(ImportRun, data["run_id"])
+    assert run is not None and run.dry_run is True
+    assert run.ingest_params_json["dry_run"] is True
+    celery_app.send_task.assert_called_once()
+    sent_kwargs = celery_app.send_task.call_args.kwargs["kwargs"]
+    assert sent_kwargs["dry_run"] is True
+
+    log_entry = AdminLog.query.order_by(AdminLog.id.desc()).first()
+    details = json.loads(log_entry.details)
+    assert details["dry_run"] is True
+    record_metric.assert_called_once_with(user_id=admin_user.id, dry_run=True)
+
+
 def test_importer_admin_upload_handles_enqueue_failure(logged_in_admin, app, tmp_path):
     client, _ = logged_in_admin
     upload_dir = tmp_path / "uploads"
@@ -266,6 +302,56 @@ def test_importer_admin_retry_enqueues(logged_in_admin, app, tmp_path):
     log_entry = AdminLog.query.order_by(AdminLog.id.desc()).first()
     assert log_entry is not None
     assert log_entry.action == "IMPORT_RUN_RETRIED"
+
+
+def test_importer_admin_retry_preserves_dry_run(logged_in_admin, app, tmp_path):
+    client, admin_user = logged_in_admin
+    upload_dir = tmp_path / "uploads"
+    _enable_importer(app, upload_dir)
+
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    csv_file = upload_dir / "dry_test.csv"
+    csv_file.write_text("first_name,last_name,email\nAda,Lovelace,ada@example.org\n", encoding="utf-8")
+
+    run = ImportRun(
+        source="csv",
+        adapter="csv",
+        status=ImportRunStatus.FAILED,
+        dry_run=False,
+        triggered_by_user_id=admin_user.id,
+        counts_json={},
+        metrics_json={},
+        ingest_params_json={
+            "file_path": str(csv_file),
+            "source_system": "csv",
+            "dry_run": True,
+            "keep_file": True,
+        },
+    )
+    db.session.add(run)
+    db.session.commit()
+
+    async_result = Mock()
+    async_result.id = "celery-task-retry-dry-run"
+    celery_app = Mock()
+    celery_app.send_task.return_value = async_result
+
+    with patch("flask_app.routes.admin_importer.get_celery_app", return_value=celery_app), patch(
+        "flask_app.routes.admin_importer.ImporterMonitoring.record_run_enqueued"
+    ) as record_metric:
+        response = client.post(f"/admin/imports/{run.id}/retry")
+
+    assert response.status_code == 202
+    db.session.refresh(run)
+    assert run.dry_run is True
+    celery_app.send_task.assert_called_once()
+    sent_kwargs = celery_app.send_task.call_args.kwargs["kwargs"]
+    assert sent_kwargs["dry_run"] is True
+
+    log_entry = AdminLog.query.order_by(AdminLog.id.desc()).first()
+    details = json.loads(log_entry.details)
+    assert details["dry_run"] is True
+    record_metric.assert_called_once_with(user_id=admin_user.id, dry_run=True)
 
 
 def test_importer_admin_retry_missing_params(logged_in_admin, app, tmp_path):

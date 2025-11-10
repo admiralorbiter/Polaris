@@ -148,6 +148,7 @@ class RunStats:
     total: int
     statuses: Mapping[str, int]
     sources: Mapping[str, int]
+    dry_runs: Mapping[str, int]
 
 
 class ImportRunService:
@@ -205,9 +206,15 @@ class ImportRunService:
             )
         }
         source_counts = {source: count for source, count in (query.with_entities(ImportRun.source, func.count()).group_by(ImportRun.source).all())}
+        dry_run_counts = {"true": 0, "false": 0}
+        for dry_run_value, count in (
+            query.with_entities(ImportRun.dry_run, func.count()).group_by(ImportRun.dry_run).all()
+        ):
+            label = "true" if bool(dry_run_value) else "false"
+            dry_run_counts[label] = dry_run_counts.get(label, 0) + count
         total = sum(status_counts.values())
 
-        return RunStats(total=total, statuses=status_counts, sources=source_counts)
+        return RunStats(total=total, statuses=status_counts, sources=source_counts, dry_runs=dry_run_counts)
 
     def list_sources(self) -> list[str]:
         rows = (

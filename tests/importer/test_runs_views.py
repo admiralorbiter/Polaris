@@ -27,8 +27,8 @@ def test_runs_list_requires_authentication(importer_app, client):
 
 
 def test_runs_list_success(importer_app, client, run_factory):
-    run_factory(source="csv", status=ImportRunStatus.SUCCEEDED)
-    run_factory(source="crm", status=ImportRunStatus.FAILED)
+    run_factory(source="csv", status=ImportRunStatus.SUCCEEDED, dry_run=True)
+    run_factory(source="crm", status=ImportRunStatus.FAILED, dry_run=False)
 
     _login_super_admin(importer_app, client)
     response = client.get("/importer/runs")
@@ -36,6 +36,8 @@ def test_runs_list_success(importer_app, client, run_factory):
     payload = response.get_json()
     assert payload["total"] == 2
     assert len(payload["runs"]) == 2
+    dry_flags = {run["run_id"]: run["dry_run"] for run in payload["runs"]}
+    assert any(dry_flags.values())
 
     audit_entries = AdminLog.query.filter_by(action="IMPORT_RUN_VIEW").all()
     assert audit_entries
@@ -52,14 +54,28 @@ def test_run_detail(importer_app, client, run_factory):
 
 
 def test_run_stats(importer_app, client, run_factory):
-    run_factory(source="csv", status=ImportRunStatus.SUCCEEDED)
-    run_factory(source="crm", status=ImportRunStatus.FAILED)
+    run_factory(source="csv", status=ImportRunStatus.SUCCEEDED, dry_run=True)
+    run_factory(source="crm", status=ImportRunStatus.FAILED, dry_run=False)
     _login_super_admin(importer_app, client)
     response = client.get("/importer/runs/stats")
     assert response.status_code == 200
     stats = response.get_json()
     assert stats["total"] == 2
     assert stats["by_status"][ImportRunStatus.SUCCEEDED.value] == 1
+    assert stats["by_dry_run"]["true"] == 1
+    assert stats["by_dry_run"]["false"] == 1
+
+
+def test_runs_list_excludes_dry_runs(importer_app, client, run_factory):
+    run_factory(source="csv", status=ImportRunStatus.SUCCEEDED, dry_run=True)
+    run_factory(source="crm", status=ImportRunStatus.FAILED, dry_run=False)
+
+    _login_super_admin(importer_app, client)
+    response = client.get("/importer/runs?include_dry_runs=0")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["total"] == 1
+    assert all(not run["dry_run"] for run in payload["runs"])
 
 
 def test_run_download(importer_app, client, run_factory):

@@ -30,6 +30,13 @@
                 data-status-endpoint="{{ url_for('admin_importer.importer_run_status', run_id=0) }}"
             >
                 <input type="hidden" name="source" value="csv">
+                <div class="form-check form-switch mb-3">
+                    <input class="form-check-input" type="checkbox" id="importer-dry-run" name="dry_run" value="1">
+                    <label class="form-check-label" for="importer-dry-run">
+                        Dry run (no writes to core tables)
+                    </label>
+                    <div class="form-text">When enabled, the importer performs validation and metrics only.</div>
+                </div>
                 <div class="mb-3">
                     <label class="form-label" for="importer-upload-file">CSV File</label>
                     <input
@@ -84,7 +91,12 @@
                     {% for run in recent_runs %}
                     <tr>
                         <td>{{ run.id }}</td>
-                        <td>{{ run.source }}</td>
+                        <td>
+                            {{ run.source }}
+                            {% if run.dry_run %}
+                            <span class="badge bg-warning text-dark ms-2">DRY RUN</span>
+                            {% endif %}
+                        </td>
                         <td>
                             {% set _status = status_labels.get(run.status_value, run.status_value.replace('_', ' ') | title) %}
                             <span class="badge {{ run.badge_class }}" data-status="{{ run.status_value }}" data-status-label="{{ _status }}">

@@ -164,9 +164,10 @@
       runs.forEach((run) => {
         const row = document.createElement("tr");
         row.dataset.runId = String(run.id);
+        const dryRunBadge = run.dry_run ? '<span class="badge bg-warning text-dark ms-2">DRY RUN</span>' : "";
         row.innerHTML = `
           <th scope="row"><button type="button" class="btn btn-link p-0 run-detail-link" data-run-id="${run.id}">${run.id}</button></th>
-          <td>${run.source || "—"}</td>
+          <td>${run.source || "—"} ${dryRunBadge}</td>
           <td>${badgeForStatus(run.status)}</td>
           <td>${formatDateTime(run.started_at)}</td>
           <td>${formatDateTime(run.finished_at)}</td>
@@ -298,13 +299,22 @@
         </div>
       `;
 
-      const autoRefreshCard = document.createElement("div");
-      autoRefreshCard.className = "col-sm-6 col-lg-3";
-      autoRefreshCard.innerHTML = `
+      const dryRunData = stats.by_dry_run || {};
+      const dryRunCount =
+        dryRunData.true ?? dryRunData["true"] ?? dryRunData["1"] ?? dryRunData["True"] ?? 0;
+      const standardCount =
+        dryRunData.false ?? dryRunData["false"] ?? dryRunData["0"] ?? dryRunData["False"] ?? 0;
+      const dryRunCard = document.createElement("div");
+      dryRunCard.className = "col-sm-6 col-lg-3";
+      dryRunCard.innerHTML = `
         <div class="card shadow-sm h-100">
           <div class="card-body">
-            <h3 class="card-title h6 text-muted mb-2">Auto refresh</h3>
-            <p class="mb-0">${state.autoRefresh ? `Every ${config.defaults.autoRefreshSeconds}s` : "Paused"}</p>
+            <h3 class="card-title h6 text-muted mb-2">Run type</h3>
+            <p class="mb-0">
+              <span class="badge bg-warning text-dark me-2">Dry runs</span>${dryRunCount}<br>
+              <span class="badge bg-primary me-2">Standard</span>${standardCount}<br>
+              <small class="text-muted">${state.autoRefresh ? `Auto refresh every ${config.defaults.autoRefreshSeconds}s` : "Auto refresh paused"}</small>
+            </p>
           </div>
         </div>
       `;
@@ -312,7 +322,7 @@
       elements.summaryCards.appendChild(totalCard);
       elements.summaryCards.appendChild(healthCard);
       elements.summaryCards.appendChild(sourceCard);
-      elements.summaryCards.appendChild(autoRefreshCard);
+      elements.summaryCards.appendChild(dryRunCard);
     }
 
     function updateLastUpdated() {
@@ -391,7 +401,15 @@
     }
 
     function buildDetailUrl(runId) {
-      return `${config.api.detailBase}/${runId}`;
+      const template = config.api.detailTemplate;
+      if (!template) return "";
+      if (template.includes("/0/")) {
+        return template.replace("/0/", `/${runId}/`);
+      }
+      if (template.endsWith("/0")) {
+        return template.replace(/\/0$/, `/${runId}`);
+      }
+      return template.replace(/0$/, String(runId));
     }
 
     function buildRetryUrl(runId) {
@@ -408,6 +426,7 @@
       elements.modalContent.querySelector('[data-field="run_id"]').textContent = detail.run_id;
       elements.modalContent.querySelector('[data-field="source"]').textContent = detail.source || "—";
       elements.modalContent.querySelector('[data-field="status_badge"]').innerHTML = badgeForStatus(detail.status);
+      elements.modalContent.querySelector('[data-field="dry_run"]').textContent = detail.dry_run ? "Yes" : "No";
       elements.modalContent.querySelector('[data-field="duration"]').textContent = formatDuration(detail.duration_seconds);
       elements.modalContent.querySelector('[data-field="counts_json"]').textContent = JSON.stringify(detail.counts_json || {}, null, 2);
       elements.modalContent.querySelector('[data-field="metrics_json"]').textContent = JSON.stringify(detail.metrics_json || {}, null, 2);
@@ -422,6 +441,11 @@
       }
 
       elements.modalUpdated.textContent = `Detail fetched ${new Date().toLocaleTimeString()}`;
+      const dryRunBanner = document.getElementById("run-detail-dry-run-banner");
+      if (dryRunBanner) {
+        dryRunBanner.classList.toggle("d-none", !detail.dry_run);
+      }
+
       if (detail.download_available) {
         elements.modalDownload.classList.remove("d-none");
         elements.modalDownload.href = buildDownloadUrl(detail.run_id);

@@ -212,6 +212,9 @@
           Loading run detail...
         </div>
         <div id="run-detail-content" class="d-none">
+          <div class="alert alert-warning d-none mb-3" id="run-detail-dry-run-banner">
+            <i class="fas fa-info-circle me-2"></i>This was a dry run. No data was written to core tables.
+          </div>
           <dl class="row mb-0">
             <dt class="col-sm-3">Run ID</dt>
             <dd class="col-sm-9" data-field="run_id"></dd>
@@ -219,6 +222,8 @@
             <dd class="col-sm-9" data-field="source"></dd>
             <dt class="col-sm-3">Status</dt>
             <dd class="col-sm-9" data-field="status_badge"></dd>
+            <dt class="col-sm-3">Dry run</dt>
+            <dd class="col-sm-9" data-field="dry_run"></dd>
             <dt class="col-sm-3">Duration</dt>
             <dd class="col-sm-9" data-field="duration"></dd>
             <dt class="col-sm-3">Counts</dt>
@@ -257,7 +262,7 @@
   window.IMPORTER_RUNS_CONFIG = {
     api: {
       list: "{{ url_for('importer.importer_runs_list') }}",
-      detailBase: "{{ url_for('importer.importer_runs_list') }}",
+      detailTemplate: "{{ url_for('importer.importer_run_detail', run_id=0) }}",
       stats: "{{ url_for('importer.importer_runs_stats') }}",
       adminBase: "{{ url_for('admin_importer.importer_dashboard').rstrip('/') }}"
     },

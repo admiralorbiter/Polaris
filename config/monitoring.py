@@ -286,6 +286,24 @@ class ImporterMonitoring:
         if Histogram
         else None
     )
+    RUNS_ENQUEUE_COUNTER = (
+        Counter(
+            "importer_runs_enqueued_total",
+            "Total importer runs enqueued via admin UI.",
+            labelnames=("dry_run",),
+        )
+        if Counter
+        else None
+    )
+    RUNS_ENQUEUE_BY_USER_COUNTER = (
+        Counter(
+            "importer_runs_enqueued_by_user_total",
+            "Total importer runs enqueued grouped by user and dry-run flag.",
+            labelnames=("user_id", "dry_run"),
+        )
+        if Counter
+        else None
+    )
 
     @classmethod
     def record_runs_list(cls, *, duration_seconds: float, status: str, result_count: int):
@@ -341,3 +359,11 @@ class ImporterMonitoring:
             cls.DQ_EXPORT_LATENCY.labels(status=status).observe(max(duration_seconds, 0.0))
         if cls.DQ_EXPORT_ROW_COUNT:
             cls.DQ_EXPORT_ROW_COUNT.labels(status=status).observe(float(max(row_count, 0)))
+
+    @classmethod
+    def record_run_enqueued(cls, *, user_id: str | int, dry_run: bool):
+        dry_run_label = "true" if dry_run else "false"
+        if cls.RUNS_ENQUEUE_COUNTER:
+            cls.RUNS_ENQUEUE_COUNTER.labels(dry_run=dry_run_label).inc()
+        if cls.RUNS_ENQUEUE_BY_USER_COUNTER:
+            cls.RUNS_ENQUEUE_BY_USER_COUNTER.labels(user_id=str(user_id), dry_run=dry_run_label).inc()

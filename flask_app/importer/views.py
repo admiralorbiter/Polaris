@@ -372,6 +372,7 @@ def importer_runs_stats():
         "total": stats.total,
         "by_status": stats.statuses,
         "by_source": stats.sources,
+        "by_dry_run": stats.dry_runs,
     }
 
     return jsonify(response_payload), HTTPStatus.OK
