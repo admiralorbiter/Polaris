@@ -6,12 +6,14 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Mapping
 
 from flask_app.importer.adapters.salesforce.extractor import SalesforceBatch, SalesforceExtractor, build_contacts_soql
-from flask_app.importer.metrics import record_salesforce_batch
+from flask_app.importer.mapping import SalesforceMappingTransformer, get_active_salesforce_mapping
+from flask_app.importer.metrics import record_salesforce_batch, record_salesforce_unmapped
 from flask_app.importer.pipeline.staging import (
     StagingSummary,
     compute_checksum,
@@ -33,6 +35,8 @@ class SalesforceIngestSummary:
     dry_run: bool
     header: tuple[str, ...]
     max_modstamp: datetime | None
+    unmapped_counts: Mapping[str, int]
+    errors: list[str]
 
 
 def ingest_salesforce_contacts(
@@ -58,6 +62,11 @@ def ingest_salesforce_contacts(
     max_modstamp: datetime | None = last_modstamp
     sequence_number = 0
     staging_buffer: list[StagingVolunteer] = []
+    unmapped_counter: Counter[str] = Counter()
+    transform_errors: list[str] = []
+
+    mapping_spec = get_active_salesforce_mapping()
+    transformer = SalesforceMappingTransformer(mapping_spec)
 
     def flush_buffer():
         nonlocal records_staged
@@ -79,10 +88,15 @@ def ingest_salesforce_contacts(
             modstamp = _parse_salesforce_datetime(record.get("SystemModstamp"))
             if modstamp and (max_modstamp is None or modstamp > max_modstamp):
                 max_modstamp = modstamp
+            transform_result = transformer.transform(record)
+            for field_name in transform_result.unmapped_fields:
+                unmapped_counter[field_name] += 1
+            if transform_result.errors:
+                transform_errors.extend(transform_result.errors)
             if dry_run:
                 continue
             sequence_number += 1
-            normalized = _build_normalized_payload(record)
+            normalized = transform_result.canonical or {}
             staging_buffer.append(
                 StagingVolunteer(
                     run_id=import_run.id,
@@ -120,7 +134,12 @@ def ingest_salesforce_contacts(
         dry_run=dry_run,
         header=header,
         max_modstamp=max_modstamp,
+        unmapped_counts=dict(unmapped_counter),
+        errors=transform_errors,
     )
+    if unmapped_counter:
+        for field_name, count in unmapped_counter.items():
+            record_salesforce_unmapped(field_name, count)
     _update_import_run(import_run, summary)
     if not dry_run and max_modstamp:
         watermark.last_successful_modstamp = max_modstamp.astimezone(timezone.utc)
@@ -154,36 +173,11 @@ def _update_import_run(import_run: ImportRun, summary: SalesforceIngestSummary) 
             "records_staged": summary.records_staged,
             "dry_run": summary.dry_run,
             "max_system_modstamp": summary.max_modstamp.isoformat() if summary.max_modstamp else None,
+            "unmapped_fields": dict(summary.unmapped_counts),
+            "transform_errors": list(summary.errors),
         }
     )
     import_run.metrics_json = metrics
-
-
-def _build_normalized_payload(record: Mapping[str, str]) -> Mapping[str, str | None]:
-    return {
-        "external_system": "salesforce",
-        "external_id": record.get("Id"),
-        "source_object": "Contact",
-        "first_name": record.get("FirstName"),
-        "last_name": record.get("LastName"),
-        "email": record.get("Email"),
-        "preferred_email": record.get("npe01__Preferred_Email__c"),
-        "home_email": record.get("npe01__HomeEmail__c"),
-        "work_email": record.get("npe01__WorkEmail__c"),
-        "mobile_phone": record.get("MobilePhone"),
-        "home_phone": record.get("HomePhone"),
-        "work_phone": record.get("npe01__WorkPhone__c"),
-        "preferred_phone": record.get("npe01__PreferredPhone__c"),
-        "title": record.get("Title"),
-        "department": record.get("Department"),
-        "gender": record.get("Gender__c"),
-        "birthdate": record.get("Birthdate"),
-        "last_volunteer_date": record.get("Last_Volunteer_Date__c"),
-        "last_mailchimp_email_date": record.get("Last_Mailchimp_Email_Date__c"),
-        "primary_affiliation_id": record.get("npsp__Primary_Affiliation__c"),
-        "system_modstamp": record.get("SystemModstamp"),
-        "last_modified_date": record.get("LastModifiedDate"),
-    }
 
 
 def _parse_salesforce_datetime(raw: str | None) -> datetime | None:

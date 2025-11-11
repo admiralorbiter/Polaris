@@ -1,0 +1,73 @@
+# Salesforce Contact → Polaris Volunteer mapping (v1.0)
+version: 1
+adapter: salesforce
+object: Contact
+fields:
+  - source: Id
+    target: external_id
+    required: true
+  - source: FirstName
+    target: first_name
+  - source: LastName
+    target: last_name
+  - source: MiddleName
+    target: middle_name
+  - source: Email
+    target: email.primary
+  - source: npe01__HomeEmail__c
+    target: email.home
+  - source: npe01__WorkEmail__c
+    target: email.work
+  - source: npe01__AlternateEmail__c
+    target: email.alternate
+  - source: npe01__Preferred_Email__c
+    target: email.preferred_type
+  - source: MobilePhone
+    target: phone.mobile
+    transform: normalize_phone
+  - source: HomePhone
+    target: phone.home
+    transform: normalize_phone
+  - source: npe01__WorkPhone__c
+    target: phone.work
+    transform: normalize_phone
+  - source: Phone
+    target: phone.primary
+    transform: normalize_phone
+  - source: npe01__PreferredPhone__c
+    target: phone.preferred_type
+  - source: Title
+    target: employment.title
+  - source: Department
+    target: employment.department
+  - source: Gender__c
+    target: demographics.gender
+  - source: Birthdate
+    target: demographics.birthdate
+    transform: parse_date
+  - source: npsp__Primary_Affiliation__c
+    target: affiliations.primary_organization_id
+  - source: Last_Mailchimp_Email_Date__c
+    target: engagement.last_mailchimp_email_at
+    transform: parse_datetime
+  - source: Last_Volunteer_Date__c
+    target: engagement.last_volunteer_date
+    transform: parse_date
+  - source: SystemModstamp
+    target: metadata.source_modstamp
+    transform: parse_datetime
+  - source: LastModifiedDate
+    target: metadata.source_last_modified
+    transform: parse_datetime
+  - target: metadata.source_system
+    default: salesforce
+  - target: metadata.source_object
+    default: Contact
+transforms:
+  normalize_phone:
+    description: Normalize phone numbers to E.164 where possible.
+  parse_date:
+    description: Parse date values (YYYY-MM-DD) into ISO-8601.
+  parse_datetime:
+    description: Parse Salesforce datetime strings into ISO-8601 (UTC).
+

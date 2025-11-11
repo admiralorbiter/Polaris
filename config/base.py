@@ -148,6 +148,10 @@ class Config:
         "IMPORTER_SALESFORCE_DOC_URL",
         "https://docs.polaris.example/importer/salesforce",
     )
+    IMPORTER_SALESFORCE_MAPPING_PATH = os.environ.get(
+        "IMPORTER_SALESFORCE_MAPPING_PATH",
+        os.path.join(os.path.dirname(__file__), "mappings", "salesforce_contact_v1.yaml"),
+    )
     _raw_sf_objects = os.environ.get("IMPORTER_SALESFORCE_OBJECTS", "contacts")
     IMPORTER_SALESFORCE_OBJECTS = tuple(
         obj.strip().lower() for obj in _raw_sf_objects.split(",") if obj.strip()

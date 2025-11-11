@@ -28,6 +28,9 @@ class TestAppConfiguration:
         """Ensure Salesforce importer defaults are present."""
         assert app.config["IMPORTER_SALESFORCE_OBJECTS"] == ("contacts",)
         assert app.config["IMPORTER_SALESFORCE_BATCH_SIZE"] == 5000
+        mapping_path = app.config["IMPORTER_SALESFORCE_MAPPING_PATH"]
+        assert mapping_path
+        assert os.path.basename(mapping_path) == "salesforce_contact_v1.yaml"
 
     def test_development_config(self, app):
         """Test development configuration"""

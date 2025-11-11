@@ -51,6 +51,19 @@
                             {% endfor %}
                         </ul>
                         {% endif %}
+                        {% if card.mapping %}
+                        <div class="small text-muted mb-2">
+                            Mapping version {{ card.mapping.version }} · checksum {{ card.mapping.checksum[:12] }}…
+                        </div>
+                        <a
+                            class="btn btn-link btn-sm ps-0"
+                            href="{{ card.mapping.download_url }}"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                        >
+                            Download mapping YAML <i class="fas fa-download ms-1"></i>
+                        </a>
+                        {% else %}
                         <a
                             class="btn btn-link btn-sm ps-0"
                             href="{{ card.docs_url }}"
@@ -59,6 +72,7 @@
                         >
                             View setup guide <i class="fas fa-external-link-alt ms-1"></i>
                         </a>
+                        {% endif %}
                     </div>
                 </div>
                 {% endfor %}

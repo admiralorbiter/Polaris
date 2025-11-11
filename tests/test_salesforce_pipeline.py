@@ -73,7 +73,11 @@ def test_ingest_salesforce_contacts_persists_rows(app):
     assert summary.records_received == 3
     staged = StagingVolunteer.query.order_by(StagingVolunteer.sequence_number).all()
     assert len(staged) == 3
-    assert staged[0].normalized_json["first_name"] == "Ada"
+    normalized = staged[0].normalized_json
+    assert normalized["external_id"] == "001"
+    assert normalized["first_name"] == "Ada"
+    assert normalized["metadata"]["source_system"] == "salesforce"
+    assert normalized["metadata"]["source_object"] == "Contact"
     stored_modstamp = watermark.last_successful_modstamp
     assert stored_modstamp is not None
     assert stored_modstamp.replace(tzinfo=timezone.utc) == datetime(2024, 1, 3, 0, 0, tzinfo=timezone.utc)
@@ -81,6 +85,9 @@ def test_ingest_salesforce_contacts_persists_rows(app):
     assert counts["rows_staged"] == 3
     metrics = run.metrics_json["salesforce"]
     assert metrics["records_received"] == 3
+    assert metrics["unmapped_fields"] == {}
+    assert metrics["transform_errors"] == []
+    assert summary.unmapped_counts == {}
 
 
 def test_ingest_salesforce_contacts_dry_run(app):
@@ -113,4 +120,5 @@ def test_ingest_salesforce_contacts_dry_run(app):
     counts = run.counts_json["staging"]["volunteers"]
     assert counts["rows_staged"] == 0
     assert counts["dry_run"] is True
+    assert summary.unmapped_counts == {}
 

@@ -17,7 +17,7 @@ from celery import Celery
 from celery.exceptions import TimeoutError as CeleryTimeoutError
 from flask.cli import ScriptInfo
 
-from flask_app.importer.celery_app import DEFAULT_QUEUE_NAME, get_celery_app
+from flask_app.importer.celery_app import DEFAULT_QUEUE_NAME, ensure_celery_app, get_celery_app
 from flask_app.importer.idempotency_summary import persist_idempotency_summary
 from flask_app.importer.pipeline import (
     CleanPromotionSummary,
@@ -373,6 +373,79 @@ def adapters_list(ctx, auth_ping: bool):
     info = ctx.ensure_object(ScriptInfo)
     app = ctx.meta.get("app") or info.load_app()
     _display_adapter_overview(app, require_auth_ping=auth_ping)
+
+
+@importer_cli.group(name="mappings")
+@click.pass_context
+def mappings_group(ctx):
+    """Inspect importer mapping specifications."""
+
+    info = ctx.ensure_object(ScriptInfo)
+    app = ctx.meta.get("app") or info.load_app()
+    if not is_importer_enabled(app):
+        raise click.ClickException("Importer is disabled; enable it before inspecting mappings.")
+    ctx.meta["app"] = app
+
+
+@mappings_group.command("show")
+@click.option("--adapter", default="salesforce", show_default=True)
+@click.pass_context
+def mappings_show(ctx, adapter: str):
+    """Display the active mapping YAML for an adapter."""
+
+    adapter = adapter.lower()
+    if adapter != "salesforce":
+        raise click.ClickException(f"Adapter '{adapter}' does not expose a mapping spec yet.")
+
+    info = ctx.ensure_object(ScriptInfo)
+    app = ctx.meta.get("app") or info.load_app()
+    with app.app_context():
+        from flask_app.importer.mapping import MappingLoadError, get_active_salesforce_mapping
+
+        try:
+            spec = get_active_salesforce_mapping()
+        except MappingLoadError as exc:
+            raise click.ClickException(f"Failed to load Salesforce mapping: {exc}") from exc
+
+        click.echo(f"Adapter: {spec.adapter}")
+        click.echo(f"Object: {spec.object_name}")
+        click.echo(f"Version: {spec.version}")
+        click.echo(f"Checksum: {spec.checksum}")
+        click.echo(f"Path: {spec.path}")
+        click.echo("")
+        click.echo(spec.path.read_text(encoding="utf-8"))
+
+
+@importer_cli.command("run-salesforce")
+@click.option("--run-id", required=True, type=int, help="ID of the importer run to queue.")
+@click.pass_context
+def run_salesforce(ctx, run_id: int):
+    """Queue the Salesforce ingest Celery task for the specified import run."""
+
+    info = ctx.ensure_object(ScriptInfo)
+    app = ctx.meta.get("app") or info.load_app()
+    if not is_importer_enabled(app):
+        raise click.ClickException("Importer is disabled; enable it before queuing runs.")
+
+    run = db.session.get(ImportRun, run_id)
+    if run is None:
+        raise click.ClickException(f"Import run {run_id} not found.")
+    if run.adapter != "salesforce":
+        raise click.ClickException(
+            f"Import run {run_id} is configured for adapter '{run.adapter}', not 'salesforce'."
+        )
+
+    state = app.extensions.get("importer")
+    if not state:
+        raise click.ClickException("Importer state unavailable; ensure init_importer(app) has been called.")
+
+    celery_app = ensure_celery_app(app, state)
+    async_result = celery_app.send_task(
+        "importer.pipeline.ingest_salesforce_contacts",
+        kwargs={"run_id": run_id},
+    )
+    task_id = getattr(async_result, "id", async_result)
+    click.echo(f"Queued Salesforce ingest for run {run_id} (task_id={task_id})")
 
 
 @importer_cli.command("run")

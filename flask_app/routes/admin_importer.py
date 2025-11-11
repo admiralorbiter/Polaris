@@ -9,11 +9,12 @@ from http import HTTPStatus
 import os
 from pathlib import Path
 
-from flask import Blueprint, current_app, jsonify, render_template, request, send_file
+from flask import Blueprint, current_app, jsonify, render_template, request, send_file, url_for
 from flask_login import current_user, login_required
 
 from flask_app.importer import get_adapter_readiness
 from flask_app.importer.celery_app import DEFAULT_QUEUE_NAME, get_celery_app
+from flask_app.importer.mapping import MappingLoadError, get_active_salesforce_mapping
 from flask_app.importer.registry import get_adapter_registry
 from flask_app.importer.pipeline.dq_service import (
     DataQualityViolationService,
@@ -39,6 +40,24 @@ from config.survivorship import load_profile
 admin_importer_blueprint = Blueprint("admin_importer", __name__, url_prefix="/admin/imports")
 _run_service = ImportRunService()
 _dq_service = DataQualityViolationService()
+
+
+@admin_importer_blueprint.get("/mappings/salesforce.yaml")
+@login_required
+@permission_required("manage_imports", org_context=False)
+def download_salesforce_mapping():
+    try:
+        spec = get_active_salesforce_mapping()
+    except MappingLoadError as exc:
+        current_app.logger.error("Failed to load Salesforce mapping: %s", exc)
+        return jsonify({"error": "Salesforce mapping unavailable"}), HTTPStatus.INTERNAL_SERVER_ERROR
+
+    return send_file(
+        spec.path,
+        mimetype="text/yaml",
+        as_attachment=True,
+        download_name=spec.path.name,
+    )
 
 _STATUS_LABELS = {
     "ready": "Ready",
@@ -136,6 +155,34 @@ def _build_adapter_cards() -> list[dict[str, object]]:
                 "Adapter is disabled. Update IMPORTER_ADAPTERS and redeploy the importer workers to enable it."
             )
 
+        mapping_info: dict[str, object] | None = None
+        if adapter_name == "salesforce":
+            try:
+                mapping_spec = get_active_salesforce_mapping()
+                mapping_info = {
+                    "version": mapping_spec.version,
+                    "checksum": mapping_spec.checksum,
+                    "download_url": url_for("admin_importer.download_salesforce_mapping"),
+                }
+            except MappingLoadError as exc:
+                messages.append(f"Salesforce mapping failed to load: {exc}")
+            latest_run = (
+                ImportRun.query.filter_by(adapter="salesforce")
+                .order_by(ImportRun.created_at.desc())
+                .first()
+            )
+            if latest_run and latest_run.metrics_json:
+                sf_metrics = latest_run.metrics_json.get("salesforce") or {}
+                unmapped = sf_metrics.get("unmapped_fields") or {}
+                if unmapped:
+                    messages.append(
+                        "Unmapped Salesforce fields detected in the last run: "
+                        + ", ".join(f"{field}×{count}" for field, count in unmapped.items())
+                    )
+                errors = sf_metrics.get("transform_errors") or []
+                if errors:
+                    messages.append("Recent mapping errors: " + "; ".join(errors[:3]))
+
         cards.append(
             {
                 "name": adapter_name,
@@ -148,6 +195,7 @@ def _build_adapter_cards() -> list[dict[str, object]]:
                 "docs_url": _resolve_docs_url(adapter_name),
                 "toggle_disabled": True,
                 "toggle_disabled_reason": "Manage adapter enablement via environment configuration.",
+                "mapping": mapping_info,
             }
         )
     return cards

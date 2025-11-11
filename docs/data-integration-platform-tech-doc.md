@@ -792,38 +792,21 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Required/format DQ applied; violations created.  
 - Mapping supports field-level transforms (e.g., picklist normalization).  
 **Dependencies**: IMP-41, IMP-11.
-**Status**: 🔄 In planning (mapping workshop set for Jan 22, 2026).
+**Status**: ✅ Implemented on dev branch (Nov 2025); dashboard/CLI wired, customer-specific overrides deferred to Sprint 7.
 
-**Outcome Notes (Plan)**
-- Author `config/mappings/salesforce_volunteer_v1.yaml` describing object/field map, null-handling, and custom transformers.
-- Extend mapping engine from CSV adapter to load declarative maps with adapter-specific overrides.
-- Surface unmapped Salesforce fields in run summary + dashboard card; provide CLI report `flask importer mappings diff --adapter salesforce`.
-
-**Implementation Outline**
-- Implement `SalesforceMappingTransformer` that consumes staged payload, applies normalization helpers, and yields canonical volunteer dict.
-- Inject adapter metadata (`sf_record_id`, `sf_owner_id`, `sf_record_type`) into `ingest_extras_json` for downstream analytics.
-- Reuse existing DQ rules; add Salesforce-specific rule codes (e.g., `SF_CONTACT_NO_COMM_PREF`).
-- Update remediation UX to display Salesforce source values alongside canonical fields.
-
-**Data Model & Storage**
-- Ensure `staging_volunteers.ingest_extras_json` stores Salesforce IDs + metadata.
-- Add migration for `volunteer_ingest_config` table to record active mapping version per adapter.
-- Document mapping file schema to support future adapters.
-
-**Metrics & Telemetry**
-- Emit `importer_salesforce_mapping_unmapped_total{field}` counter.
-- Log mapping version + checksum per run for reproducibility.
-- Capture transform latency metric to monitor mapping performance.
+**Implementation Notes (Nov 2025)**
+- Introduced YAML source of truth (`config/mappings/salesforce_contact_v1.yaml`) plus loader/validator; YAML checksum + version captured in run metrics.
+- Added `SalesforceMappingTransformer` to apply transforms (phone normalization, date parsing) and populate canonical volunteer dicts directly in `StagingVolunteer.normalized_json`.
+- Admin → Imports card now surfaces mapping metadata, unmapped-field warnings, and provides a download link for the active YAML. CLI exposes `flask importer mappings show` to inspect the spec.
+- Mapping metrics: per-run `metrics_json["salesforce"]` records unmapped fields/errors; Prometheus counter `importer_salesforce_mapping_unmapped_total{field}` tracks hotspots.
 
 **Testing Expectations**
-- **Unit**: YAML loader, per-field transformers, unmapped field detection.
-- **Integration**: End-to-end import from staging to DQ ensuring violations align with expectations; cover custom fields + picklists.
-- **Regression**: Golden dataset variant `ops/testdata/importer_salesforce_contacts_v1/` with coverage for custom field combos.
+- **Unit**: YAML loader validation, transformer behavior, mapping CLI command.
+- **Integration**: Salesforce pipeline test ensures mapped payloads land in staging and unmapped counters stay in sync.
 
 **Open Questions / Clarifications**
-- Who curates the initial mapping YAML—Importer squad or Solutions team?
-- Do we ship customer-specific mapping overrides at launch, or defer to Sprint 7 versioning work?
-- How do we expose mapping diffs to customers (downloadable YAML vs dashboard UI)?
+- ✅ Mapping curated internally (single Contact spec for v1); customer overrides scheduled for Sprint 7.
+- ✅ Diff exposure handled via downloadable YAML + admin messaging (dashboard).
 
 ### IMP-43 — Incremental upsert & reconciliation counters _(5 pts)_
 **User story**: As an operator, I see created/updated/unchanged counts for the window.  
