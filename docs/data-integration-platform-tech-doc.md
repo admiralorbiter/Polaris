@@ -497,6 +497,7 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - **Operational readiness**: Document retry behavior changes for support, define rollback steps if survivorship overwrites regress, and brief QA on new regression suites.
 - **Risks / assumptions**: Consistent normalization (email/phone), availability of external IDs in staging, and acceptable latency for repeated `external_id_map` lookups.
 - **Clarifications requested**: Confirm external system namespaces, whether survivorship precedence differs by field group, and who owns dashboard updates for new counters.
+- **Retrospective**: See [Sprint 3 Retrospective](./sprint3-retrospective.md) for outcomes and lessons learned.
 
 ### IMP-30 — External ID map & idempotent upsert _(8 pts)_
 **User story**: As an operator, retries do not create duplicates.  
@@ -506,7 +507,14 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - `counts_json.core.volunteers` tracks `rows_created`, `rows_updated`, `rows_skipped_no_change`.  
 - DQ/retry flows respect external IDs and avoid duplicate staging promotions.  
 **Dependencies**: IMP-2, IMP-12.
-**Status**: 🚧 Planned for Sprint 3 kickoff.
+**Status**: ✅ Delivered (Nov 2025).
+**Outcome Notes**:
+- Loader reuses shared `resolve_import_target` helper; idempotent counters populate `counts_json.core.volunteers`.
+- Support runbook updated with retry guidance and quarantine messaging for missing external IDs.
+- Prometheus counters (`importer_idempotent_rows_created_total`, `..._updated_total`, `..._skipped_total`) live in sandbox dashboards.
+**Follow-ups**:
+- Add alerting thresholds for `rows_missing_external_id` spikes before GA.
+- Continue monitoring `external_id_map` backfill scripts until all legacy rows carry `external_system`.
 **Implementation Notes (Sprint 3 prep)**:
 - Reuse `external_id_map` schema from IMP-2; ensure staging rows populate `external_system`/`external_id` before promotion.
 - Add soft-delete columns (`deactivated_at`, `upstream_deleted_reason`) and normalize `is_active` semantics so loader/reactivation logic can avoid destructive deletes while preserving history.
@@ -550,7 +558,13 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - `dedupe_suggestions` captures `decision="auto_resolved"` for deterministic matches.  
 - `counts_json.core.volunteers` increments `rows_deduped_auto`.  
 **Dependencies**: IMP-30.
-**Status**: 🟢 Delivered (Nov 2025) — gated on IMP-30 rollout.
+**Status**: ✅ Delivered (Nov 2025) — gated on IMP-30 rollout.
+**Outcome Notes**:
+- Deterministic email/phone matching reduced manual remediation volume; results surfaced via `rows_deduped_auto` counters and dashboard badges.
+- Structured logs capture `dedupe_decision` and `dedupe_match_type` for audit and analytics.
+**Follow-ups**:
+- Track manual fallback rate (no email/phone) to scope fuzzy dedupe in EPIC-5.
+- Coordinate with FE guild on long-term ownership of dedupe-related dashboard components.
 **Implementation Notes (Sprint 3 prep)**:
 - Normalize inputs with existing helper (`normalize_contact_fields`) prior to lookup.
 - Priority: email match → phone match → combined heuristics; flag ambiguous cases for future FUZZY dedupe.
@@ -594,7 +608,13 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Per-field decisions include before/after payloads and `source_run_id`.  
 - Admin UI surfaces survivorship summary in run detail.  
 **Dependencies**: IMP-31.
-**Status**: ⚪ Discovery in progress — precedence matrix pending sign-off.
+**Status**: 🟡 Partially delivered — engine live for contact identity; admin UI + alerts carrying into Sprint 4.
+**Outcome Notes**:
+- `apply_survivorship` helper merged with precedence profiles for contact fields; change-log entries now record per-field winners.
+- Logging and metrics (`importer_survivorship_decisions_total`) enabled for sandbox analysis.
+**Follow-ups**:
+- Ship admin dashboard summary and support documentation highlighting active profile.
+- Define alerting/notification strategy when survivorship overrides manual remediation.
 **Implementation Notes (Sprint 3 prep)**:
 - Define field precedence tables (manual remediation > source freshest > existing core). Final implementation lives in `config/survivorship.py` with per-field-group profiles and optional overrides via `IMPORTER_SURVIVORSHIP_PROFILE_PATH`.
 - Store per-field decisions in `change_log` with before/after payloads, winner/loser sources, and `source_run_id` where available.
@@ -635,7 +655,12 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Metrics emitted for created vs updated vs skipped remain stable between runs.  
 - `idempotency_summary.json` artifact generated for dashboards.  
 **Dependencies**: IMP-30.
-**Status**: 🟢 Ready to start once IMP-30 lands.
+**Status**: ✅ Delivered (Nov 2025).
+**Outcome Notes**:
+- Regression suite (`tests/importer/test_idempotency_regression.py`) replays golden datasets (dry-run + live) and asserts stable counters.
+- CI publishes `idempotency_summary.json` artifacts to `ci_artifacts/idempotency/` and blocks merges on regressions.
+**Follow-ups**:
+- Extend coverage for survivorship override scenarios and partial file subsets next sprint.
 **Implementation Notes (Sprint 3 prep)**:
 - Extend golden dataset with duplicate IDs and changed payload revisions.
 - Add pytest fixture to run same CSV twice (dry-run + real run) asserting counts + external map stability.
