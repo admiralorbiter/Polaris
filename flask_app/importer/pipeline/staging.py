@@ -44,9 +44,9 @@ def stage_volunteers_from_csv(
     for row in adapter.iter_rows():
         payload_json = dict(row.raw)
         normalized_json = dict(row.normalized)
-        external_system = _resolve_external_system(normalized_json.get("external_system"), source_system)
+        external_system = resolve_external_system(normalized_json.get("external_system"), source_system)
         external_id = normalized_json.get("external_id")
-        checksum = _compute_checksum(normalized_json)
+        checksum = compute_checksum(normalized_json)
 
         if dry_run:
             dry_run_rows.append(row)
@@ -55,7 +55,7 @@ def stage_volunteers_from_csv(
         staging_row = StagingVolunteer(
             run_id=import_run.id,
             sequence_number=row.sequence_number,
-            source_record_id=_resolve_source_record_id(external_id, row.sequence_number),
+            source_record_id=resolve_source_record_id(external_id, row.sequence_number),
             external_system=external_system,
             external_id=str(external_id) if external_id not in (None, "") else None,
             payload_json=payload_json,
@@ -82,11 +82,11 @@ def stage_volunteers_from_csv(
         dry_run=dry_run,
         dry_run_rows=tuple(dry_run_rows),
     )
-    _update_counts(import_run, summary)
+    update_staging_counts(import_run, summary)
     return summary
 
 
-def _resolve_external_system(candidate: object | None, fallback: str) -> str:
+def resolve_external_system(candidate: object | None, fallback: str) -> str:
     if isinstance(candidate, str):
         candidate_clean = candidate.strip()
         if candidate_clean:
@@ -96,20 +96,20 @@ def _resolve_external_system(candidate: object | None, fallback: str) -> str:
     return fallback or "csv"
 
 
-def _compute_checksum(payload: dict[str, object | None]) -> str:
+def compute_checksum(payload: dict[str, object | None]) -> str:
     """Return a stable checksum for a payload to support idempotency."""
 
     serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
-def _resolve_source_record_id(external_id: object | None, sequence_number: int) -> str:
+def resolve_source_record_id(external_id: object | None, sequence_number: int) -> str:
     if external_id in (None, ""):
         return f"seq-{sequence_number}"
     return str(external_id)
 
 
-def _update_counts(import_run: ImportRun, summary: StagingSummary) -> None:
+def update_staging_counts(import_run: ImportRun, summary: StagingSummary) -> None:
     counts = dict(import_run.counts_json or {})
     staging_counts = counts.setdefault("staging", {}).setdefault("volunteers", {})
     staging_counts.update(

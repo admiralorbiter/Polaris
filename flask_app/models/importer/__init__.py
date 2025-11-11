@@ -16,6 +16,7 @@ from .schema import (
     ExternalIdMap,
     ImportRun,
     ImportRunStatus,
+    ImporterWatermark,
     MergeLog,
     StagingRecordStatus,
     StagingVolunteer,
@@ -35,5 +36,6 @@ __all__ = [
     "StagingRecordStatus",
     "StagingVolunteer",
     "DataQualityViolation",
+    "ImporterWatermark",
 ]
 

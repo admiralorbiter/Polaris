@@ -529,3 +529,49 @@ class ChangeLogEntry(BaseModel):
         Index("idx_change_log_entity", "entity_type", "entity_id"),
         CheckConstraint("field_name <> ''", name="ck_change_log_field_non_empty"),
     )
+
+
+class ImporterWatermark(BaseModel):
+    """Track the last successful watermark for each adapter/object pair."""
+
+    __tablename__ = "importer_watermarks"
+
+    id: Mapped[int] = mapped_column(db.Integer, primary_key=True, autoincrement=True)
+    adapter: Mapped[str] = mapped_column(db.String(64), nullable=False)
+    object_name: Mapped[str] = mapped_column(db.String(128), nullable=False)
+    last_successful_modstamp: Mapped[datetime | None] = mapped_column(
+        db.DateTime(timezone=True),
+        nullable=True,
+        comment="Most recent SystemModstamp processed successfully.",
+    )
+    last_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("import_runs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    metadata_json: Mapped[dict | None] = mapped_column(
+        db.JSON,
+        nullable=True,
+        comment="Adapter-specific metadata (e.g., batch counts, cursor hints).",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    last_run = relationship("ImportRun", foreign_keys=[last_run_id])
+
+    __table_args__ = (
+        UniqueConstraint(
+            "adapter",
+            "object_name",
+            name="uq_importer_watermarks_adapter_object",
+        ),
+        Index("idx_importer_watermarks_adapter", "adapter"),
+    )

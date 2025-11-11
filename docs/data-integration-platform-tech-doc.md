@@ -756,39 +756,34 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Partial failures logged to run; retries safe.  
 - Resume from `SalesforceWatermark` record when run restarts.  
 **Dependencies**: IMP-40, IMP-3.
-**Status**: 🔄 In planning (API partnership review scheduled for Jan 15, 2026).
+**Status**: ✅ Implemented on dev branch (Nov 2025); staging rollout pending Bulk API smoke tests with sandbox data.
 
-**Outcome Notes (Plan)**
-- Use SOQL via Bulk API 2.0 for initial fetch; fallback to REST query if Bulk fails for small tenants.
-- Store raw responses under `staging_volunteers.raw_payload_json` and include `SystemModstamp`, `LastModifiedDate`, `IsDeleted` fields.
-- Introduce `importer_watermarks` table keyed by adapter + object (`salesforce.contacts`) storing `last_successful_modstamp`.
-- Rate-limit/backoff strategy: exponential backoff with jitter respecting Salesforce daily limits; instrumentation hooks for monitoring usage.
-
-**Implementation Outline**
-- Implement `SalesforceExtractor` class orchestrating auth, query chunking, and streaming into staging queue tasks.
-- Leverage Celery chaining to paginate through results; checkpoint after each batch by updating watermark record.
-- Handle partial failures: mark run status `partially_failed`, store failing batch ID, surface remediation instructions.
-- Ensure extractor honours dry-run mode by skipping staging writes but logging counts.
+**Implementation Notes (Nov 2025)**
+- Added `SalesforceExtractor` (Bulk API 2.0) with incremental SOQL builder (`SystemModstamp` gating, optional `LIMIT`) and CSV parsing backed by hashed optional deps from `requirements-optional.txt`.
+- New Celery task `importer.pipeline.ingest_salesforce_contacts` fetches Contacts only (batch size 5k, 5s poll) and streams into staging via `pipeline.salesforce.ingest_salesforce_contacts`, respecting dry runs and capturing max modstamp per batch.
+- `importer_watermarks` table tracks `(adapter, object)` cursor state (`last_successful_modstamp`, `last_run_id`, metadata); `ImportRun.metrics_json["salesforce"]` now records batches processed, records received, and watermark timestamp.
+- Staging rows persist the full Salesforce payload in `payload_json` plus normalized hints (name/email/phone, object identifiers) for mapping work in IMP-42. Dry runs skip inserts but still populate counts/metrics.
 
 **Data Model & Storage**
-- New table `importer_watermarks` (adapter TEXT, object TEXT, last_successful_modstamp TIMESTAMPTZ, last_run_id INT, PRIMARY KEY(adapter, object)).
-- Update `staging_volunteers` schema doc to note Salesforce-specific metadata columns.
+- Added `ImporterWatermark` SQLAlchemy model/table. Watermark updates only commit after successful job completion; dry runs leave the cursor unchanged.
+- `ImportRun` metrics/counters now updated via shared staging helper (`update_staging_counts`) so CSV and Salesforce runs surface consistent counts.
 
 **Metrics & Telemetry**
-- Emit `importer_salesforce_batches_total{status}` counter and `importer_salesforce_batch_duration_seconds` histogram.
-- Track remaining API quota via periodic call to `limits` endpoint; surface warnings when <15%.
-- Add structured log entries for each batch with `batch_id`, `records_received`, `retry_count`.
+- Prometheus: `importer_salesforce_batches_total{status}` counter, `importer_salesforce_batch_duration_seconds` histogram, plus existing adapter-enabled/auth metrics.
+- Structured logs per batch (`batch_sequence`, `records`, `locator`, `duration_seconds`) and run summary log on completion.
 
-**Testing Expectations**
-- **Unit**: SOQL builder, watermark math, retry/backoff logic.
-- **Integration**: Sandbox org fixture; ingest >5k records to exercise pagination; simulate rate-limit error for retry path.
-- **Regression**: Verify restart after failure resumes at saved watermark without duplicating rows.
-- **Load**: Stress test with 100k records ensuring Celery queue throughput acceptable.
+**Operational Runbook**
+- Config knobs exposed via env vars: `IMPORTER_SALESFORCE_OBJECTS` (default `contacts`), `IMPORTER_SALESFORCE_BATCH_SIZE` (default `5000`). Credentials remain env-driven (`SF_USERNAME`, `SF_PASSWORD`, `SF_SECURITY_TOKEN`, optional domain/client id/secret).
+- CLI/worker workflow: run `pip install -r requirements-optional.txt`, enable adapter, queue runs via Celery task, monitor via admin Adapter Availability + run metrics.
+
+**Testing Coverage**
+- Unit: SOQL builder edge cases, extractor polling/CSV parsing, watermark math, staging helper logic.
+- Integration: pipeline unit tests simulate Bulk batches to validate staging inserts/dry runs, watermark advancement, metrics updates. (Full sandbox/Bulk smoke tests tracked in staging checklist.)
 
 **Open Questions / Clarifications**
-- Which Salesforce objects are in scope for MVP (Contacts only vs Contacts + Campaign Members)?
-- Do we encapsulate credentials in Vault/Secrets Manager, or rely on env vars initially?
-- How do we handle Salesforce multi-currency fields during staging—store raw or normalized?
+- ✅ MVP scope = Contacts only (Campaign Member ingest deferred).
+- ✅ Secrets remain env-driven for v1; revisit Vault when multi-tenant support lands.
+- ✅ Org does not use Salesforce multi-currency today; raw amount handling deferred to revenue objects in future sprints.
 
 ### IMP-42 — Salesforce → canonical mapping v1 _(8 pts)_
 **User story**: As a dev, SF fields map to `VolunteerIngest`.  

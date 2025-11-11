@@ -24,6 +24,11 @@ class TestAppConfiguration:
         assert app.config is not None
         assert "SECRET_KEY" in app.config
 
+    def test_importer_salesforce_defaults(self, app):
+        """Ensure Salesforce importer defaults are present."""
+        assert app.config["IMPORTER_SALESFORCE_OBJECTS"] == ("contacts",)
+        assert app.config["IMPORTER_SALESFORCE_BATCH_SIZE"] == 5000
+
     def test_development_config(self, app):
         """Test development configuration"""
         assert app.config["DEBUG"] is True

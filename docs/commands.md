@@ -19,6 +19,8 @@
   Execute the full pipeline but skip core writes. `metrics_json` will contain would-be inserts/updates and the run is labeled DRY RUN in the dashboard.
 - `flask importer retry --run-id <id>`  
   Retry a failed or pending run using stored parameters. Requires the original upload file to still exist.
+- `celery -A app.celery call importer.pipeline.ingest_salesforce_contacts --kwargs '{"run_id": 42}'`  
+  Queue a Bulk API Salesforce contact ingest for run 42 (adapter must be enabled and optional requirements installed).
 
 ### Adapter Diagnostics
 - `flask importer adapters list`  

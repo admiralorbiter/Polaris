@@ -148,6 +148,16 @@ class Config:
         "IMPORTER_SALESFORCE_DOC_URL",
         "https://docs.polaris.example/importer/salesforce",
     )
+    _raw_sf_objects = os.environ.get("IMPORTER_SALESFORCE_OBJECTS", "contacts")
+    IMPORTER_SALESFORCE_OBJECTS = tuple(
+        obj.strip().lower() for obj in _raw_sf_objects.split(",") if obj.strip()
+    ) or ("contacts",)
+    try:
+        IMPORTER_SALESFORCE_BATCH_SIZE = max(
+            1000, int(os.environ.get("IMPORTER_SALESFORCE_BATCH_SIZE", "5000"))
+        )
+    except ValueError:
+        IMPORTER_SALESFORCE_BATCH_SIZE = 5000
     if IMPORTER_RUNS_PAGE_SIZE_DEFAULT not in _parsed_page_sizes:
         _parsed_page_sizes.insert(0, IMPORTER_RUNS_PAGE_SIZE_DEFAULT)
     IMPORTER_RUNS_PAGE_SIZES = tuple(sorted(set(_parsed_page_sizes)))

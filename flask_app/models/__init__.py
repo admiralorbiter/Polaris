@@ -64,6 +64,7 @@ from .importer import (
     ExternalIdMap,
     ImportRun,
     ImportRunStatus,
+    ImporterWatermark,
     MergeLog,
     StagingRecordStatus,
     StagingVolunteer,
@@ -142,4 +143,5 @@ __all__ = [
     "MergeLog",
     "ChangeLogEntry",
     "CleanVolunteer",
+    "ImporterWatermark",
 ]

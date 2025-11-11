@@ -15,6 +15,10 @@ from typing import Any
 from celery import shared_task
 from flask import current_app
 
+from flask_app.importer.adapters.salesforce.extractor import (
+    SalesforceExtractor,
+    create_salesforce_client,
+)
 from flask_app.importer.idempotency_summary import persist_idempotency_summary
 from flask_app.importer.pipeline import (
     load_core_volunteers,
@@ -22,7 +26,9 @@ from flask_app.importer.pipeline import (
     run_minimal_dq,
     stage_volunteers_from_csv,
 )
+from flask_app.importer.pipeline.salesforce import ingest_salesforce_contacts as run_salesforce_ingest
 from flask_app.importer.utils import cleanup_upload
+from flask_app.models import ImporterWatermark
 from flask_app.models.base import db
 from flask_app.models.importer.schema import ImportRun, ImportRunStatus
 
@@ -159,3 +165,96 @@ def ingest_csv(
     finally:
         if cleanup_target is not None:
             cleanup_upload(cleanup_target)
+
+
+@shared_task(name="importer.pipeline.ingest_salesforce_contacts", bind=True)
+def ingest_salesforce_contacts(
+    self,
+    *,
+    run_id: int,
+    dry_run: bool = False,
+    record_limit: int | None = None,
+) -> dict[str, object]:
+    """
+    Execute the Salesforce contact ingest pipeline via the importer worker.
+    """
+
+    run = db.session.get(ImportRun, run_id)
+    if run is None:
+        raise ValueError(f"Import run {run_id} not found.")
+
+    run.status = ImportRunStatus.RUNNING
+    run.started_at = datetime.now(timezone.utc)
+    db.session.commit()
+
+    object_name = (current_app.config.get("IMPORTER_SALESFORCE_OBJECTS") or ("contacts",))[0]
+    batch_size = current_app.config.get("IMPORTER_SALESFORCE_BATCH_SIZE", 5000)
+
+    watermark = (
+        db.session.query(ImporterWatermark)
+        .filter_by(adapter="salesforce", object_name=object_name)
+        .with_for_update(of=ImporterWatermark)
+        .first()
+    )
+    if watermark is None:
+        watermark = ImporterWatermark(adapter="salesforce", object_name=object_name)
+        db.session.add(watermark)
+        db.session.flush()
+
+    try:
+        client = create_salesforce_client()
+        extractor = SalesforceExtractor(
+            client=client,
+            batch_size=batch_size,
+            poll_interval=5.0,
+            poll_timeout=900.0,
+            logger=current_app.logger,
+        )
+        summary = run_salesforce_ingest(
+            import_run=run,
+            extractor=extractor,
+            watermark=watermark,
+            staging_batch_size=500,
+            dry_run=dry_run,
+            logger=current_app.logger,
+            record_limit=record_limit,
+        )
+        run.status = ImportRunStatus.SUCCEEDED
+        run.finished_at = datetime.now(timezone.utc)
+        db.session.commit()
+        current_app.logger.info(
+            "Salesforce import run completed",
+            extra={
+                "importer_run_id": run_id,
+                "salesforce_job_id": summary.job_id,
+                "salesforce_batches_processed": summary.batches_processed,
+                "salesforce_records_received": summary.records_received,
+                "salesforce_records_staged": summary.records_staged,
+                "importer_dry_run": dry_run,
+            },
+        )
+        return {
+            "run_id": run_id,
+            "job_id": summary.job_id,
+            "batches_processed": summary.batches_processed,
+            "records_received": summary.records_received,
+            "records_staged": summary.records_staged,
+            "dry_run": dry_run,
+            "max_system_modstamp": summary.max_modstamp.isoformat() if summary.max_modstamp else None,
+        }
+    except Exception as exc:  # pragma: no cover - defensive logging path
+        db.session.rollback()
+        recovery_run = db.session.get(ImportRun, run_id)
+        if recovery_run is not None:
+            recovery_run.status = ImportRunStatus.FAILED
+            recovery_run.error_summary = str(exc)
+            recovery_run.finished_at = datetime.now(timezone.utc)
+            db.session.commit()
+        current_app.logger.exception(
+            "Salesforce import run failed",
+            extra={
+                "importer_run_id": run_id,
+                "importer_error": str(exc),
+            },
+        )
+        raise
