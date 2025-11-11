@@ -11,7 +11,8 @@ This note summarizes the IMP-1 work that makes the importer package optional and
   IMPORTER_ENABLED=false
   IMPORTER_ADAPTERS=csv,salesforce,google_sheets
   ```
-- Optional dependencies: install adapter extras with `pip install ".[importer]"` when enabling adapters that require third-party libraries.
+- Optional dependencies: install adapter extras with `pip install ".[importer-salesforce]"` (or consume `requirements-optional.txt`) when enabling adapters that require third-party libraries. The extras keep the base image slim while allowing opt-in installs.
+- `IMPORTER_SALESFORCE_DOC_URL` / `IMPORTER_CSV_DOC_URL`: optional URLs surfaced in the admin Adapter Availability card so operators can jump to setup guides. Defaults point to Polaris internal docs.
 - `IMPORTER_UPLOAD_DIR`: optional path where uploaded files are staged for the worker (defaults to `instance/import_uploads`); accepts absolute or instance-relative values.
 - `IMPORTER_MAX_UPLOAD_MB`: max CSV upload size exposed in the admin UI (defaults to `25`).
 - `IMPORTER_SHOW_RECENT_RUNS`: toggle the recent-runs table on the admin importer page (defaults to `true`).
@@ -28,6 +29,7 @@ This note summarizes the IMP-1 work that makes the importer package optional and
   - CLI group mounting.
   - Template context processor exposing `importer_enabled` and `importer_menu_items`.
   - Startup log message indicating whether the importer was enabled and which adapters loaded.
+  - Prometheus instrumentation for Salesforce readiness (`importer_salesforce_adapter_enabled_total`, `importer_salesforce_auth_attempts_total`).
 - The nav bar shows an **Importer** dropdown (super admins only) when the flag is on and adapters are registered.
 
 ## CLI Usage
@@ -38,6 +40,7 @@ This note summarizes the IMP-1 work that makes the importer package optional and
     - `flask importer run --source csv --file …` queues a run by default and prints machine-readable JSON (`--inline` retains the synchronous behaviour for local debugging).
     - `flask importer retry --run-id <id>` retries a failed or pending import run using stored parameters. Requires the original file to still exist and the run to have been created with retry support (stores `ingest_params_json`).
     - `flask importer cleanup-uploads --max-age-hours 72` removes staged upload files older than the specified window—handy for on-prem installs storing files on disk. Note: admin uploads retain files for retry capability (`keep_file=True`), so consider run associations when pruning.
+    - `flask importer adapters list [--auth-ping]` surfaces adapter readiness (deps/env/auth). Use `--auth-ping` to attempt a live Salesforce auth check and record Prometheus counters.
 - On Windows, start the worker with `flask importer worker run --pool=solo` because the default prefork pool is not supported.
 
 ## Health Endpoint
@@ -71,7 +74,8 @@ This note summarizes the IMP-1 work that makes the importer package optional and
 | Worker not starting | `flask importer worker run` fails | On Windows, add `--pool=solo`. Verify `IMPORTER_WORKER_ENABLED=true` if using conditional worker startup. |
 | Health endpoint 404 | `GET /importer/health` returns 404 | Ensure importer is enabled (`IMPORTER_ENABLED=true`) and blueprint registered. Check `flask routes` for `/importer/health`. |
 | CLI command not found | `flask importer` raises "No such command" | Verify importer is enabled. Check that `init_importer(app)` is called in app factory. |
-| Adapter not loading | Adapter missing from health response | Verify adapter name in `IMPORTER_ADAPTERS` matches registry entry. Check for import errors in logs. |
+| Adapter not loading | Adapter missing from health response | Verify adapter name in `IMPORTER_ADAPTERS` matches registry entry. Run `flask importer adapters list` for detailed readiness (deps/env/auth). |
+| Salesforce adapter ready status = missing-deps | CLI/admin UI shows "Missing dependencies" | Install extras: `pip install ".[importer-salesforce]"` or `pip install -r requirements-optional.txt`. Rebuild optional Docker layer if using a baked image. |
 
 ### Quick Verification Checklist
 
@@ -84,6 +88,7 @@ Before starting Sprint 2 work, verify Sprint 1 completion:
 - [ ] `flask importer worker ping` succeeds (worker running)
 - [ ] `GET /importer/health` returns JSON with `enabled: true`
 - [ ] Admin UI shows "Importer" menu (super admin only)
+- [ ] Admin → Imports page renders Adapter Availability card (CSV ready, Salesforce disabled by default)
 - [ ] Can upload CSV via admin UI or CLI (`flask importer run --source csv --file <path>`)
 - [ ] Test run completes and creates records in `import_runs` table
 - [ ] Golden dataset files exist in `ops/testdata/importer_golden_dataset_v0/`

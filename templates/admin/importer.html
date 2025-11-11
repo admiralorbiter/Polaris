@@ -15,6 +15,58 @@
         </p>
     </div>
 
+    {% if adapter_cards %}
+    <div class="card shadow-sm mb-4">
+        <div class="card-body">
+            <h2 class="h4">Adapter Availability</h2>
+            <p class="text-muted small">
+                Adapters are enabled via infrastructure configuration. Resolve status warnings before exposing them to operators.
+            </p>
+            <div class="row g-3">
+                {% for card in adapter_cards %}
+                <div class="col-md-6">
+                    <div class="adapter-card h-100 p-3 border rounded {{ 'adapter-card-disabled' if not card.is_configured }}">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <div>
+                                <h3 class="h5 mb-1">{{ card.title }}</h3>
+                                <span class="badge {{ card.badge_class }}">{{ card.status_label }}</span>
+                            </div>
+                            <div class="form-check form-switch ms-3">
+                                <input
+                                    class="form-check-input"
+                                    type="checkbox"
+                                    id="adapter-toggle-{{ card.name }}"
+                                    {% if card.is_configured %}checked{% endif %}
+                                    {% if card.toggle_disabled %}disabled{% endif %}
+                                >
+                                <label class="form-check-label small" for="adapter-toggle-{{ card.name }}">
+                                    {% if card.is_configured %}Enabled{% else %}Disabled{% endif %}
+                                </label>
+                            </div>
+                        </div>
+                        {% if card.messages %}
+                        <ul class="small text-muted ps-3 mb-3">
+                            {% for message in card.messages %}
+                            <li>{{ message }}</li>
+                            {% endfor %}
+                        </ul>
+                        {% endif %}
+                        <a
+                            class="btn btn-link btn-sm ps-0"
+                            href="{{ card.docs_url }}"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                        >
+                            View setup guide <i class="fas fa-external-link-alt ms-1"></i>
+                        </a>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     <div class="card shadow-sm">
         <div class="card-body">
             <h2 class="h4">Start a New Import Run</h2>

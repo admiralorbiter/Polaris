@@ -715,22 +715,25 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Importer warns clearly when adapter enabled but deps/creds missing.  
 - Admin toggle hides Salesforce UI affordances when adapter disabled.  
 **Dependencies**: IMP-1.
-**Status**: 🔄 In planning (target code freeze: Jan 10, 2026).
+**Status**: ✅ Implemented on dev branch (Nov 2025); staging rollout pending connector QA.
 
-**Outcome Notes (Plan)**
-- Ship `pip install ".[importer-salesforce]"` extra wiring `simple_salesforce` + `salesforce-bulk` (or `salesforce-api` alternative) with version pins and hashes.
-- Extend `IMPORTER_ADAPTERS` parsing to validate `salesforce` only if extra import succeeds; surface actionable CLI error message.
-- Provide migration notes for packaging (Docker image optional layer, `requirements-optional.txt`).
+**Implementation Notes (Nov 2025)**
+- Added `project.optional-dependencies["importer-salesforce"]` and `requirements-optional.txt` (with hashes) so operators install extras via `pip install ".[importer-salesforce]"` or `pip install -r requirements-optional.txt`.
+- Runtime readiness uses `importer.adapters.salesforce.check_salesforce_adapter_readiness()` to validate optional deps, creds, and (optionally) live auth; failures surface actionable messages in logs, CLI, and the admin UI.
+- New CLI surface: `flask importer adapters list [--auth-ping]` renders status per adapter (CSV, Salesforce) and can perform a live auth ping when dependencies/creds are present.
+- Admin Importer dashboard now contains an “Adapter Availability” card (under Admin → Imports) with status pill, toggle indicator, and setup guide link (configurable via `IMPORTER_SALESFORCE_DOC_URL`).
+- `ImportRun.adapter_health_json` stores a snapshot of adapter readiness when a run is queued (CLI or admin), improving post-mortem diagnostics.
+- Deployment note: include `requirements-optional.txt` in the optional Docker layer that bakes Salesforce support; omit the file when producing the slim base image.
 
 **Implementation Outline**
 - Add adapter registration to `importer/adapters/__init__.py`; guard import behind feature flag + extra check.
-- Implement `ensure_salesforce_adapter_ready()` that validates env vars (`SF_USERNAME`, `SF_PASSWORD`, `SF_TOKEN` or OAuth config) and connected app scope.
+- Implement `ensure_salesforce_adapter_ready()` that validates env vars (`SF_USERNAME`, `SF_PASSWORD`, `SF_SECURITY_TOKEN`) required for username/password+token auth with Simple Salesforce.
+- Instantiate the client via `from simple_salesforce import Salesforce, SalesforceAuthenticationFailed`, surfacing clear failure messaging when auth fails.
 - Update CLI (`flask importer adapters list`) to indicate availability and dependency status.
 - Extend admin settings page to show Salesforce card with enable/disable toggle and doc links.
 
 **Data Model & Storage**
-- No DB schema changes; store adapter config in `importer_adapter_settings` table (JSON) to cache instance URL + auth method.
-- Persist adapter health in `import_runs` metadata (`adapter_health_json`) for quick diagnostics.
+- Added nullable `ImportRun.adapter_health_json` (JSON) to persist readiness metadata alongside run metrics for troubleshooting.
 
 **Metrics & Telemetry**
 - Emit `importer_salesforce_adapter_enabled_total` gauge and auth attempt counters with success/failure labels.
@@ -742,9 +745,9 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - **Packaging**: Smoke install on slim Docker image ensuring optional layer works.
 
 **Open Questions / Clarifications**
-- Do we support both username/password+token and OAuth JWT flows at launch, or phase OAuth later?
-- Who owns connected app creation per tenant—Polaris support or customer IT?
-- Should adapter health surfacing live in an existing admin dashboard card or a new integrations page?
+- ✅ Launch authentication flow uses username/password + security token via Simple Salesforce; evaluate OAuth in future sprints.
+- ✅ Connected app provisioning remains a Polaris Support responsibility for v1; long-term plan is a shared hand-off (support bootstraps, customer IT finalises).
+- ✅ Adapter health surfaces on the existing Admin → Imports page (Adapter Availability card); revisit a dedicated integrations page when more adapters ship.
 
 ### IMP-41 — Salesforce extract → staging _(8 pts)_
 **User story**: As an operator, Contacts pull incrementally into staging.  

@@ -7,13 +7,14 @@ validation while remaining lightweight when the importer is disabled.
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Tuple
+from typing import Any, Dict, Iterable, Mapping, Tuple
 
 from flask import Flask
 
 from flask_app.utils.importer import get_importer_adapters, is_importer_enabled
 
 from .celery_app import ensure_celery_app, get_celery_app
+from .metrics import record_salesforce_adapter_status, record_salesforce_auth_attempt
 from .cli import get_disabled_importer_group, importer_cli
 from .pipeline.dq_service import DataQualityViolationService, ViolationFilters
 from .pipeline.run_service import ImportRunService, RunFilters
@@ -30,6 +31,8 @@ __all__ = [
     "RunFilters",
     "DataQualityViolationService",
     "ViolationFilters",
+    "get_adapter_readiness",
+    "refresh_adapter_readiness",
 ]
 
 
@@ -44,6 +47,7 @@ def _ensure_extension_state(app: Flask) -> dict:
             "worker_enabled": False,
             "celery_app": None,
             "_context_registered": False,
+            "adapter_readiness": {},
         },
     )
     return state
@@ -63,6 +67,51 @@ def _register_template_context(app: Flask, state: dict[str, Any]) -> None:
         }
 
     state["_context_registered"] = True
+
+
+def _compute_adapter_readiness(
+    app: Flask,
+    descriptors: Iterable[AdapterDescriptor],
+    *,
+    require_auth_ping: bool = False,
+) -> Dict[str, Dict[str, Any]]:
+    readiness: Dict[str, Dict[str, Any]] = {}
+    salesforce_status: bool | None = None
+    for descriptor in descriptors:
+        payload: Dict[str, Any] = {
+            "name": descriptor.name,
+            "title": descriptor.title,
+            "optional_dependencies": descriptor.optional_dependencies,
+        }
+        if descriptor.name == "salesforce":
+            from flask_app.importer.adapters.salesforce import check_salesforce_adapter_readiness
+
+            readiness_result = check_salesforce_adapter_readiness(
+                require_auth_ping=require_auth_ping,
+            )
+            payload.update(readiness_result.as_dict())
+            if require_auth_ping and readiness_result.auth_status in ("ok", "failed"):
+                record_salesforce_auth_attempt(
+                    "success" if readiness_result.auth_status == "ok" else "failure"
+                )
+            salesforce_status = readiness_result.status == "ready"
+        else:
+            payload.update(
+                {
+                    "status": "ready",
+                    "dependency_ok": True,
+                    "dependency_errors": [],
+                    "missing_env_vars": [],
+                    "auth_status": "skipped",
+                    "messages": [],
+                }
+            )
+        readiness[descriptor.name] = payload
+    if salesforce_status is None:
+        record_salesforce_adapter_status(False)
+    else:
+        record_salesforce_adapter_status(bool(salesforce_status))
+    return readiness
 
 
 def _set_cli(app: Flask, enabled: bool) -> None:
@@ -100,6 +149,7 @@ def init_importer(app: Flask) -> None:
     _register_template_context(app, state)
 
     if not enabled:
+        record_salesforce_adapter_status(False)
         state["active_adapters"] = ()
         state["menu_items"] = ()
         _set_cli(app, enabled=False)
@@ -125,6 +175,27 @@ def init_importer(app: Flask) -> None:
     )
     ensure_celery_app(app, state)
 
+    readiness_map = _compute_adapter_readiness(app, state["active_adapters"])
+    state["adapter_readiness"] = readiness_map
+    for descriptor in state["active_adapters"]:
+        payload = readiness_map.get(descriptor.name, {})
+        status = payload.get("status")
+        if status and status != "ready":
+            messages = list(payload.get("messages") or ())
+            message_str = "; ".join(messages) if messages else "No additional context provided."
+            app.logger.warning(
+                "Importer adapter '%s' not ready (status=%s). %s",
+                descriptor.name,
+                status,
+                message_str,
+                extra={
+                    "importer_adapter": descriptor.name,
+                    "importer_adapter_status": status,
+                    "importer_adapter_messages": messages,
+                    "importer_adapter_missing_env": payload.get("missing_env_vars"),
+                },
+            )
+
     if importer_blueprint.name not in app.blueprints and not getattr(app, "_got_first_request", False):
         app.register_blueprint(importer_blueprint)
     elif importer_blueprint.name not in app.blueprints:
@@ -135,3 +206,23 @@ def init_importer(app: Flask) -> None:
 
     adapter_names = ", ".join(adapter.name for adapter in active_descriptors) or "none"
     app.logger.info("Importer enabled with adapters: %s", adapter_names)
+
+
+def get_adapter_readiness(app: Flask) -> Mapping[str, Dict[str, Any]]:
+    """
+    Return cached adapter readiness information for the importer extension.
+    """
+    state = _ensure_extension_state(app)
+    readiness = state.get("adapter_readiness", {})
+    return dict(readiness)
+
+
+def refresh_adapter_readiness(app: Flask, *, require_auth_ping: bool = False) -> Mapping[str, Dict[str, Any]]:
+    """
+    Recompute adapter readiness and persist the results on the importer extension state.
+    """
+    state = _ensure_extension_state(app)
+    descriptors = state.get("active_adapters", ())
+    readiness_map = _compute_adapter_readiness(app, descriptors, require_auth_ping=require_auth_ping)
+    state["adapter_readiness"] = readiness_map
+    return dict(readiness_map)

@@ -44,6 +44,8 @@ def test_importer_admin_page_renders(logged_in_admin, app, tmp_path):
     response = client.get("/admin/imports/")
     assert response.status_code == 200
     assert b"Start a New Import Run" in response.data
+    assert b"Adapter Availability" in response.data
+    assert b"Salesforce (Bulk API)" in response.data
 
 
 def test_importer_admin_page_renders_with_runs(logged_in_admin, app, tmp_path):
@@ -128,6 +130,8 @@ def test_importer_admin_upload_enqueues(logged_in_admin, app, tmp_path):
     assert run.status == ImportRunStatus.PENDING
     assert run.triggered_by_user_id == admin_user.id
     assert run.notes and "volunteers.csv" in run.notes
+    assert run.adapter_health_json is not None
+    assert "csv" in run.adapter_health_json
 
     # Admin log entry captured
     log_entry = AdminLog.query.order_by(AdminLog.id.desc()).first()

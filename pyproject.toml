@@ -1,6 +1,24 @@
 # Polaris Project Configuration
 # Configuration for development tools (black, isort, mypy, etc.)
 
+[build-system]
+requires = ["setuptools>=67", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "polaris"
+version = "0.0.0"
+description = "Polaris data integration platform"
+requires-python = ">=3.11"
+readme = "README.md"
+dependencies = []
+
+[project.optional-dependencies]
+"importer-salesforce" = [
+    "simple-salesforce==1.12.5",
+    "salesforce-bulk==2.2.0",
+]
+
 [tool.black]
 line-length = 120
 target-version = ['py311']

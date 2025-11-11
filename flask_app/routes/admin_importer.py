@@ -12,7 +12,9 @@ from pathlib import Path
 from flask import Blueprint, current_app, jsonify, render_template, request, send_file
 from flask_login import current_user, login_required
 
+from flask_app.importer import get_adapter_readiness
 from flask_app.importer.celery_app import DEFAULT_QUEUE_NAME, get_celery_app
+from flask_app.importer.registry import get_adapter_registry
 from flask_app.importer.pipeline.dq_service import (
     DataQualityViolationService,
     RemediationConflict,
@@ -37,6 +39,24 @@ from config.survivorship import load_profile
 admin_importer_blueprint = Blueprint("admin_importer", __name__, url_prefix="/admin/imports")
 _run_service = ImportRunService()
 _dq_service = DataQualityViolationService()
+
+_STATUS_LABELS = {
+    "ready": "Ready",
+    "missing-deps": "Missing dependencies",
+    "missing-env": "Needs configuration",
+    "auth-error": "Authentication error",
+    "disabled": "Disabled",
+}
+
+_STATUS_BADGES = {
+    "ready": "bg-success",
+    "missing-deps": "bg-danger",
+    "missing-env": "bg-warning text-dark",
+    "auth-error": "bg-danger",
+    "disabled": "bg-secondary",
+}
+
+_FOCUS_ADAPTERS = ("csv", "salesforce")
 
 
 def _ensure_importer_enabled():
@@ -72,6 +92,65 @@ def _validate_upload(file_storage) -> None:
         file_storage.stream.seek(position)
         if size_bytes > max_bytes:
             raise OverflowError("Upload exceeds maximum size limit.")
+
+
+def _resolve_docs_url(adapter_name: str) -> str:
+    if adapter_name == "salesforce":
+        return current_app.config.get(
+            "IMPORTER_SALESFORCE_DOC_URL",
+            "https://docs.polaris.example/importer/salesforce",
+        )
+    if adapter_name == "csv":
+        return current_app.config.get(
+            "IMPORTER_CSV_DOC_URL",
+            "https://docs.polaris.example/importer/csv",
+        )
+    return current_app.config.get(
+        "IMPORTER_ADAPTER_DOC_URL",
+        "https://docs.polaris.example/importer",
+    )
+
+
+def _build_adapter_cards() -> list[dict[str, object]]:
+    state = current_app.extensions.get("importer", {})
+    configured_adapters = tuple(state.get("configured_adapters", ()))
+    readiness_map = get_adapter_readiness(current_app)
+    descriptor_map = get_adapter_registry()
+
+    cards: list[dict[str, object]] = []
+    for adapter_name in _FOCUS_ADAPTERS:
+        descriptor = descriptor_map.get(adapter_name)
+        if descriptor is None:
+            continue
+
+        readiness = readiness_map.get(adapter_name) or {}
+        is_configured = adapter_name in configured_adapters
+        status = readiness.get("status") or ("disabled" if not is_configured else "ready")
+        messages = list(readiness.get("messages") or ())
+        dependency_errors = readiness.get("dependency_errors") or ()
+        if dependency_errors:
+            messages.extend(str(error) for error in dependency_errors if str(error) not in messages)
+
+        if not is_configured and adapter_name != "csv":
+            messages.append(
+                "Adapter is disabled. Update IMPORTER_ADAPTERS and redeploy the importer workers to enable it."
+            )
+
+        cards.append(
+            {
+                "name": adapter_name,
+                "title": descriptor.title,
+                "status": status,
+                "status_label": _STATUS_LABELS.get(status, status.replace("-", " ").title()),
+                "badge_class": _STATUS_BADGES.get(status, "bg-secondary"),
+                "is_configured": is_configured,
+                "messages": messages,
+                "docs_url": _resolve_docs_url(adapter_name),
+                "toggle_disabled": True,
+                "toggle_disabled_reason": "Manage adapter enablement via environment configuration.",
+            }
+        )
+    return cards
 
 
 @admin_importer_blueprint.get("/")
@@ -118,11 +197,13 @@ def importer_dashboard():
                 "dry_run": bool(run.dry_run),
             }
         )
+    adapter_cards = _build_adapter_cards()
     return render_template(
         "admin/importer.html",
         recent_runs=recent_runs,
         max_upload_mb=current_app.config.get("IMPORTER_MAX_UPLOAD_MB", 25),
         default_queue=DEFAULT_QUEUE_NAME,
+        adapter_cards=adapter_cards,
     )
 
 
@@ -344,6 +425,7 @@ def importer_upload():
             triggered_by_user_id=current_user.id,
             counts_json={},
             metrics_json={},
+            adapter_health_json=get_adapter_readiness(current_app),
             ingest_params_json={
                 "file_path": str(stored_path),
                 "source_system": source,

@@ -135,3 +135,5 @@ logs/
 .vscode/
 .idea/
 ci_artifacts/
+
+.tmp_unicode/

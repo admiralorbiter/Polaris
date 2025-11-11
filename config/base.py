@@ -139,6 +139,15 @@ class Config:
             IMPORTER_RUNS_PAGE_SIZE_DEFAULT = _parsed_page_sizes[0]
     else:
         IMPORTER_RUNS_PAGE_SIZE_DEFAULT = _parsed_page_sizes[0]
+
+    IMPORTER_CSV_DOC_URL = os.environ.get(
+        "IMPORTER_CSV_DOC_URL",
+        "https://docs.polaris.example/importer/csv",
+    )
+    IMPORTER_SALESFORCE_DOC_URL = os.environ.get(
+        "IMPORTER_SALESFORCE_DOC_URL",
+        "https://docs.polaris.example/importer/salesforce",
+    )
     if IMPORTER_RUNS_PAGE_SIZE_DEFAULT not in _parsed_page_sizes:
         _parsed_page_sizes.insert(0, IMPORTER_RUNS_PAGE_SIZE_DEFAULT)
     IMPORTER_RUNS_PAGE_SIZES = tuple(sorted(set(_parsed_page_sizes)))

@@ -20,6 +20,12 @@
 - `flask importer retry --run-id <id>`  
   Retry a failed or pending run using stored parameters. Requires the original upload file to still exist.
 
+### Adapter Diagnostics
+- `flask importer adapters list`  
+  Display readiness for each configured adapter (dependencies, env vars, current status). Mirrors the Admin → Imports Adapter Availability card.
+- `flask importer adapters list --auth-ping`  
+  Perform the standard readiness check and attempt a live Salesforce authentication. Emits Prometheus counters (`importer_salesforce_auth_attempts_total`) for success/failure.
+
 ### Housekeeping
 - `flask importer cleanup-uploads --max-age-hours <hours>`  
   Prune old uploads from `IMPORTER_UPLOAD_DIR`. Pair with retry awareness by keeping files needed for reruns.
@@ -48,6 +54,9 @@ flask importer
 
 # Check worker connectivity
 flask importer worker ping
+
+# Inspect adapter readiness
+flask importer adapters list
 
 # Test CSV adapter with golden data
 flask importer run --source csv --file ops/testdata/importer_golden_dataset_v0/volunteers_valid.csv --inline

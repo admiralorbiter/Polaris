@@ -1,0 +1,11 @@
+#
+# Optional dependency groups that are not required for the core Polaris app.
+# Install with: pip install -r requirements-optional.txt
+#
+# Salesforce importer adapter extras (used by `pip install ".[importer-salesforce]"`)
+simple-salesforce==1.12.5 \
+    --hash=sha256:07029575385d04132babfd6e19c1c8068c859d616a45dab07bbf9875bdc5ab93
+salesforce-bulk==2.2.0 \
+    --hash=sha256:6894e2f0d1b7a719388bbc425e1874cc096a3cc80106e93098a672709ac5ff4e
+unicodecsv==0.14.1 \
+    --hash=sha256:018c08037d48649a0412063ff4eda26eaa81eff1546dbffa51fa5293276ff7fc

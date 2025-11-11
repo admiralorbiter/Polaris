@@ -199,6 +199,22 @@ main:has(.admin-container) {
     margin: var(--spacing-lg) 0;
 }
 
+.adapter-card {
+    background: var(--bg-white);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow var(--transition-base), transform var(--transition-base);
+}
+
+.adapter-card:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+}
+
+.adapter-card-disabled {
+    opacity: 0.85;
+}
+
 .pagination .page-item {
     margin: 0;
 }

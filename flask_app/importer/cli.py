@@ -45,18 +45,13 @@ def importer_cli(ctx):
     """
     info = ctx.ensure_object(ScriptInfo)
     app = info.load_app()
+    ctx.meta["app"] = app
     if not is_importer_enabled(app):
         raise click.ClickException(
             "Importer is disabled via IMPORTER_ENABLED=false. " "Enable it to run importer CLI commands."
         )
     if ctx.invoked_subcommand is None:
-        adapters = get_importer_adapters(app)
-        if not adapters:
-            click.echo("No importer adapters configured.")
-        else:
-            click.echo("Enabled importer adapters:")
-            for adapter in adapters:
-                click.echo(f"  - {adapter}")
+        _display_adapter_overview(app)
 
 
 def get_disabled_importer_group() -> click.Group:
@@ -69,6 +64,46 @@ def get_disabled_importer_group() -> click.Group:
         raise click.ClickException("Importer commands are unavailable because IMPORTER_ENABLED=false.")
 
     return disabled_group
+
+
+def _display_adapter_overview(app, *, require_auth_ping: bool = False) -> None:
+    """
+    Emit adapter readiness information for CLI consumers.
+    """
+
+    from flask_app.importer import get_adapter_readiness, refresh_adapter_readiness
+
+    state = app.extensions.get("importer", {})
+    configured = state.get("configured_adapters", ())
+    if not configured:
+        click.echo("No importer adapters configured.")
+        return
+
+    readiness_map = (
+        refresh_adapter_readiness(app, require_auth_ping=require_auth_ping)
+        if require_auth_ping
+        else get_adapter_readiness(app)
+    )
+    if require_auth_ping:
+        auth_status = (readiness_map.get("salesforce") or {}).get("auth_status")
+        app.logger.info(
+            "Importer adapter auth ping completed",
+            extra={
+                "importer_adapter": "salesforce",
+                "importer_adapter_auth_status": auth_status,
+            },
+        )
+    active_descriptors = {descriptor.name: descriptor for descriptor in state.get("active_adapters", ())}
+
+    click.echo("Enabled importer adapters:")
+    for adapter in configured:
+        payload = readiness_map.get(adapter, {})
+        descriptor = active_descriptors.get(adapter)
+        title = payload.get("title") or (descriptor.title if descriptor else adapter)
+        status = payload.get("status", "ready")
+        click.echo(f"  - {title} ({adapter}): {status}")
+        for message in payload.get("messages") or ():
+            click.echo(f"      {message}")
 
 
 def _resolve_celery(app) -> Optional[Celery]:
@@ -311,6 +346,35 @@ def worker_ping(ctx, timeout: float):
     click.echo(json.dumps(payload, indent=2))
 
 
+@importer_cli.group(name="adapters")
+@click.pass_context
+def adapters_group(ctx):
+    """Inspect and manage importer adapters."""
+
+    info = ctx.ensure_object(ScriptInfo)
+    app = ctx.meta.get("app") or info.load_app()
+    if not is_importer_enabled(app):
+        raise click.ClickException("Importer is disabled; enable it before inspecting adapters.")
+    ctx.meta["app"] = app
+
+
+@adapters_group.command("list")
+@click.option(
+    "--auth-ping",
+    is_flag=True,
+    help="Attempt an authenticated Salesforce login when checking readiness (may take a few seconds).",
+)
+@click.pass_context
+def adapters_list(ctx, auth_ping: bool):
+    """
+    Display importer adapter readiness, optionally attempting live authentication checks.
+    """
+
+    info = ctx.ensure_object(ScriptInfo)
+    app = ctx.meta.get("app") or info.load_app()
+    _display_adapter_overview(app, require_auth_ping=auth_ping)
+
+
 @importer_cli.command("run")
 @click.option("--source", required=True, help="Logical source identifier (currently only 'csv' is supported).")
 @click.option(
@@ -342,6 +406,8 @@ def importer_run(
     """Execute an importer run for the provided source."""
     info = ctx.ensure_object(ScriptInfo)
     app = info.load_app()
+    from flask_app.importer import get_adapter_readiness
+
     if not is_importer_enabled(app):
         raise click.ClickException("Importer is disabled; enable it via IMPORTER_ENABLED before running.")
 
@@ -358,6 +424,7 @@ def importer_run(
         notes=f"CLI ingest from {csv_path}",
         counts_json={},
         metrics_json={},
+        adapter_health_json=get_adapter_readiness(app),
         ingest_params_json={
             "file_path": str(csv_path),
             "source_system": normalized_source,

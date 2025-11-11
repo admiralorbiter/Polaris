@@ -62,6 +62,8 @@ def test_importer_run_cli_queues_by_default(app, runner, tmp_path):
     assert run is not None
     assert run.status == ImportRunStatus.PENDING
     assert run.dry_run is False
+    assert run.adapter_health_json is not None
+    assert "csv" in run.adapter_health_json
 
 
 def test_importer_run_cli_summary_json_requires_inline(app, runner, tmp_path):

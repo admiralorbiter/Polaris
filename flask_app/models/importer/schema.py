@@ -56,6 +56,11 @@ class ImportRun(BaseModel):
         nullable=True,
         comment="Stored parameters for retry support (file_path, source_system, dry_run, keep_file)",
     )
+    adapter_health_json: Mapped[dict | None] = mapped_column(
+        db.JSON,
+        nullable=True,
+        comment="Snapshot of adapter readiness metadata when the run was created.",
+    )
 
     triggered_by_user = relationship("User", foreign_keys=[triggered_by_user_id])
     staging_rows = relationship(
