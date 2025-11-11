@@ -39,6 +39,9 @@
 
 **Sprint Retrospectives & Learnings**:
 - `docs/sprint1-retrospective.md` — Sprint 1 completion retrospective, lessons learned, and recommendations for Sprint 2
+- `docs/sprint2-retrospective.md` — Sprint 2 completion retrospective, lessons learned, and recommendations for Sprint 3
+- `docs/sprint3-retrospective.md` — Sprint 3 completion retrospective, lessons learned, and recommendations for Sprint 4
+- `docs/sprint4-retrospective.md` — Sprint 4 completion retrospective, lessons learned, and recommendations for Sprint 5
 
 **Operational Guides**:
 - `docs/importer-feature-flag.md` — Feature flag configuration, troubleshooting, and verification checklist
@@ -832,6 +835,162 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - **Regression**: Combined with idempotency + ingest suites to guard against duplicate records or counter regressions.
 
 **Open Questions / Clarifications**
-- Do we require two-phase commit or transactional batching between staging flush and core upsert to avoid partial watermark advancement?
-- How quickly must counters surface in existing dashboards (<1 min post-run?)
-- What is the expected SLA for reprocessing Salesforce deletes—immediate or batched nightly?
+- ✅ Two-phase commit implemented: watermark advances only after successful core database commit.
+- ✅ Counters surface within ~1 minute post-run via dashboard refresh.
+- ✅ Salesforce deletes processed in same run for fresher counts; no nightly batching required.
+---
+
+## Sprint 5 — Fuzzy Dedupe + Merge UI
+**Epic**: EPIC-5  
+**Goal**: Human-in-the-loop identity resolution; auto-merge & undo.
+
+### IMP-50 — Candidate generation & scoring _(8 pts)_
+**User story**: As a steward, likely duplicates appear with scores & features.  
+**Acceptance Criteria**
+- Blocking keys (email/phone/name+zip); features (name, DOB, address, employer/school).
+- Scores stored in `dedupe_suggestions` with features JSON; thresholds configurable.
+**Dependencies**: IMP-31.
+
+### IMP-51 — Merge UI _(13 pts)_
+**User story**: As an admin, I can compare, choose field winners, and merge safely.  
+**Acceptance Criteria**
+- Side-by-side compare; field highlights; survivorship controls.
+- On merge: `merge_log`, `external_id_map` unify, `change_log` diffs recorded.
+- Actions: accept, reject, defer.
+**Dependencies**: IMP-50, IMP-32.
+
+### IMP-52 — Auto-merge + undo merge _(8 pts)_
+**User story**: As an operator, obvious dupes auto-merge; I can undo.  
+**Acceptance Criteria**
+- Auto-merge for score ≥ threshold; undo restores state fully.
+**Dependencies**: IMP-51.
+
+### IMP-53 — Dedupe metrics on runs _(3 pts)_
+**User story**: As an admin, I see auto-merged & needs-review counts per run.  
+**Acceptance Criteria**
+- New run columns and links to review queue.
+**Dependencies**: IMP-50.
+
+---
+
+## Sprint 6 — Reconciliation, Anomalies, Alerts
+**Epic**: EPIC-6  
+**Goal**: Detect leaks/staleness/spikes; trend views; operator alerts.
+
+### IMP-60 — Reconciliation & freshness _(8 pts)_
+**User story**: As an operator, I know if data is stale or missing.  
+**Acceptance Criteria**
+- Freshness (now - max(source_updated_at)); thresholds; run labels.
+- Source vs core counts; hash parity spot checks; metrics saved to `counts_json`.
+**Dependencies**: IMP-43.
+
+### IMP-61 — Anomaly detectors _(8 pts)_
+**User story**: As a PM, I see drift in rejects/dupes/null rates.  
+**Acceptance Criteria**
+- Delta guard (3σ), null drift (2× baseline), rule offenders ranked.
+- Flags shown on runs and Source Health page.
+**Dependencies**: IMP-60.
+
+### IMP-62 — Alerts (email/Slack/webhook) _(5 pts)_
+**User story**: As an operator, I'm notified on failures or critical anomalies.  
+**Acceptance Criteria**
+- Channels configurable; links point to run/queue; on/off per source.
+**Dependencies**: IMP-61.
+
+### IMP-63 — Trend views _(5 pts)_
+**User story**: As a PM, I can view 30-day trends for ingests/rejects/dupes/freshness.  
+**Acceptance Criteria**
+- Charts render; filterable dates; export CSV/PNG.
+**Dependencies**: IMP-60.
+
+---
+
+## Sprint 7 — Mapping Versioning + Config UI + Backfills
+**Epic**: EPIC-7  
+**Goal**: Version mappings; in-app config; safe backfills.
+
+### IMP-70 — Versioned mappings _(8 pts)_
+**User story**: As a dev, I can evolve mappings without breaking history.  
+**Acceptance Criteria**
+- `mapping_version` stored on runs; UI shows current/prior; unmapped field warnings.
+**Dependencies**: IMP-42.
+
+### IMP-71 — Config UI & thresholds _(8 pts)_
+**User story**: As an admin, I can tune thresholds, rules, and schedules.  
+**Acceptance Criteria**
+- Edit dedupe thresholds, anomaly thresholds, cron schedule, rule modes (warn/enforce); audit config changes.
+**Dependencies**: IMP-60, IMP-61.
+
+### IMP-72 — Backfill UX & CLI _(5 pts)_
+**User story**: As an operator, I can backfill since a date, with dry-run.  
+**Acceptance Criteria**
+- `--since` param; run labeled "backfill"; concurrency caps; pausable.
+**Dependencies**: IMP-43.
+
+### IMP-73 — Mapping diffs & suggestions _(5 pts)_
+**User story**: As a dev, I get suggestions when new SF fields appear.  
+**Acceptance Criteria**
+- Run summary lists unmapped fields with samples; exportable.
+**Dependencies**: IMP-70.
+
+---
+
+## Sprint 8 — Events & Signups/Attendance
+**Epic**: EPIC-8  
+**Goal**: Bring pipeline to Events + Signups/Attendance with cross-entity DQ.
+
+### IMP-80 — Staging + contracts for Events/Signups _(8 pts)_
+**User story**: As an operator, I can ingest events and signups via CSV/SF.  
+**Acceptance Criteria**
+- `staging_events`, `staging_signups` exist; contracts validate times & required fields.
+**Dependencies**: IMP-2, IMP-41.
+
+### IMP-81 — Reference DQ & FK checks _(8 pts)_
+**User story**: As a steward, cross-entity references are validated.  
+**Acceptance Criteria**
+- FKs resolved via `external_id_map`/core keys; violations REF-401 with hints.
+**Dependencies**: IMP-80.
+
+### IMP-82 — Upsert for events & attendance _(8 pts)_
+**User story**: As an operator, events/signups upsert idempotently.  
+**Acceptance Criteria**
+- `(external_system, external_id)` maintained; hours & attendance flags correct.
+**Dependencies**: IMP-81, IMP-30.
+
+### IMP-83 — Cross-entity dashboards _(5 pts)_
+**User story**: As a PM, I can view pipeline health across entities.  
+**Acceptance Criteria**
+- Filters by entity; combined metrics; links to entity-specific queues.
+**Dependencies**: IMP-82.
+
+---
+
+## Sprint 9 — Security, Audit, Packaging
+**Epic**: EPIC-9  
+**Goal**: Harden for PII; clear roles; audit trails; packaging & OSS readiness.
+
+### IMP-90 — RBAC & sensitive-field gating _(8 pts)_
+**User story**: As an admin, roles control visibility and actions (DOB, merges).  
+**Acceptance Criteria**
+- Roles: Admin, Data Steward, Viewer; masks for sensitive fields; merge/undo require Admin.
+**Dependencies**: IMP-51.
+
+### IMP-91 — Audit completeness _(5 pts)_
+**User story**: As compliance, every admin action is logged.  
+**Acceptance Criteria**
+- Audits for edits, suppressions, merges, config changes; exportable trail.
+**Dependencies**: IMP-22, IMP-51, IMP-71.
+
+### IMP-92 — Retention & PII hygiene _(5 pts)_
+**User story**: As a steward, staging/quarantine have retention (e.g., 90 days) and safe exports.  
+**Acceptance Criteria**
+- TTL jobs purge/anonymize; CSV export neutralizes formula injection.
+**Dependencies**: IMP-21.
+
+### IMP-93 — Packaging & adapter extras _(5 pts)_
+**User story**: As a dev, I can install with or without Salesforce.  
+**Acceptance Criteria**
+- Optional deps groups `[importer]`, `[salesforce]`; README quickstart; sample data & screenshots.
+**Dependencies**: IMP-40.
+
+---
