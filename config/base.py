@@ -98,6 +98,7 @@ class Config:
         SECRET_KEY = "test-secret-key-placeholder"
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SQLALCHEMY_ENGINE_OPTIONS = {}
 
     # Importer configuration
     _raw_importer_enabled = os.environ.get("IMPORTER_ENABLED")
@@ -201,6 +202,15 @@ class DevelopmentConfig(Config):
 
     SQLALCHEMY_DATABASE_URI = os.environ.get("DATABASE_URL", db_uri)
     SQLALCHEMY_ECHO = True  # Enable SQL query logging in development
+    if SQLALCHEMY_DATABASE_URI.startswith("sqlite"):
+        SQLALCHEMY_ENGINE_OPTIONS = {
+            "connect_args": {
+                "check_same_thread": False,
+                "timeout": 5,
+            }
+        }
+    else:
+        SQLALCHEMY_ENGINE_OPTIONS = {}
 
 
 class TestingConfig(Config):
@@ -210,6 +220,12 @@ class TestingConfig(Config):
     SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"  # In-memory database for testing
     WTF_CSRF_ENABLED = False
     SQLALCHEMY_ECHO = False
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        "connect_args": {
+            "check_same_thread": False,
+            "timeout": 5,
+        }
+    }
 
 
 class ProductionConfig(Config):

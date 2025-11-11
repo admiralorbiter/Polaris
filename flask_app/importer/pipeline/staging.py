@@ -7,11 +7,22 @@ import json
 from dataclasses import dataclass
 from typing import IO
 
+from flask import current_app, has_app_context
+
 from flask_app.importer.adapters import VolunteerCSVAdapter, VolunteerCSVRow
 from flask_app.models.base import db
 from flask_app.models.importer.schema import ImportRun, StagingVolunteer
 
 BATCH_SIZE = 500
+
+BATCH_SIZE = 500
+
+
+def _commit_staging_batch() -> None:
+    if has_app_context() and current_app.config.get("TESTING"):
+        db.session.flush()
+    else:
+        db.session.commit()
 
 
 @dataclass
@@ -67,12 +78,12 @@ def stage_volunteers_from_csv(
 
         if len(rows_to_flush) >= batch_size:
             db.session.add_all(rows_to_flush)
-            db.session.flush()
+            _commit_staging_batch()
             rows_to_flush.clear()
 
     if not dry_run and rows_to_flush:
         db.session.add_all(rows_to_flush)
-        db.session.flush()
+        _commit_staging_batch()
 
     summary = StagingSummary(
         rows_processed=adapter.statistics.rows_processed,
@@ -83,6 +94,7 @@ def stage_volunteers_from_csv(
         dry_run_rows=tuple(dry_run_rows),
     )
     update_staging_counts(import_run, summary)
+    _commit_staging_batch()
     return summary
 
 

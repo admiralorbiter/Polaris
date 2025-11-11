@@ -79,6 +79,14 @@
 - Feature behind flag (if applicable) • unit/functional tests • docs updated • counters/metrics visible in Runs • security reviewed • rollback strategy noted.
 - Importer DoD checklist: see `docs/importer-dod.md`; include the checklist when closing importer tickets.
 
+### SQLite Concurrency Tips (development)
+
+- SQLite connections are forced into WAL mode with `synchronous=NORMAL` and a 5s busy timeout so the admin UI can read while importer batches write.
+- SQLAlchemy uses `check_same_thread=False`; always run the Celery worker in a separate process from the Flask dev server.
+- CSV and Salesforce staging now commit after each batch (~500 rows) instead of holding a single long transaction; expect more frequent, smaller writes.
+- If you see `database is locked`, check that only one heavy import runs at a time and consider `sqlite3` commands `wal_checkpoint` / `VACUUM` to clear the WAL file.
+- Production should graduate to PostgreSQL, but these tweaks keep local dev usable until that migration happens.
+
 ---
 
 ## Sprint 0 — Foundations

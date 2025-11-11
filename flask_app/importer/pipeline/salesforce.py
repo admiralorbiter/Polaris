@@ -18,6 +18,7 @@ from flask_app.importer.pipeline.staging import (
     StagingSummary,
     compute_checksum,
     resolve_source_record_id,
+    _commit_staging_batch,
     update_staging_counts,
 )
 from flask_app.models.base import db
@@ -77,7 +78,7 @@ def ingest_salesforce_contacts(
             staging_buffer.clear()
             return
         db.session.add_all(staging_buffer)
-        db.session.flush()
+        _commit_staging_batch()
         records_staged += len(staging_buffer)
         staging_buffer.clear()
 

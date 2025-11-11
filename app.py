@@ -1,10 +1,12 @@
 # app.py
 
+import logging
 import os
 
 from dotenv import load_dotenv
 from flask import Flask, current_app, render_template
 from flask_login import LoginManager
+from sqlalchemy import event
 
 # Load environment variables from .env file first
 load_dotenv()
@@ -25,6 +27,8 @@ from flask_app.routes import init_routes  # noqa: E402
 from flask_app.utils.error_handler import init_error_alerting  # noqa: E402
 from flask_app.utils.logging_config import setup_logging  # noqa: E402
 from flask_app.utils.monitoring import init_monitoring  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
@@ -62,11 +66,35 @@ init_monitoring(app)
 # Initialize organization context middleware
 init_org_context_middleware(app)
 
-# Create the database tables only if not in testing mode
-# During testing, conftest.py will handle database setup with isolated test databases
-# This prevents tests from accidentally creating/modifying the production database
-if not app.config.get("TESTING", False):
-    with app.app_context():
+def _configure_sqlite_connection_factory(*, enable_foreign_keys: bool):
+    """Return a connection hook applying concurrency-friendly pragmas."""
+
+    def _configure_sqlite_connection(dbapi_connection, connection_record):  # pragma: no cover - instrumentation
+        try:
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.execute("PRAGMA busy_timeout=5000")
+            if enable_foreign_keys:
+                cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+        except Exception as exc:
+            logger.warning("Failed to apply SQLite PRAGMAs: %s", exc)
+
+    return _configure_sqlite_connection
+
+
+with app.app_context():
+    engine = db.engine
+    if engine.url.drivername.startswith("sqlite"):
+        if not getattr(engine, "_sqlite_pragmas_configured", False):
+            pragma_hook = _configure_sqlite_connection_factory(
+                enable_foreign_keys=not app.config.get("TESTING", False)
+            )
+            event.listen(engine, "connect", pragma_hook)
+            engine._sqlite_pragmas_configured = True  # type: ignore[attr-defined]
+    # Create the database tables only if not in testing mode
+    if not app.config.get("TESTING", False):
         db.create_all()
 
 
