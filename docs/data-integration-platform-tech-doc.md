@@ -824,6 +824,7 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Added `SalesforceContactLoader` (two-phase commit) that snapshots staging rows, upserts against `external_id_map` (`entity_type="salesforce_contact"`, placeholder `entity_id=0` until canonical contacts land), handles soft deletes inline, and advances the watermark only after core updates succeed.
 - Persist reconciliation counters under `counts_json.core.volunteers.salesforce` (`created/updated/unchanged/deleted`) and store the latest source timestamp in `import_runs.max_source_updated_at` (new column). Prometheus now exposes `importer_salesforce_rows_total{action}` and `importer_salesforce_watermark_seconds`.
 - Celery task (`flask importer run-salesforce --run-id <id>`) queues the ingest + loader combo; task logs include per-action counters. Admin card summarizes the last run counters and still links to the mapping YAML.
+- Admin Imports page now exposes a dedicated Salesforce trigger panel when the adapter is ready. Operators can queue dry runs, set a test record limit, optionally reset the Salesforce watermark (with confirmation), and poll live status. UI triggers are rate limited (1 per minute per user) and capture adapter readiness snapshots in the associated `ImportRun`.
 
 **Metrics & Telemetry**
 - `importer_salesforce_rows_total{action}` counters, `importer_salesforce_watermark_seconds` gauge, plus structured logs (job id, batches, rows per action).

@@ -81,6 +81,121 @@
     </div>
     {% endif %}
 
+    {% if salesforce_adapter_enabled %}
+    <div class="card shadow-sm mb-4">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                <div>
+                    <h2 class="h4 mb-1">Start a Salesforce Import</h2>
+                    <p class="text-muted mb-0">
+                        Trigger an incremental Salesforce ingest using the configured adapter and watermark.
+                    </p>
+                </div>
+                {% if salesforce_last_run %}
+                <div class="text-muted small text-end">
+                    Last run ID {{ salesforce_last_run.id }} · {{ salesforce_last_run.status_label }}
+                </div>
+                {% endif %}
+            </div>
+
+            {% if salesforce_adapter_messages %}
+            <div class="alert alert-info mt-3 mb-3" role="status">
+                <ul class="mb-0 ps-3">
+                    {% for message in salesforce_adapter_messages %}
+                    <li>{{ message }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+
+            {% if not salesforce_adapter_ready %}
+            <div class="alert alert-warning mt-3 mb-0" role="alert">
+                Salesforce adapter is not ready. Resolve the readiness warnings above before triggering imports.
+            </div>
+            {% else %}
+            <form
+                id="salesforce-import-form"
+                class="mt-3"
+                action="{{ url_for('admin_importer.importer_salesforce_trigger') }}"
+                method="post"
+                data-status-endpoint="{{ url_for('admin_importer.importer_run_status', run_id=0) }}"
+            >
+                <div class="form-check form-switch mb-3">
+                    <input class="form-check-input" type="checkbox" id="salesforce-dry-run" name="dry_run" value="1">
+                    <label class="form-check-label" for="salesforce-dry-run">
+                        Dry run (validation only)
+                    </label>
+                    <div class="form-text">
+                        When enabled, the importer validates and stages data without updating core tables.
+                    </div>
+                </div>
+
+                <details class="mb-3">
+                    <summary class="fw-semibold">Advanced options</summary>
+                    <div class="mt-3">
+                        <label class="form-label" for="salesforce-record-limit">Record limit (optional)</label>
+                        <input
+                            class="form-control"
+                            type="number"
+                            id="salesforce-record-limit"
+                            name="record_limit"
+                            min="1"
+                            step="1"
+                            placeholder="e.g. 5000"
+                        >
+                        <div class="form-text">
+                            Useful for sandbox smoke tests. Leave blank to ingest all available records.
+                        </div>
+                    </div>
+
+                    <div class="form-check form-switch mt-3">
+                        <input
+                            class="form-check-input"
+                            type="checkbox"
+                            id="salesforce-reset-watermark"
+                            name="reset_watermark"
+                            value="1"
+                        >
+                        <label class="form-check-label text-danger fw-semibold" for="salesforce-reset-watermark">
+                            Reset Salesforce watermark before this run
+                        </label>
+                        <div class="form-text text-danger">
+                            Resets the import cursor and reprocesses all eligible Salesforce records.
+                            Use caution on production systems.
+                        </div>
+                    </div>
+
+                    <div class="mt-3">
+                        <label class="form-label" for="salesforce-notes">Notes (optional)</label>
+                        <textarea
+                            class="form-control"
+                            id="salesforce-notes"
+                            name="notes"
+                            rows="2"
+                            maxlength="500"
+                            placeholder="Describe why this import is being run."
+                        ></textarea>
+                    </div>
+                </details>
+
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-cloud-download-alt me-1"></i>
+                    Start Salesforce Import
+                </button>
+                <button
+                    type="button"
+                    id="salesforce-stop-polling"
+                    class="btn btn-outline-secondary ms-2 d-none"
+                >
+                    Stop polling
+                </button>
+            </form>
+            <div id="salesforce-import-feedback" class="mt-3" role="alert" style="display: none;"></div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
     <div class="card shadow-sm">
         <div class="card-body">
             <h2 class="h4">Start a New Import Run</h2>

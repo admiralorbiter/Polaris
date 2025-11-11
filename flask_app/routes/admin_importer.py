@@ -5,11 +5,22 @@ Admin-facing importer routes for initiating runs and monitoring status.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
+from collections import deque
 from http import HTTPStatus
 import os
 from pathlib import Path
+import re
 
-from flask import Blueprint, current_app, jsonify, render_template, request, send_file, url_for
+from flask import (
+    Blueprint,
+    current_app,
+    jsonify,
+    render_template,
+    request,
+    send_file,
+    url_for,
+)
 from flask_login import current_user, login_required
 
 from flask_app.importer import get_adapter_readiness
@@ -30,6 +41,7 @@ from flask_app.models.importer.schema import (
     DataQualityStatus,
     ImportRun,
     ImportRunStatus,
+    ImporterWatermark,
 )
 from flask_app.utils.importer import is_importer_enabled
 from flask_app.utils.permissions import permission_required
@@ -76,6 +88,14 @@ _STATUS_BADGES = {
 }
 
 _FOCUS_ADAPTERS = ("csv", "salesforce")
+_SALESFORCE_RECORD_LIMIT_MAX = 1_000_000
+
+
+_ADAPTER_READINESS_CACHE: dict[str, object] = {"expires": None, "value": None}
+_SALESFORCE_TRIGGER_HISTORY: dict[int, deque[datetime]] = {}
+_SALESFORCE_RATE_LIMIT = 1
+_SALESFORCE_RATE_WINDOW = timedelta(minutes=1)
+_CONTROL_CHAR_PATTERN = re.compile(r"[\x00-\x1f\x7f]")
 
 
 def _ensure_importer_enabled():
@@ -156,6 +176,7 @@ def _build_adapter_cards() -> list[dict[str, object]]:
             )
 
         mapping_info: dict[str, object] | None = None
+        latest_run_summary: dict[str, object] | None = None
         if adapter_name == "salesforce":
             try:
                 mapping_spec = get_active_salesforce_mapping()
@@ -171,31 +192,40 @@ def _build_adapter_cards() -> list[dict[str, object]]:
                 .order_by(ImportRun.created_at.desc())
                 .first()
             )
-            if latest_run and latest_run.metrics_json:
-                sf_metrics = latest_run.metrics_json.get("salesforce") or {}
-                unmapped = sf_metrics.get("unmapped_fields") or {}
-                if unmapped:
-                    messages.append(
-                        "Unmapped Salesforce fields detected in the last run: "
-                        + ", ".join(f"{field}×{count}" for field, count in unmapped.items())
-                    )
-                errors = sf_metrics.get("transform_errors") or []
-                if errors:
-                    messages.append("Recent mapping errors: " + "; ".join(errors[:3]))
-                core_counts = (
-                    (latest_run.counts_json or {})
-                    .get("core", {})
-                    .get("volunteers", {})
-                    .get("salesforce", {})
+            if latest_run:
+                status_value = (
+                    latest_run.status.value if hasattr(latest_run.status, "value") else str(latest_run.status)
                 )
-                if core_counts:
-                    messages.append(
-                        "Last run counters — "
-                        f"created {core_counts.get('created', 0)}, "
-                        f"updated {core_counts.get('updated', 0)}, "
-                        f"deleted {core_counts.get('deleted', 0)}, "
-                        f"unchanged {core_counts.get('unchanged', 0)}."
+                latest_run_summary = {
+                    "id": latest_run.id,
+                    "status_value": status_value,
+                    "status_label": status_value.replace("_", " ").title(),
+                }
+                if latest_run.metrics_json:
+                    sf_metrics = latest_run.metrics_json.get("salesforce") or {}
+                    unmapped = sf_metrics.get("unmapped_fields") or {}
+                    if unmapped:
+                        messages.append(
+                            "Unmapped Salesforce fields detected in the last run: "
+                            + ", ".join(f"{field}×{count}" for field, count in unmapped.items())
+                        )
+                    errors = sf_metrics.get("transform_errors") or []
+                    if errors:
+                        messages.append("Recent mapping errors: " + "; ".join(errors[:3]))
+                    core_counts = (
+                        (latest_run.counts_json or {})
+                        .get("core", {})
+                        .get("volunteers", {})
+                        .get("salesforce", {})
                     )
+                    if core_counts:
+                        messages.append(
+                            "Last run counters — "
+                            f"created {core_counts.get('created', 0)}, "
+                            f"updated {core_counts.get('updated', 0)}, "
+                            f"deleted {core_counts.get('deleted', 0)}, "
+                            f"unchanged {core_counts.get('unchanged', 0)}."
+                        )
 
         cards.append(
             {
@@ -210,9 +240,274 @@ def _build_adapter_cards() -> list[dict[str, object]]:
                 "toggle_disabled": True,
                 "toggle_disabled_reason": "Manage adapter enablement via environment configuration.",
                 "mapping": mapping_info,
+                "latest_run": latest_run_summary,
             }
         )
     return cards
+
+
+def _get_adapter_readiness_snapshot(force_refresh: bool = False) -> dict[str, object]:
+    cached_value = _ADAPTER_READINESS_CACHE.get("value")
+    cached_expiry = _ADAPTER_READINESS_CACHE.get("expires")
+    now = datetime.now(timezone.utc)
+
+    if (
+        not force_refresh
+        and cached_value is not None
+        and isinstance(cached_expiry, datetime)
+        and cached_expiry > now
+    ):
+        return cached_value  # type: ignore[return-value]
+
+    snapshot = get_adapter_readiness(current_app)
+    _ADAPTER_READINESS_CACHE["value"] = snapshot
+    _ADAPTER_READINESS_CACHE["expires"] = now + timedelta(seconds=30)
+    return snapshot
+
+
+def _reset_salesforce_watermark(*, notes: str | None = None) -> None:
+    """
+    Reset the Salesforce importer watermark so the next run reprocesses everything.
+    """
+
+    object_name = (current_app.config.get("IMPORTER_SALESFORCE_OBJECTS") or ("contacts",))[0]
+    watermark = (
+        db.session.query(ImporterWatermark)
+        .filter_by(adapter="salesforce", object_name=object_name)
+        .first()
+    )
+    if watermark is not None:
+        db.session.delete(watermark)
+        db.session.commit()
+    AdminLog.log_action(
+        admin_user_id=current_user.id,
+        action="IMPORT_SALESFORCE_WATERMARK_RESET",
+        details=json.dumps(
+            {
+                "adapter": "salesforce",
+                "object_name": object_name,
+                "notes": notes or "",
+            }
+        ),
+        ip_address=request.remote_addr,
+        user_agent=request.headers.get("User-Agent"),
+    )
+
+
+def _get_salesforce_adapter_state() -> tuple[bool, bool, list[str]]:
+    state = current_app.extensions.get("importer", {})
+    configured_adapters = tuple(state.get("configured_adapters", ()))
+    is_enabled = "salesforce" in configured_adapters
+
+    readiness_snapshot = _get_adapter_readiness_snapshot()
+    readiness = readiness_snapshot.get("salesforce") or {}
+    status = readiness.get("status")
+    is_ready = status == "ready"
+    messages = list(readiness.get("messages") or ())
+    dependency_errors = readiness.get("dependency_errors") or ()
+    messages.extend(str(error) for error in dependency_errors if str(error) not in messages)
+    return is_enabled, is_ready, messages
+
+
+def _is_salesforce_rate_limited(user_id: int) -> bool:
+    history = _SALESFORCE_TRIGGER_HISTORY.setdefault(user_id, deque())
+    now = datetime.now(timezone.utc)
+    window_start = now - _SALESFORCE_RATE_WINDOW
+    while history and history[0] < window_start:
+        history.popleft()
+    return len(history) >= _SALESFORCE_RATE_LIMIT
+
+
+def _record_salesforce_trigger(user_id: int) -> None:
+    history = _SALESFORCE_TRIGGER_HISTORY.setdefault(user_id, deque())
+    history.append(datetime.now(timezone.utc))
+
+
+@admin_importer_blueprint.post("/salesforce/trigger")
+@login_required
+@permission_required("manage_imports", org_context=False)
+def importer_salesforce_trigger():
+    if not _ensure_importer_enabled():
+        return jsonify({"error": "Importer is disabled."}), HTTPStatus.NOT_FOUND
+
+    if _is_salesforce_rate_limited(current_user.id):
+        return (
+            jsonify(
+                {
+                    "error": "Too many Salesforce imports triggered. Please wait before retrying."
+                }
+            ),
+            HTTPStatus.TOO_MANY_REQUESTS,
+        )
+
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a JSON object."}), HTTPStatus.BAD_REQUEST
+
+    dry_run = bool(payload.get("dry_run", False))
+    record_limit_raw = payload.get("record_limit")
+    reset_watermark = bool(payload.get("reset_watermark", False))
+    notes = payload.get("notes")
+
+    record_limit: int | None = None
+    if record_limit_raw is not None:
+        try:
+            record_limit = int(record_limit_raw)
+        except (TypeError, ValueError):
+            return jsonify({"error": "record_limit must be an integer."}), HTTPStatus.BAD_REQUEST
+        if record_limit <= 0:
+            return jsonify({"error": "record_limit must be greater than zero."}), HTTPStatus.BAD_REQUEST
+        if record_limit > _SALESFORCE_RECORD_LIMIT_MAX:
+            return (
+                jsonify(
+                    {
+                        "error": f"record_limit must be less than or equal to {_SALESFORCE_RECORD_LIMIT_MAX:,}."
+                    }
+                ),
+                HTTPStatus.BAD_REQUEST,
+            )
+
+    if notes is not None and not isinstance(notes, str):
+        return jsonify({"error": "notes must be a string."}), HTTPStatus.BAD_REQUEST
+
+    is_enabled, is_ready, readiness_messages = _get_salesforce_adapter_state()
+    if not is_enabled:
+        return (
+            jsonify(
+                {
+                    "error": "Salesforce adapter is not enabled. Update IMPORTER_ADAPTERS to include 'salesforce'.",
+                    "messages": readiness_messages,
+                }
+            ),
+            HTTPStatus.BAD_REQUEST,
+        )
+    if not is_ready:
+        return (
+            jsonify(
+                {
+                    "error": "Salesforce adapter is not ready. Resolve readiness issues before triggering imports.",
+                    "messages": readiness_messages,
+                }
+            ),
+            HTTPStatus.BAD_REQUEST,
+        )
+
+    if reset_watermark:
+        _reset_salesforce_watermark(notes=notes)
+
+    adapter_snapshot = _get_adapter_readiness_snapshot(force_refresh=True)
+
+    run_notes = notes.strip() if isinstance(notes, str) else ""
+    if len(run_notes) > 500:
+        return jsonify({"error": "notes must be 500 characters or fewer."}), HTTPStatus.BAD_REQUEST
+    if not run_notes:
+        run_notes = f"Salesforce import triggered by user {current_user.id}"
+    run_notes = _CONTROL_CHAR_PATTERN.sub(" ", run_notes)
+
+    ingest_params: dict[str, object] = {
+        "source_system": "salesforce",
+        "dry_run": dry_run,
+        "reset_watermark": reset_watermark,
+    }
+    if record_limit is not None:
+        ingest_params["record_limit"] = record_limit
+
+    run = ImportRun(
+        source="salesforce",
+        adapter="salesforce",
+        status=ImportRunStatus.PENDING,
+        dry_run=dry_run,
+        notes=run_notes,
+        triggered_by_user_id=current_user.id,
+        counts_json={},
+        metrics_json={},
+        adapter_health_json=adapter_snapshot,
+        ingest_params_json=ingest_params,
+    )
+    db.session.add(run)
+    db.session.commit()
+
+    celery_app = get_celery_app(current_app)
+    if celery_app is None:
+        run.status = ImportRunStatus.FAILED
+        run.error_summary = "Importer worker is not configured."
+        db.session.commit()
+        return (
+            jsonify({"error": "Importer worker is not configured; cannot queue Salesforce import."}),
+            HTTPStatus.SERVICE_UNAVAILABLE,
+        )
+
+    task_kwargs: dict[str, object] = {
+        "run_id": run.id,
+        "dry_run": dry_run,
+    }
+    if record_limit is not None:
+        task_kwargs["record_limit"] = record_limit
+
+    try:
+        async_result = celery_app.send_task(
+            "importer.pipeline.ingest_salesforce_contacts",
+            kwargs=task_kwargs,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        current_app.logger.exception(
+            "Failed to enqueue Salesforce importer run",
+            extra={"importer_run_id": run.id, "triggered_by_user_id": current_user.id},
+            exc_info=exc,
+        )
+        db.session.refresh(run)
+        run.status = ImportRunStatus.FAILED
+        run.error_summary = str(exc)
+        db.session.commit()
+        return (
+            jsonify({"error": "Failed to enqueue Salesforce import; please retry later."}),
+            HTTPStatus.INTERNAL_SERVER_ERROR,
+        )
+
+    AdminLog.log_action(
+        admin_user_id=current_user.id,
+        action="IMPORT_RUN_ENQUEUED",
+        details=json.dumps(
+            {
+                "run_id": run.id,
+                "task_id": async_result.id,
+                "source": "salesforce",
+                "dry_run": dry_run,
+                "record_limit": record_limit,
+                "reset_watermark": reset_watermark,
+            }
+        ),
+        ip_address=request.remote_addr,
+        user_agent=request.headers.get("User-Agent"),
+    )
+
+    current_app.logger.info(
+        "Salesforce importer run enqueued",
+        extra={
+            "importer_run_id": run.id,
+            "importer_task_id": async_result.id,
+            "importer_source": "salesforce",
+            "triggered_by_user_id": current_user.id,
+            "importer_dry_run": dry_run,
+            "salesforce_record_limit": record_limit,
+            "salesforce_reset_watermark": reset_watermark,
+        },
+    )
+
+    ImporterMonitoring.record_run_enqueued(user_id=current_user.id, dry_run=dry_run)
+    _record_salesforce_trigger(current_user.id)
+
+    return (
+        jsonify(
+            {
+                "run_id": run.id,
+                "task_id": getattr(async_result, "id", async_result),
+                "status": "queued",
+                "queue": DEFAULT_QUEUE_NAME,
+            }
+        ),
+        HTTPStatus.ACCEPTED,
+    )
 
 
 @admin_importer_blueprint.get("/")
@@ -260,12 +555,22 @@ def importer_dashboard():
             }
         )
     adapter_cards = _build_adapter_cards()
+    salesforce_adapter_enabled, salesforce_adapter_ready, salesforce_adapter_messages = _get_salesforce_adapter_state()
+    salesforce_last_run = None
+    for card in adapter_cards:
+        if card.get("name") == "salesforce":
+            salesforce_last_run = card.get("latest_run")
+            break
     return render_template(
         "admin/importer.html",
         recent_runs=recent_runs,
         max_upload_mb=current_app.config.get("IMPORTER_MAX_UPLOAD_MB", 25),
         default_queue=DEFAULT_QUEUE_NAME,
         adapter_cards=adapter_cards,
+        salesforce_adapter_enabled=salesforce_adapter_enabled,
+        salesforce_adapter_ready=salesforce_adapter_ready,
+        salesforce_adapter_messages=salesforce_adapter_messages,
+        salesforce_last_run=salesforce_last_run,
     )
 
 

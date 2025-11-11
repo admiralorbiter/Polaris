@@ -19,10 +19,10 @@ from flask_app.models.importer.schema import (
 from flask_app.routes.admin_importer import register_importer_admin_routes
 
 
-def _enable_importer(app, upload_dir: Path) -> None:
+def _enable_importer(app, upload_dir: Path, adapters: tuple[str, ...] = ("csv",)) -> None:
     app.config.update(
         IMPORTER_ENABLED=True,
-        IMPORTER_ADAPTERS=("csv",),
+        IMPORTER_ADAPTERS=adapters,
         IMPORTER_WORKER_ENABLED=True,
         IMPORTER_UPLOAD_DIR=str(upload_dir),
         CELERY_CONFIG={"task_always_eager": True, "task_eager_propagates": True},
@@ -218,6 +218,116 @@ def test_importer_admin_upload_rejects_non_csv(logged_in_admin, app, tmp_path):
 
     assert response.status_code == 400
     assert response.get_json()["error"] == "Unsupported file type; only CSV is allowed."
+
+
+def test_salesforce_trigger_requires_ready_adapter(logged_in_admin, app, tmp_path):
+    client, _ = logged_in_admin
+    _enable_importer(app, tmp_path / "uploads", adapters=("csv", "salesforce"))
+
+    with patch(
+        "flask_app.routes.admin_importer._get_salesforce_adapter_state",
+        return_value=(True, False, ["Missing Salesforce credentials"]),
+    ):
+        response = client.post("/admin/imports/salesforce/trigger", json={"dry_run": True})
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert "not ready" in payload["error"].lower()
+    assert "Missing Salesforce credentials" in " ".join(payload.get("messages", []))
+
+
+def test_salesforce_trigger_validates_record_limit(logged_in_admin, app, tmp_path):
+    client, _ = logged_in_admin
+    _enable_importer(app, tmp_path / "uploads", adapters=("csv", "salesforce"))
+
+    with patch(
+        "flask_app.routes.admin_importer._get_salesforce_adapter_state",
+        return_value=(True, True, []),
+    ), patch("flask_app.routes.admin_importer.get_adapter_readiness", return_value={"salesforce": {"status": "ready"}}):
+        response = client.post(
+            "/admin/imports/salesforce/trigger",
+            json={"record_limit": -5},
+        )
+
+    assert response.status_code == 400
+    assert "greater than zero" in response.get_json()["error"]
+
+
+def test_salesforce_trigger_enqueues_run(logged_in_admin, app, tmp_path):
+    client, admin_user = logged_in_admin
+    _enable_importer(app, tmp_path / "uploads", adapters=("csv", "salesforce"))
+
+    async_result = Mock()
+    async_result.id = "celery-task-salesforce"
+    celery_app = Mock()
+    celery_app.send_task.return_value = async_result
+
+    readiness_snapshot = {"salesforce": {"status": "ready"}}
+
+    with patch(
+        "flask_app.routes.admin_importer._get_salesforce_adapter_state",
+        return_value=(True, True, []),
+    ), patch(
+        "flask_app.routes.admin_importer.get_adapter_readiness",
+        return_value=readiness_snapshot,
+    ), patch(
+        "flask_app.routes.admin_importer.get_celery_app",
+        return_value=celery_app,
+    ), patch(
+        "flask_app.routes.admin_importer.ImporterMonitoring.record_run_enqueued"
+    ) as record_metric, patch(
+        "flask_app.routes.admin_importer._reset_salesforce_watermark"
+    ) as reset_watermark, patch(
+        "flask_app.routes.admin_importer._record_salesforce_trigger"
+    ) as record_trigger:
+        response = client.post(
+            "/admin/imports/salesforce/trigger",
+            json={
+                "dry_run": False,
+                "record_limit": 5000,
+                "reset_watermark": True,
+                "notes": "  Manual rerun  ",
+            },
+        )
+
+    assert response.status_code == 202
+    payload = response.get_json()
+    assert payload["status"] == "queued"
+    assert payload["task_id"] == async_result.id
+    celery_app.send_task.assert_called_once()
+    sent_kwargs = celery_app.send_task.call_args.kwargs["kwargs"]
+    assert sent_kwargs == {"run_id": payload["run_id"], "dry_run": False, "record_limit": 5000}
+
+    record_metric.assert_called_once_with(user_id=admin_user.id, dry_run=False)
+    reset_watermark.assert_called_once()
+    record_trigger.assert_called_once_with(admin_user.id)
+
+    run = db.session.get(ImportRun, payload["run_id"])
+    assert run is not None
+    assert run.adapter == "salesforce"
+    assert run.dry_run is False
+    assert run.notes == "Manual rerun"
+    assert run.adapter_health_json == readiness_snapshot
+    assert run.ingest_params_json["record_limit"] == 5000
+    assert run.ingest_params_json["reset_watermark"] is True
+    assert run.triggered_by_user_id == admin_user.id
+
+    log_entry = AdminLog.query.order_by(AdminLog.id.desc()).first()
+    assert log_entry.action == "IMPORT_RUN_ENQUEUED"
+    log_details = json.loads(log_entry.details)
+    assert log_details["source"] == "salesforce"
+    assert log_details["reset_watermark"] is True
+
+
+def test_salesforce_trigger_rate_limit(logged_in_admin, app, tmp_path):
+    client, _ = logged_in_admin
+    _enable_importer(app, tmp_path / "uploads", adapters=("csv", "salesforce"))
+
+    with patch("flask_app.routes.admin_importer._is_salesforce_rate_limited", return_value=True):
+        response = client.post("/admin/imports/salesforce/trigger", json={})
+
+    assert response.status_code == 429
+    assert "wait" in response.get_json()["error"].lower()
 
 
 def test_importer_status_endpoint_returns_payload(logged_in_admin, app, tmp_path):
