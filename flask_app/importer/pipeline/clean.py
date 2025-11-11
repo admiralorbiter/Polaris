@@ -194,11 +194,24 @@ def _coerce_string(value: object | None) -> str:
 
 
 def _normalize_email(value: object | None) -> str | None:
+    # Handle nested dict structures (e.g., Salesforce email.primary)
+    if isinstance(value, dict):
+        email_value = value.get("primary") or value.get("home") or value.get("work") or value.get("alternate")
+        if email_value:
+            token = _coerce_string(email_value)
+            return token.lower() if token else None
+        return None
     token = _coerce_string(value)
     return token.lower() or None
 
 
 def _normalize_phone(value: object | None) -> str | None:
+    # Handle nested dict structures (e.g., Salesforce phone.mobile)
+    if isinstance(value, dict):
+        phone_value = value.get("primary") or value.get("mobile") or value.get("home") or value.get("work")
+        if phone_value:
+            return _coerce_string(phone_value)
+        return None
     token = _coerce_string(value)
     return token or None
 

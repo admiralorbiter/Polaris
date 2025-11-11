@@ -815,33 +815,21 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Run summary exposes `rows_created`, `rows_updated`, `rows_unchanged`, `rows_deleted`.  
 - Salesforce watermark advanced only after successful commit.  
 **Dependencies**: IMP-42, IMP-30.
-**Status**: 🔄 In planning (dependency: idempotent loader GA review Feb 2026).
+**Status**: ✅ Implemented on dev branch (Nov 2025); loader + counters live, dashboards refreshed on completion.
 
-**Outcome Notes (Plan)**
-- Extend existing idempotent loader to consume Salesforce batches, reusing `external_id_map` with `external_system="salesforce"`.
-- Record reconciliation counters in `counts_json.core.volunteers.salesforce` including created/updated/unchanged/deactivated rows.
-- Persist `max_source_updated_at` on `import_runs` for freshness reporting and feed Sprint 6 reconciliation.
-
-**Implementation Outline**
-- Implement adapter-specific loader shim orchestrating promotion of canonical rows through dedupe + survivorship.
-- On each commit, update `importer_watermarks` with highest `SystemModstamp` observed to ensure incremental behavior.
-- Handle Salesforce soft deletes by marking records as `inactive` and incrementing `rows_deleted` counter; coordinate with survivorship to avoid data loss.
-- Update admin dashboards to include Salesforce-specific counters and freshness badges.
-
-**Data Model & Storage**
-- Extend `external_id_map` to flag source system (ensure indexes cover `salesforce`).
-- Add nullable `max_source_updated_at` column to `import_runs` (TIMESTAMPTZ) with migration + backfill script.
-- Store reconciliation snapshots in `import_run_reconciliation` table for future Sprint 6 consumption.
+**Implementation Notes (Nov 2025)**
+- Added `SalesforceContactLoader` (two-phase commit) that snapshots staging rows, upserts against `external_id_map` (`entity_type="salesforce_contact"`, placeholder `entity_id=0` until canonical contacts land), handles soft deletes inline, and advances the watermark only after core updates succeed.
+- Persist reconciliation counters under `counts_json.core.volunteers.salesforce` (`created/updated/unchanged/deleted`) and store the latest source timestamp in `import_runs.max_source_updated_at` (new column). Prometheus now exposes `importer_salesforce_rows_total{action}` and `importer_salesforce_watermark_seconds`.
+- Celery task (`flask importer run-salesforce --run-id <id>`) queues the ingest + loader combo; task logs include per-action counters. Admin card summarizes the last run counters and still links to the mapping YAML.
 
 **Metrics & Telemetry**
-- Emit `importer_salesforce_rows_total{action}` (created/updated/unchanged/deleted) and `importer_salesforce_watermark_seconds` gauge.
-- Log reconciliation summary with deltas vs prior run; feed Grafana panel for pilot customers.
+- `importer_salesforce_rows_total{action}` counters, `importer_salesforce_watermark_seconds` gauge, plus structured logs (job id, batches, rows per action).
+- `ImportRun.metrics_json["salesforce"]["max_source_updated_at"]` records freshness for dashboard polling (refreshes within ~1 minute post-run).
 
 **Testing Expectations**
-- **Unit**: Loader branching for update vs unchanged vs delete, watermark advancement logic, counter aggregation.
-- **Integration**: Replay incremental runs spanning create→update→delete lifecycle; assert no duplicate inserts, counters accurate, watermark advanced once.
-- **Regression**: Combine with idempotency suite to ensure Salesforce ingestion remains deterministic.
-- **Perf**: Benchmark 10k-record delta to confirm loader throughput (goal: <5 min per 10k updates).
+- **Unit**: Loader branching for create/update/unchanged/delete, watermark advancement, counter persistence.
+- **Integration**: Replay create→update→delete sequences to ensure counters stay accurate and watermark advances exactly once; dry-run skips loader but preserves staging metrics.
+- **Regression**: Combined with idempotency + ingest suites to guard against duplicate records or counter regressions.
 
 **Open Questions / Clarifications**
 - Do we require two-phase commit or transactional batching between staging flush and core upsert to avoid partial watermark advancement?

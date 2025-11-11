@@ -416,10 +416,66 @@ def mappings_show(ctx, adapter: str):
         click.echo(spec.path.read_text(encoding="utf-8"))
 
 
+@importer_cli.command("create-salesforce-run")
+@click.option("--dry-run", is_flag=True, help="Execute pipeline without writing to core database.")
+@click.option("--queue", is_flag=True, help="Immediately queue the ingest task after creating the run.")
+@click.option("--limit", type=int, help="Limit the number of records to ingest for testing.")
+@click.pass_context
+def create_salesforce_run(ctx, dry_run: bool, queue: bool, limit: Optional[int]):
+    """Create a new Salesforce import run and optionally queue it immediately."""
+
+    info = ctx.ensure_object(ScriptInfo)
+    app = ctx.meta.get("app") or info.load_app()
+    if not is_importer_enabled(app):
+        raise click.ClickException("Importer is disabled; enable it before creating runs.")
+
+    from flask_app.importer import get_adapter_readiness
+
+    run = ImportRun(
+        source="salesforce",
+        adapter="salesforce",
+        status=ImportRunStatus.PENDING,
+        dry_run=dry_run,
+        notes=f"CLI-created Salesforce import run (dry_run={dry_run})",
+        counts_json={},
+        metrics_json={},
+        adapter_health_json=get_adapter_readiness(app),
+        ingest_params_json={
+            "source_system": "salesforce",
+            "dry_run": dry_run,
+            "record_limit": limit,
+        },
+    )
+    db.session.add(run)
+    db.session.commit()
+    run_id = run.id
+
+    click.echo(f"Created Salesforce import run {run_id} (dry_run={dry_run})")
+
+    if queue:
+        state = app.extensions.get("importer")
+        if not state:
+            raise click.ClickException("Importer state unavailable; ensure init_importer(app) has been called.")
+
+        celery_app = ensure_celery_app(app, state)
+        kwargs = {"run_id": run_id}
+        if limit is not None:
+            kwargs["record_limit"] = limit
+        async_result = celery_app.send_task(
+            "importer.pipeline.ingest_salesforce_contacts",
+            kwargs=kwargs,
+        )
+        task_id = getattr(async_result, "id", async_result)
+        click.echo(f"Queued Salesforce ingest for run {run_id} (task_id={task_id})")
+    else:
+        click.echo(f"To queue this run, use: flask importer run-salesforce --run-id {run_id}")
+
+
 @importer_cli.command("run-salesforce")
 @click.option("--run-id", required=True, type=int, help="ID of the importer run to queue.")
+@click.option("--limit", type=int, help="Limit the number of records to ingest for testing.")
 @click.pass_context
-def run_salesforce(ctx, run_id: int):
+def run_salesforce(ctx, run_id: int, limit: Optional[int]):
     """Queue the Salesforce ingest Celery task for the specified import run."""
 
     info = ctx.ensure_object(ScriptInfo)
@@ -440,9 +496,12 @@ def run_salesforce(ctx, run_id: int):
         raise click.ClickException("Importer state unavailable; ensure init_importer(app) has been called.")
 
     celery_app = ensure_celery_app(app, state)
+    kwargs = {"run_id": run_id}
+    if limit is not None:
+        kwargs["record_limit"] = limit
     async_result = celery_app.send_task(
         "importer.pipeline.ingest_salesforce_contacts",
-        kwargs={"run_id": run_id},
+        kwargs=kwargs,
     )
     task_id = getattr(async_result, "id", async_result)
     click.echo(f"Queued Salesforce ingest for run {run_id} (task_id={task_id})")
@@ -674,6 +733,120 @@ def _retry_import_run(app, run: ImportRun) -> tuple[str, str]:
     )
 
     return async_result.id, "queued"
+
+
+@importer_cli.command("debug-staging")
+@click.option("--run-id", required=True, type=int, help="ID of the import run to inspect.")
+@click.option("--limit", type=int, default=1, help="Number of staging rows to inspect.")
+@click.pass_context
+def debug_staging(ctx, run_id: int, limit: int):
+    """Debug staging volunteer data to see what's in payload_json and normalized_json."""
+    from flask_app.models.importer.schema import StagingVolunteer
+    from flask_app.importer.pipeline.dq import _compose_payload
+    
+    info = ctx.ensure_object(ScriptInfo)
+    app = info.load_app()
+    
+    rows = db.session.query(StagingVolunteer).filter_by(run_id=run_id).limit(limit).all()
+    if not rows:
+        click.echo(f"No staging rows found for run_id={run_id}")
+        return
+    
+    for row in rows:
+        click.echo(f"\n{'='*80}")
+        click.echo(f"Staging Row ID: {row.id}")
+        click.echo(f"External ID: {row.external_id}")
+        click.echo(f"Status: {row.status}")
+        click.echo(f"\nRAW PAYLOAD (payload_json):")
+        click.echo(json.dumps(row.payload_json, indent=2))
+        click.echo(f"\nNORMALIZED PAYLOAD (normalized_json):")
+        click.echo(json.dumps(row.normalized_json, indent=2))
+        
+        # Test what _compose_payload returns
+        composed = _compose_payload(row)
+        click.echo(f"\nCOMPOSED PAYLOAD (what DQ rules see):")
+        click.echo(json.dumps(dict(composed), indent=2))
+        click.echo(f"\nEmail fields:")
+        click.echo(f"  email: {composed.get('email')}")
+        click.echo(f"  email_normalized: {composed.get('email_normalized')}")
+        click.echo(f"  Email (capital): {composed.get('Email')}")
+        click.echo(f"\nPhone fields:")
+        click.echo(f"  phone: {composed.get('phone')}")
+        click.echo(f"  phone_e164: {composed.get('phone_e164')}")
+        click.echo(f"  Phone (capital): {composed.get('Phone')}")
+        click.echo(f"  MobilePhone: {composed.get('MobilePhone')}")
+        click.echo(f"  HomePhone: {composed.get('HomePhone')}")
+
+
+@importer_cli.command("load-clean")
+@click.option("--run-id", required=True, type=int, help="ID of the import run to load clean volunteers from.")
+@click.pass_context
+def load_clean_volunteers(ctx, run_id: int):
+    """Load clean volunteers from a completed import run into core database."""
+    from flask_app.importer.pipeline.salesforce_loader import SalesforceContactLoader
+    from flask_app.models.importer.schema import ImportRun
+    
+    info = ctx.ensure_object(ScriptInfo)
+    app = info.load_app()
+    if not is_importer_enabled(app):
+        raise click.ClickException("Importer is disabled; enable it before loading.")
+    
+    run = db.session.get(ImportRun, run_id)
+    if run is None:
+        raise click.ClickException(f"Import run {run_id} not found.")
+    
+    if run.source != "salesforce":
+        raise click.ClickException(f"This command only works for Salesforce imports. Run {run_id} is from {run.source}.")
+    
+    if run.status == ImportRunStatus.RUNNING:
+        raise click.ClickException(f"Import run {run_id} is still running. Wait for it to complete.")
+    
+    click.echo(f"Loading clean volunteers from run {run_id}...")
+    loader = SalesforceContactLoader(run)
+    counters = loader.execute()
+    
+    click.echo(f"Completed:")
+    click.echo(f"  Created: {counters.created}")
+    click.echo(f"  Updated: {counters.updated}")
+    click.echo(f"  Unchanged: {counters.unchanged}")
+    click.echo(f"  Deleted: {counters.deleted}")
+
+
+@importer_cli.command("stats")
+@click.option("--run-id", type=int, help="Show stats for a specific import run.")
+@click.pass_context
+def importer_stats(ctx, run_id: Optional[int]):
+    """Show statistics about imported volunteers."""
+    from flask_app.models.importer.schema import CleanVolunteer, ImportRun
+    from flask_app.models import Volunteer
+    
+    info = ctx.ensure_object(ScriptInfo)
+    app = info.load_app()
+    
+    total_volunteers = db.session.query(Volunteer).count()
+    click.echo(f"Total volunteers in core database: {total_volunteers}")
+    
+    if run_id:
+        run = db.session.get(ImportRun, run_id)
+        if not run:
+            click.echo(f"Import run {run_id} not found.")
+            return
+        
+        clean_count = db.session.query(CleanVolunteer).filter_by(run_id=run_id).count()
+        click.echo(f"\nImport Run {run_id} ({run.source}):")
+        click.echo(f"  Clean volunteers promoted: {clean_count}")
+        if run.counts_json:
+            core_counts = run.counts_json.get("core", {}).get("volunteers", {}).get(run.source, {})
+            click.echo(f"  Created: {core_counts.get('created', 0)}")
+            click.echo(f"  Updated: {core_counts.get('updated', 0)}")
+            click.echo(f"  Unchanged: {core_counts.get('unchanged', 0)}")
+    else:
+        # Show recent runs
+        recent_runs = db.session.query(ImportRun).order_by(ImportRun.started_at.desc()).limit(5).all()
+        click.echo(f"\nRecent import runs:")
+        for run in recent_runs:
+            clean_count = db.session.query(CleanVolunteer).filter_by(run_id=run.id).count()
+            click.echo(f"  Run {run.id} ({run.source}): {clean_count} clean volunteers")
 
 
 @importer_cli.command("retry")

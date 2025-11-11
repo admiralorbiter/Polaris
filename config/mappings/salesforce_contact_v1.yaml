@@ -59,6 +59,8 @@ fields:
   - source: LastModifiedDate
     target: metadata.source_last_modified
     transform: parse_datetime
+  - source: IsDeleted
+    target: metadata.core_state
   - target: metadata.source_system
     default: salesforce
   - target: metadata.source_object

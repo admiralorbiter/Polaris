@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from flask_app.importer.adapters.salesforce.extractor import SalesforceBatch
 from flask_app.importer.pipeline.salesforce import ingest_salesforce_contacts
+from flask_app.importer.pipeline.salesforce_loader import SalesforceContactLoader
+from flask_app.models import ExternalIdMap
 from flask_app.models.base import db
 from flask_app.models.importer.schema import ImportRun, ImportRunStatus, ImporterWatermark, StagingVolunteer
 
@@ -68,7 +70,11 @@ def test_ingest_salesforce_contacts_persists_rows(app):
         logger=app.logger,
         record_limit=None,
     )
+    loader = SalesforceContactLoader(run)
+    counters = loader.execute()
+    assert counters.created == 3
     db.session.commit()
+    db.session.refresh(run)
 
     assert summary.records_received == 3
     staged = StagingVolunteer.query.order_by(StagingVolunteer.sequence_number).all()
@@ -88,6 +94,17 @@ def test_ingest_salesforce_contacts_persists_rows(app):
     assert metrics["unmapped_fields"] == {}
     assert metrics["transform_errors"] == []
     assert summary.unmapped_counts == {}
+    refreshed = db.session.get(ImportRun, run.id)
+    assert refreshed is not None
+    core_counts = (refreshed.counts_json or {}).get("core", {}).get("volunteers", {}).get("salesforce")
+    assert core_counts is not None
+    assert core_counts["created"] == 3
+    assert core_counts["updated"] == 0
+    assert core_counts["deleted"] == 0
+    assert core_counts["unchanged"] == 0
+    assert run.max_source_updated_at is not None
+    active_maps = ExternalIdMap.query.filter_by(entity_type="salesforce_contact", is_active=True).all()
+    assert len(active_maps) == 3
 
 
 def test_ingest_salesforce_contacts_dry_run(app):
@@ -113,6 +130,7 @@ def test_ingest_salesforce_contacts_dry_run(app):
         record_limit=None,
     )
     db.session.commit()
+    db.session.refresh(run)
 
     assert summary.records_staged == 0
     assert StagingVolunteer.query.count() == 0
@@ -121,4 +139,8 @@ def test_ingest_salesforce_contacts_dry_run(app):
     assert counts["rows_staged"] == 0
     assert counts["dry_run"] is True
     assert summary.unmapped_counts == {}
+    refreshed = db.session.get(ImportRun, run.id)
+    assert refreshed is not None
+    assert "core" not in (refreshed.counts_json or {})
+    assert ExternalIdMap.query.filter_by(entity_type="salesforce_contact").count() == 0
 

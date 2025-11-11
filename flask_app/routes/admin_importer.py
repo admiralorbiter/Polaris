@@ -182,6 +182,20 @@ def _build_adapter_cards() -> list[dict[str, object]]:
                 errors = sf_metrics.get("transform_errors") or []
                 if errors:
                     messages.append("Recent mapping errors: " + "; ".join(errors[:3]))
+                core_counts = (
+                    (latest_run.counts_json or {})
+                    .get("core", {})
+                    .get("volunteers", {})
+                    .get("salesforce", {})
+                )
+                if core_counts:
+                    messages.append(
+                        "Last run counters — "
+                        f"created {core_counts.get('created', 0)}, "
+                        f"updated {core_counts.get('updated', 0)}, "
+                        f"deleted {core_counts.get('deleted', 0)}, "
+                        f"unchanged {core_counts.get('unchanged', 0)}."
+                    )
 
         cards.append(
             {

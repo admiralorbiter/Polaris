@@ -25,8 +25,11 @@ from flask_app.importer.pipeline import (
     promote_clean_volunteers,
     run_minimal_dq,
     stage_volunteers_from_csv,
+    StagingSummary,
+    CoreLoadSummary,
 )
 from flask_app.importer.pipeline.salesforce import ingest_salesforce_contacts as run_salesforce_ingest
+from flask_app.importer.pipeline.salesforce_loader import LoaderCounters, SalesforceContactLoader
 from flask_app.importer.utils import cleanup_upload
 from flask_app.models import ImporterWatermark
 from flask_app.models.base import db
@@ -219,9 +222,54 @@ def ingest_salesforce_contacts(
             logger=current_app.logger,
             record_limit=record_limit,
         )
-        run.status = ImportRunStatus.SUCCEEDED
-        run.finished_at = datetime.now(timezone.utc)
-        db.session.commit()
+
+        # Run DQ validation and clean promotion (same as CSV pipeline)
+        dq_summary = run_minimal_dq(run, dry_run=dry_run, csv_rows=None)
+        clean_summary = promote_clean_volunteers(run, dry_run=dry_run)
+
+        if dry_run:
+            counters = LoaderCounters()
+            run.status = ImportRunStatus.SUCCEEDED
+            run.finished_at = datetime.now(timezone.utc)
+            run.metrics_json = run.metrics_json or {}
+            run.metrics_json.setdefault("salesforce", {})["max_source_updated_at"] = (
+                summary.max_modstamp.isoformat() if summary.max_modstamp else None
+            )
+            db.session.commit()
+        else:
+            loader = SalesforceContactLoader(run)
+            counters = loader.execute()
+        
+        # Create CoreLoadSummary from Salesforce loader counters for idempotency summary
+        core_summary = CoreLoadSummary(
+            rows_processed=counters.created + counters.updated + counters.unchanged + counters.deleted,
+            rows_created=counters.created,
+            rows_updated=counters.updated,
+            rows_reactivated=0,  # Salesforce loader doesn't track reactivations
+            rows_deduped_auto=0,  # Salesforce loader doesn't track auto-dedupes
+            rows_skipped_duplicates=0,  # Salesforce loader doesn't track duplicate skips
+            rows_skipped_no_change=counters.unchanged,
+            rows_missing_external_id=0,  # Salesforce loader doesn't track missing IDs
+            rows_soft_deleted=counters.deleted,
+            duplicate_emails=(),  # Salesforce loader doesn't track duplicate emails
+            dry_run=dry_run,
+        )
+        
+        # Persist idempotency summary (includes DQ and clean summaries)
+        persist_idempotency_summary(
+            run,
+            staging_summary=StagingSummary(
+                rows_processed=summary.records_received,
+                rows_staged=summary.records_staged,
+                rows_skipped_blank=0,
+                header=summary.header,
+                dry_run=summary.dry_run,
+                dry_run_rows=(),
+            ),
+            dq_summary=dq_summary,
+            clean_summary=clean_summary,
+            core_summary=core_summary,
+        )
         current_app.logger.info(
             "Salesforce import run completed",
             extra={
@@ -230,6 +278,10 @@ def ingest_salesforce_contacts(
                 "salesforce_batches_processed": summary.batches_processed,
                 "salesforce_records_received": summary.records_received,
                 "salesforce_records_staged": summary.records_staged,
+                "salesforce_rows_created": counters.created if not dry_run else 0,
+                "salesforce_rows_updated": counters.updated if not dry_run else 0,
+                "salesforce_rows_deleted": counters.deleted if not dry_run else 0,
+                "salesforce_rows_unchanged": counters.unchanged if not dry_run else 0,
                 "importer_dry_run": dry_run,
             },
         )
@@ -241,6 +293,7 @@ def ingest_salesforce_contacts(
             "records_staged": summary.records_staged,
             "dry_run": dry_run,
             "max_system_modstamp": summary.max_modstamp.isoformat() if summary.max_modstamp else None,
+            "counters": counters.to_dict(),
         }
     except Exception as exc:  # pragma: no cover - defensive logging path
         db.session.rollback()

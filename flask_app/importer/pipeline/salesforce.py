@@ -54,6 +54,9 @@ def ingest_salesforce_contacts(
     """
 
     last_modstamp = watermark.last_successful_modstamp
+    # Ensure last_modstamp is timezone-aware for comparison
+    if last_modstamp is not None and last_modstamp.tzinfo is None:
+        last_modstamp = last_modstamp.replace(tzinfo=timezone.utc)
     soql = build_contacts_soql(last_modstamp=last_modstamp, limit=record_limit)
     batches_processed = 0
     records_received = 0
@@ -86,8 +89,14 @@ def ingest_salesforce_contacts(
         for record in batch.records:
             records_received += 1
             modstamp = _parse_salesforce_datetime(record.get("SystemModstamp"))
-            if modstamp and (max_modstamp is None or modstamp > max_modstamp):
-                max_modstamp = modstamp
+            if modstamp:
+                # Ensure both datetimes are timezone-aware before comparison
+                if max_modstamp is not None and max_modstamp.tzinfo is None:
+                    max_modstamp = max_modstamp.replace(tzinfo=timezone.utc)
+                if modstamp.tzinfo is None:
+                    modstamp = modstamp.replace(tzinfo=timezone.utc)
+                if max_modstamp is None or modstamp > max_modstamp:
+                    max_modstamp = modstamp
             transform_result = transformer.transform(record)
             for field_name in transform_result.unmapped_fields:
                 unmapped_counter[field_name] += 1

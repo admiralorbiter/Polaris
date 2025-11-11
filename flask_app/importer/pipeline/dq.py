@@ -281,14 +281,137 @@ def _compose_payload(row: StagingVolunteer) -> MutableMapping[str, object | None
     normalized = row.normalized_json or {}
     raw = row.payload_json or {}
 
+    # Start with raw payload
     payload.update(raw)
-    payload.update(normalized)
 
-    # Ensure keys expected by rules exist when available in normalized contract.
-    if "email" not in payload and "email_normalized" in normalized:
-        payload["email"] = normalized["email_normalized"]
-    if "phone" not in payload and "phone_e164" in normalized:
-        payload["phone"] = normalized["phone_e164"]
+    # Email extraction - check raw FIRST before updating normalized
+    email_value = None
+    if raw.get("Email"):
+        email_value = str(raw["Email"]).strip()
+        if email_value:  # Only set if non-empty after stripping
+            payload["email"] = email_value
+            payload["email_normalized"] = email_value
+    
+    # Phone extraction - check raw FIRST before updating normalized  
+    phone_value = None
+    if raw.get("Phone"):
+        phone_value = str(raw["Phone"]).strip()
+        if phone_value:
+            payload["phone"] = phone_value
+    elif raw.get("MobilePhone"):
+        phone_value = str(raw["MobilePhone"]).strip()
+        if phone_value:
+            payload["phone"] = phone_value
+    elif raw.get("HomePhone"):
+        phone_value = str(raw["HomePhone"]).strip()
+        if phone_value:
+            payload["phone"] = phone_value
+    
+    # NOW update with normalized (this may add nested structures that could overwrite our values)
+    payload.update(normalized)
+    
+    # Re-check email/phone - normalized may have overwritten our string values with dicts
+    # If we had a value but payload now has a dict, re-extract
+    if email_value and isinstance(payload.get("email"), dict):
+        # Normalized overwrote our string with a dict - extract from dict
+        email_dict = payload["email"]
+        email_value = (
+            email_dict.get("primary") or 
+            email_dict.get("home") or 
+            email_dict.get("work") or 
+            email_dict.get("alternate")
+        )
+        if email_value:
+            email_value = str(email_value).strip()
+            if email_value:
+                payload["email"] = email_value
+                payload["email_normalized"] = email_value
+            else:
+                payload.pop("email", None)
+        else:
+            payload.pop("email", None)
+    elif not email_value and isinstance(payload.get("email"), dict):
+        # No raw value, try extracting from normalized dict
+        email_dict = payload["email"]
+        email_value = (
+            email_dict.get("primary") or 
+            email_dict.get("home") or 
+            email_dict.get("work") or 
+            email_dict.get("alternate")
+        )
+        if email_value:
+            email_value = str(email_value).strip()
+            if email_value:
+                payload["email"] = email_value
+                payload["email_normalized"] = email_value
+            else:
+                payload.pop("email", None)
+        else:
+            # If no email in nested dict, remove the dict so DQ rules see it as missing
+            payload.pop("email", None)
+    elif not email_value and "email_normalized" in normalized:
+        email_value = str(normalized["email_normalized"]).strip()
+        if email_value:
+            payload["email"] = email_value
+            payload["email_normalized"] = email_value
+    elif not email_value and "VOL_EMAIL" in normalized:
+        email_value = str(normalized["VOL_EMAIL"]).strip()
+        if email_value:
+            payload["email"] = email_value
+    
+    # Re-check phone - normalized may have overwritten our string value with a dict
+    if phone_value and isinstance(payload.get("phone"), dict):
+        # Normalized overwrote our string with a dict - extract from dict
+        phone_dict = payload["phone"]
+        phone_value = (
+            phone_dict.get("primary") or 
+            phone_dict.get("mobile") or 
+            phone_dict.get("home") or 
+            phone_dict.get("work")
+        )
+        if phone_value:
+            phone_value = str(phone_value).strip()
+            if phone_value:
+                payload["phone"] = phone_value
+                payload["phone_e164"] = phone_value
+            else:
+                payload.pop("phone", None)
+        else:
+            payload.pop("phone", None)
+    elif not phone_value and isinstance(payload.get("phone"), dict):
+        # No raw value, try extracting from normalized dict
+        phone_dict = payload["phone"]
+        phone_value = (
+            phone_dict.get("primary") or 
+            phone_dict.get("mobile") or 
+            phone_dict.get("home") or 
+            phone_dict.get("work")
+        )
+        if phone_value:
+            phone_value = str(phone_value).strip()
+            if phone_value:
+                payload["phone"] = phone_value
+                # Note: phone might already be normalized to E.164 by the transform
+                payload["phone_e164"] = phone_value
+            else:
+                payload.pop("phone", None)
+        else:
+            # If no phone in nested dict, remove the dict so DQ rules see it as missing
+            payload.pop("phone", None)
+    elif not phone_value and "phone_e164" in normalized:
+        phone_value = str(normalized["phone_e164"]).strip()
+        if phone_value:
+            payload["phone"] = phone_value
+            payload["phone_e164"] = phone_value
+    elif not phone_value and "VOL_PHONE_E164" in normalized:
+        phone_value = str(normalized["VOL_PHONE_E164"]).strip()
+        if phone_value:
+            payload["phone"] = phone_value
+            payload["phone_e164"] = phone_value
+    elif not phone_value and "VOL_PHONE" in normalized:
+        phone_value = str(normalized["VOL_PHONE"]).strip()
+        if phone_value:
+            payload["phone"] = phone_value
 
     return payload
 

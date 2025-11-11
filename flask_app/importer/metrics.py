@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 try:
@@ -38,12 +39,23 @@ if _PROMETHEUS_AVAILABLE:
         "Unmapped Salesforce fields encountered during mapping.",
         ["field"],
     )
+    _salesforce_row_counter = Counter(
+        "importer_salesforce_rows_total",
+        "Salesforce rows processed by action (created/updated/unchanged/deleted).",
+        ["action"],
+    )
+    _salesforce_watermark_gauge = Gauge(
+        "importer_salesforce_watermark_seconds",
+        "Unix timestamp of the last successful Salesforce watermark.",
+    )
 else:  # pragma: no cover - fallbacks when prometheus_client missing
     _salesforce_enabled_gauge = None
     _salesforce_auth_attempts = None
     _salesforce_batch_counter = None
     _salesforce_batch_duration = None
     _salesforce_unmapped_counter = None
+    _salesforce_row_counter = None
+    _salesforce_watermark_gauge = None
 
 
 def record_salesforce_adapter_status(enabled: bool) -> None:
@@ -83,4 +95,20 @@ def record_salesforce_unmapped(field: str, count: int) -> None:
     if _salesforce_unmapped_counter is None:
         return
     _salesforce_unmapped_counter.labels(field=field).inc(count)
+
+
+def record_salesforce_rows(*, action: str, count: int) -> None:
+    """Record counts for Salesforce row actions."""
+
+    if _salesforce_row_counter is None:
+        return
+    _salesforce_row_counter.labels(action=action).inc(count)
+
+
+def record_salesforce_watermark(dt: datetime) -> None:
+    """Record the most recent Salesforce watermark timestamp."""
+
+    if _salesforce_watermark_gauge is None:
+        return
+    _salesforce_watermark_gauge.set(dt.timestamp())
 

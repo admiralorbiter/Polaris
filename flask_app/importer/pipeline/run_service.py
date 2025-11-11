@@ -298,7 +298,13 @@ class ImportRunService:
         duration_seconds: float | None = None
         if run.started_at:
             finished = run.finished_at or datetime.now(timezone.utc)
-            duration_seconds = (finished - run.started_at).total_seconds()
+            # Ensure both datetimes are timezone-aware before subtraction
+            started = run.started_at
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=timezone.utc)
+            if finished.tzinfo is None:
+                finished = finished.replace(tzinfo=timezone.utc)
+            duration_seconds = (finished - started).total_seconds()
 
         triggered_by_user = None
         if run.triggered_by_user_id:

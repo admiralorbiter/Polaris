@@ -61,6 +61,11 @@ class ImportRun(BaseModel):
         nullable=True,
         comment="Snapshot of adapter readiness metadata when the run was created.",
     )
+    max_source_updated_at: Mapped[datetime | None] = mapped_column(
+        db.DateTime(timezone=True),
+        nullable=True,
+        comment="Latest source updated-at observed during the run for freshness tracking.",
+    )
 
     triggered_by_user = relationship("User", foreign_keys=[triggered_by_user_id])
     staging_rows = relationship(
