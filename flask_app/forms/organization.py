@@ -5,6 +5,7 @@ Forms for organization management
 
 import re
 
+from flask import current_app
 from flask_wtf import FlaskForm
 from wtforms import BooleanField, DateField, SelectField, StringField, SubmitField, TextAreaField
 from wtforms.validators import DataRequired, Length, Optional, ValidationError
@@ -436,9 +437,8 @@ class UpdateOrganizationForm(FlaskForm):
             except ValidationError:
                 # Re-raise ValidationError so it's properly caught by form validation
                 raise
-            except Exception:
-                # If database query fails, let it pass (will be caught by route handler)
-                pass
+            except Exception:  # pragma: no cover - defensive logging
+                current_app.logger.exception("Failed to validate organization name uniqueness")
 
     def validate_slug(self, field):
         """Custom validation for slug"""
@@ -464,9 +464,8 @@ class UpdateOrganizationForm(FlaskForm):
             except ValidationError:
                 # Re-raise ValidationError so it's properly caught by form validation
                 raise
-            except Exception:
-                # If database query fails, let it pass (will be caught by route handler)
-                pass
+            except Exception:  # pragma: no cover - defensive logging
+                current_app.logger.exception("Failed to validate organization slug uniqueness")
 
     def validate_website(self, field):
         """Custom validation for website URL"""

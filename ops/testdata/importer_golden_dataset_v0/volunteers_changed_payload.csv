@@ -1,0 +1,4 @@
+external_system,external_id,first_name,last_name,email,phone,source_updated_at
+legacy_csv,vol-001,Eleanor,Rigby,eleanor.rigby+update@example.org,+14155550999,2025-10-05T09:00:00Z
+legacy_csv,vol-002,Maxwell,Edison,maxwell.e@example.org,+14155550192,2025-10-05T09:05:00Z
+legacy_csv,vol-003,Prudence,Jones,prudence.jones@example.org,,2025-10-05T09:10:00Z

@@ -106,8 +106,7 @@ class Config:
 
     if IMPORTER_ENABLED and not IMPORTER_ADAPTERS:
         raise ValueError(
-            "IMPORTER_ENABLED is true but IMPORTER_ADAPTERS is empty. "
-            "Provide at least one adapter name."
+            "IMPORTER_ENABLED is true but IMPORTER_ADAPTERS is empty. " "Provide at least one adapter name."
         )
 
     _raw_worker_enabled = os.environ.get("IMPORTER_WORKER_ENABLED")
@@ -117,6 +116,12 @@ class Config:
     CELERY_SQLITE_PATH = os.environ.get("CELERY_SQLITE_PATH")
     CELERY_CONFIG = os.environ.get("CELERY_CONFIG")
     IMPORTER_UPLOAD_DIR = os.environ.get("IMPORTER_UPLOAD_DIR")
+    IMPORTER_ARTIFACT_DIR = os.environ.get("IMPORTER_ARTIFACT_DIR")
+    IMPORTER_METRICS_ENV = os.environ.get("IMPORTER_METRICS_ENV", "sandbox")
+    IMPORTER_METRICS_SANDBOX_ENABLED = _coerce_bool(
+        os.environ.get("IMPORTER_METRICS_SANDBOX_ENABLED"),
+        default=True,
+    )
     try:
         IMPORTER_MAX_UPLOAD_MB = int(os.environ.get("IMPORTER_MAX_UPLOAD_MB", "25"))
     except ValueError:

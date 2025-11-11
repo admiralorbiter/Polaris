@@ -7,6 +7,7 @@ This script provides different test execution modes and options.
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -87,6 +88,20 @@ def run_smoke_tests():
     return run_command(cmd, "Smoke Tests")
 
 
+def collect_idempotency_artifacts(target_dir: Path):
+    """Collect generated idempotency summaries and copy them to the target directory."""
+    artifact_root = Path("instance") / "import_artifacts"
+    if not artifact_root.exists():
+        return
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    for summary_path in artifact_root.rglob("idempotency_summary.json"):
+        relative = summary_path.relative_to(artifact_root)
+        destination = target_dir / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(summary_path, destination)
+
+
 def lint_code():
     """Run code linting"""
     print(f"\n{'='*60}")
@@ -95,9 +110,7 @@ def lint_code():
 
     # Run flake8 if available
     try:
-        result = subprocess.run(
-            ["flake8", "flask_app/", "tests/", "--max-line-length=120"], check=False
-        )
+        result = subprocess.run(["flake8", "flask_app/", "tests/", "--max-line-length=120"], check=False)
         if result.returncode == 0:
             print("✓ Code linting passed")
         else:
@@ -197,6 +210,7 @@ def main():
 
         # Run tests with coverage
         test_exit = run_with_coverage()
+        collect_idempotency_artifacts(Path("ci_artifacts") / "idempotency")
         if test_exit != 0:
             exit_code = test_exit
 

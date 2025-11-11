@@ -6,6 +6,7 @@ Forms for event management
 import re
 from datetime import datetime
 
+from flask import current_app
 from flask_wtf import FlaskForm
 from wtforms import DateTimeField, IntegerField, SelectField, StringField, SubmitField, TextAreaField, TimeField
 from wtforms.validators import DataRequired, Length, NumberRange, Optional, ValidationError
@@ -402,8 +403,8 @@ class UpdateEventForm(FlaskForm):
                     raise ValidationError("An event with this slug already exists.")
             except ValidationError:
                 raise
-            except Exception:
-                pass
+            except Exception:  # pragma: no cover - defensive logging
+                current_app.logger.exception("Failed to validate event slug uniqueness")
 
     def validate_start_date(self, field):
         """Custom validation for start date"""

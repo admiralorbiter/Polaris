@@ -20,9 +20,7 @@ def register_auth_routes(app):
                 username = form.username.data.strip()
                 password = form.password.data
 
-                current_app.logger.info(
-                    f"Login attempt for username: {username} from {request.remote_addr}"
-                )
+                current_app.logger.info(f"Login attempt for username: {username} from {request.remote_addr}")
 
                 # Query user with error handling
                 user = User.find_by_username(username)
@@ -85,6 +83,6 @@ def register_auth_routes(app):
             try:
                 logout_user()
             except Exception:
-                pass
+                current_app.logger.exception("Failed to force logout after error")
             flash("You have been logged out.", "info")
             return redirect(url_for("index"))

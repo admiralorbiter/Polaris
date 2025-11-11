@@ -1,11 +1,21 @@
 # conftest.py
 
 import os
+import sys
 import tempfile
+import warnings
 from unittest.mock import patch
 
 import pytest
+from sqlalchemy.pool import NullPool
 from werkzeug.security import generate_password_hash
+
+if sys.version_info >= (3, 13):
+    warnings.filterwarnings(
+        "ignore",
+        message="unclosed database",
+        category=ResourceWarning,
+    )
 
 # Set testing environment BEFORE importing app to prevent database corruption
 # This ensures app.py uses TestingConfig when imported
@@ -61,6 +71,7 @@ def app():
                 "TESTING": True,
                 "WTF_CSRF_ENABLED": False,
                 "SQLALCHEMY_DATABASE_URI": f"sqlite:///{temp_db}",
+                "SQLALCHEMY_ENGINE_OPTIONS": {"poolclass": NullPool},
                 "SQLALCHEMY_ECHO": True,  # Enable SQL echo for tests (like development)
                 "SECRET_KEY": "test-secret-key-for-testing-only",
                 "DEBUG": True,
@@ -96,6 +107,7 @@ def app():
             db.session.remove()
             db.session.close()
             db.drop_all()
+            db.engine.dispose()
     finally:
         # Always close and remove the temporary database file, even on error
         try:

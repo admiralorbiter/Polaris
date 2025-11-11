@@ -18,6 +18,7 @@ from celery.exceptions import TimeoutError as CeleryTimeoutError
 from flask.cli import ScriptInfo
 
 from flask_app.importer.celery_app import DEFAULT_QUEUE_NAME, get_celery_app
+from flask_app.importer.idempotency_summary import persist_idempotency_summary
 from flask_app.importer.pipeline import (
     CleanPromotionSummary,
     CoreLoadSummary,
@@ -121,6 +122,13 @@ def _execute_csv_inline(
         )
         run.status = ImportRunStatus.SUCCEEDED
         run.finished_at = datetime.now(timezone.utc)
+        persist_idempotency_summary(
+            run,
+            staging_summary=staging_summary,
+            dq_summary=dq_summary,
+            clean_summary=clean_summary,
+            core_summary=core_summary,
+        )
         db.session.commit()
         return staging_summary, dq_summary, clean_summary, core_summary
     except Exception as exc:

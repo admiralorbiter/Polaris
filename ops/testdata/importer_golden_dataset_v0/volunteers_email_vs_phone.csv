@@ -1,0 +1,3 @@
+external_system,external_id,first_name,last_name,email,phone,source_updated_at
+legacy_csv,vol-email-dup,Ella,Rivers,eleanor.rigby@example.org,+14155550701,2025-10-06T08:00:00Z
+legacy_csv,vol-phone-dup,Max,Shadows,max.shadows@example.org,+14155550102,2025-10-06T08:05:00Z

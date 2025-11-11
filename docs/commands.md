@@ -56,6 +56,19 @@ flask importer run --source csv --file ops/testdata/importer_golden_dataset_v0/v
 flask importer run --source csv --file <path> --inline --summary-json
 ```
 
+### Test Execution
+
+- `python -m pytest …`  
+  Runs pytest directly. Useful for tight loops against specific files or tests (e.g. `pytest tests/importer/test_idempotency_regression.py`). Keeps output focused on the selected scope and skips optional tooling.
+- `python run_tests.py <mode>`  
+  Wrapper that orchestrates linting, security checks, coverage runs, and artifact export. Notable modes:  
+  - `python run_tests.py all` — equivalent to `pytest tests/ -v`.  
+  - `python run_tests.py ci` — runs lint (unless `--no-lint`), Bandit, full pytest with coverage, then copies generated `idempotency_summary.json` files into `ci_artifacts/idempotency/` for dashboards.  
+  - Other modes (`unit`, `integration`, `fast`, `parallel`, etc.) map to curated pytest command lines; run with `--help` for the full list.
+- Environment toggles:  
+  - `IMPORTER_METRICS_ENV` (defaults to `sandbox`) and `IMPORTER_METRICS_SANDBOX_ENABLED` gate the synthetic metrics the regression suite emits.  
+  - `IMPORTER_ARTIFACT_DIR` controls where `idempotency_summary.json` artifacts land (defaults to `instance/import_artifacts/`).
+
 ### Debugging Tips
 
 1. **Use `--inline` flag**: For local debugging, use `--inline` to run synchronously and see immediate output/logs.
@@ -78,4 +91,3 @@ flask importer run --source csv --file <path> --inline --summary-json
 - **SQLite transport**: Default SQLite broker is fine for local dev; use Redis/Postgres for production scale.
 
 > For additional flags, run `flask importer --help` or append `--help` to any subcommand.
-

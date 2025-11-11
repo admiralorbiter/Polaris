@@ -13,14 +13,19 @@ from flask import current_app
 from werkzeug.datastructures import FileStorage
 from werkzeug.utils import secure_filename
 
-
 DEFAULT_UPLOAD_SUBDIR = "import_uploads"
+DEFAULT_ARTIFACT_SUBDIR = "import_artifacts"
 CSV_EXTENSIONS: tuple[str, ...] = ("csv",)
 
 
-def _normalize_upload_dir(configured_path: str | None, instance_path: str) -> Path:
+def _normalize_upload_dir(
+    configured_path: str | None,
+    instance_path: str,
+    *,
+    default_subdir: str,
+) -> Path:
     if not configured_path:
-        return Path(instance_path) / DEFAULT_UPLOAD_SUBDIR
+        return Path(instance_path) / default_subdir
 
     candidate = Path(configured_path)
     if candidate.is_absolute():
@@ -34,9 +39,27 @@ def resolve_upload_directory(app) -> Path:
     Determine and create (if necessary) the importer upload directory.
     """
 
-    upload_dir = _normalize_upload_dir(app.config.get("IMPORTER_UPLOAD_DIR"), app.instance_path)
+    upload_dir = _normalize_upload_dir(
+        app.config.get("IMPORTER_UPLOAD_DIR"),
+        app.instance_path,
+        default_subdir=DEFAULT_UPLOAD_SUBDIR,
+    )
     upload_dir.mkdir(parents=True, exist_ok=True)
     return upload_dir
+
+
+def resolve_artifact_directory(app) -> Path:
+    """
+    Determine and create (if necessary) the importer artifact directory.
+    """
+
+    artifact_dir = _normalize_upload_dir(
+        app.config.get("IMPORTER_ARTIFACT_DIR"),
+        app.instance_path,
+        default_subdir=DEFAULT_ARTIFACT_SUBDIR,
+    )
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    return artifact_dir
 
 
 def allowed_file(filename: str, allowed_extensions: Iterable[str] = CSV_EXTENSIONS) -> bool:
@@ -133,4 +156,3 @@ def diff_payload(
             continue
         diff[key] = {"before": before, "after": after}
     return diff
-

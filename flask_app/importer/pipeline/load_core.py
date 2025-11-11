@@ -4,8 +4,8 @@ Create-only upsert helpers that load clean volunteers into the core schema.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import os
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Any, Iterable, Mapping, MutableMapping, Sequence
@@ -19,9 +19,9 @@ from flask_app.models import ContactEmail, ContactPhone, EmailType, PhoneType, V
 from flask_app.models.importer.schema import (
     ChangeLogEntry,
     CleanVolunteer,
+    DataQualityViolation,
     DedupeDecision,
     DedupeSuggestion,
-    DataQualityViolation,
     ExternalIdMap,
     StagingRecordStatus,
     StagingVolunteer,
@@ -339,9 +339,20 @@ def load_core_volunteers(
         dry_run=False,
     )
     _update_core_counts(import_run, summary)
-    if not summary.dry_run:
+    metrics_enabled = True
+    metrics_source = getattr(import_run, "source", None)
+    metrics_environment = None
+    if has_app_context():
+        config = current_app.config
+        metrics_enabled = config.get("IMPORTER_METRICS_SANDBOX_ENABLED", True)
+        metrics_environment = config.get("IMPORTER_METRICS_ENV")
+    if metrics_environment and metrics_source:
+        metrics_source = f"{metrics_environment}:{metrics_source}"
+    elif metrics_environment:
+        metrics_source = metrics_environment
+    if metrics_enabled and not summary.dry_run:
         ImporterMonitoring.record_idempotent_outcomes(
-            source=getattr(import_run, "source", None),
+            source=metrics_source,
             created=summary.rows_created,
             updated=summary.rows_updated,
             skipped=summary.rows_skipped_no_change,
@@ -582,36 +593,36 @@ def _profile_field_names(profile: SurvivorshipProfile) -> set[str]:
 
 def _build_core_snapshot(volunteer: Volunteer, field_names: set[str]) -> Mapping[str, Any]:
     snapshot: dict[str, Any] = {}
-    for field in field_names:
-        if field == "email":
+    for field_name in field_names:
+        if field_name == "email":
             email = _get_primary_email(volunteer)
-            snapshot[field] = email.email if email else None
-        elif field == "phone_e164":
+            snapshot[field_name] = email.email if email else None
+        elif field_name == "phone_e164":
             phone = _get_primary_phone(volunteer)
-            snapshot[field] = phone.phone_number if phone else None
-        elif hasattr(volunteer, field):
-            snapshot[field] = getattr(volunteer, field)
+            snapshot[field_name] = phone.phone_number if phone else None
+        elif hasattr(volunteer, field_name):
+            snapshot[field_name] = getattr(volunteer, field_name)
     return snapshot
 
 
 def _build_incoming_payload(candidate: CleanVolunteerPayload, field_names: set[str]) -> Mapping[str, Any]:
     payload: dict[str, Any] = {}
     normalized_payload = candidate.normalized_payload or {}
-    for field in field_names:
-        if field == "first_name":
-            payload[field] = candidate.first_name
-        elif field == "last_name":
-            payload[field] = candidate.last_name
-        elif field == "middle_name":
-            payload[field] = _coerce_string(normalized_payload.get("middle_name"))
-        elif field == "preferred_name":
-            payload[field] = _coerce_string(normalized_payload.get("preferred_name"))
-        elif field == "email":
-            payload[field] = candidate.email
-        elif field == "phone_e164":
-            payload[field] = candidate.phone_e164
+    for field_name in field_names:
+        if field_name == "first_name":
+            payload[field_name] = candidate.first_name
+        elif field_name == "last_name":
+            payload[field_name] = candidate.last_name
+        elif field_name == "middle_name":
+            payload[field_name] = _coerce_string(normalized_payload.get("middle_name"))
+        elif field_name == "preferred_name":
+            payload[field_name] = _coerce_string(normalized_payload.get("preferred_name"))
+        elif field_name == "email":
+            payload[field_name] = candidate.email
+        elif field_name == "phone_e164":
+            payload[field_name] = candidate.phone_e164
         else:
-            payload[field] = normalized_payload.get(field)
+            payload[field_name] = normalized_payload.get(field_name)
     return payload
 
 
@@ -798,8 +809,7 @@ def _record_survivorship_metrics(import_run, survivorship: SurvivorshipResult) -
     manual_overridden = [
         decision.field_name
         for decision in survivorship.decisions
-        if any(candidate.tier == "manual" for candidate in decision.losers)
-        and decision.winner.tier != "manual"
+        if any(candidate.tier == "manual" for candidate in decision.losers) and decision.winner.tier != "manual"
     ]
     if manual_overridden:
         ImporterMonitoring.record_survivorship_warnings(count=len(manual_overridden))

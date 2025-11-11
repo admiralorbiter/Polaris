@@ -15,6 +15,7 @@ from typing import Any
 from celery import shared_task
 from flask import current_app
 
+from flask_app.importer.idempotency_summary import persist_idempotency_summary
 from flask_app.importer.pipeline import (
     load_core_volunteers,
     promote_clean_volunteers,
@@ -98,6 +99,13 @@ def ingest_csv(
         )
         run.status = ImportRunStatus.SUCCEEDED
         run.finished_at = datetime.now(timezone.utc)
+        persist_idempotency_summary(
+            run,
+            staging_summary=staging_summary,
+            dq_summary=dq_summary,
+            clean_summary=clean_summary,
+            core_summary=core_summary,
+        )
         db.session.commit()
         current_app.logger.info(
             "Importer run completed",

@@ -645,28 +645,30 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 **Implementation Outline**:
 - Build pytest scenario executing dry-run then real run with identical file, asserting zero net new core records.
 - Create helper assertions ensuring `external_id_map` entries remain stable apart from timestamp updates.
-- Integrate regression suite into CI, publishing `idempotency_summary.json` artifact for dashboards.
+- Integrate regression suite into CI (`tests/importer/test_idempotency_regression.py`), publishing `idempotency_summary.json` artifacts for dashboards.
 
 **Data & Fixtures**:
 - Expand golden dataset with identical replays, changed payloads, and deterministic dedupe coverage.
-- Annotate fixtures with expected counters and survivorship outcomes for quick validation.
+- Annotate fixtures with expected counters and survivorship outcomes for quick validation (see `ops/testdata/importer_golden_dataset_v0/README.md`).
 - Document regeneration process when schema or counters evolve.
 
 **Metrics & Telemetry**:
 - Push synthetic metrics from regression suite into monitoring sandbox to validate dashboard ingestion.
+- Emit `idempotency_summary.json` under `instance/import_artifacts/run_<id>/` and mirror to `ci_artifacts/idempotency/` for CI consumption.
+- Prefix monitoring labels via `IMPORTER_METRICS_ENV` (default `sandbox`); disable production emission with `IMPORTER_METRICS_SANDBOX_ENABLED`.
 - Alert on deltas >0 in created rows between replay runs.
-- Log test run IDs and outcomes for traceability.
+- Log test run IDs and outcomes for traceability. Regression failures surfaced via dashboards are triaged by the importer maintainer (Admir).
 
 **Testing Expectations**:
 - **Pytest**: Parametrize dry-run vs live run combos and multiple sources.
+- **Pytest regression suite**: `tests/importer/test_idempotency_regression.py` exercises replays, changed payloads, deterministic dedupe, and partial/out-of-order subsets.
 - **CLI smoke**: Validate scripted replay via existing tooling (e.g. admin helpers).
 - **CI**: Ensure run completes in <5 minutes and blocks merge on regression.
 
 **Open Questions / Clarifications**:
-- Should suite also cover partial file replays or out-of-order retries?
-- Who triages regression failures surfaced via dashboards (QA vs Eng on-call)?
-- Do we need environment-specific toggles to keep regression metrics out of production dashboards?
-
+- ✅ Covered: partial file replays or out-of-order retries (`test_partial_replay_subset_is_idempotent`).
+- ✅ Covered: regression failures surfaced via dashboards are triaged by the importer maintainer (Admir).
+- ✅ Covered: use `IMPORTER_METRICS_SANDBOX_ENABLED` + `IMPORTER_METRICS_ENV` to keep regression metrics out of production dashboards until we're ready.
 ---
 
 ## Sprint 4 — Salesforce Adapter (Optional)

@@ -1,4 +1,5 @@
 import os
+import tempfile
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
@@ -6,6 +7,7 @@ import pytest
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.pool import NullPool
 
 from flask_app.models.base import BaseModel, db
 
@@ -25,18 +27,35 @@ def app():
     app = Flask(__name__)
     app.config["TESTING"] = True
     app.config["SECRET_KEY"] = "test_secret_key"
-    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
+    db_fd, temp_db = tempfile.mkstemp(suffix=".db")
+    app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{temp_db}"
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"poolclass": NullPool}
 
     # Mock logger to prevent actual logging during tests
     app.logger = MagicMock()
 
-    db.init_app(app)
+    try:
+        db.init_app(app)
 
-    with app.app_context():
-        db.create_all()
-        yield app
-        db.drop_all()
+        with app.app_context():
+            db.create_all()
+            try:
+                yield app
+            finally:
+                db.session.remove()
+                db.engine.dispose()
+                db.drop_all()
+    finally:
+        try:
+            os.close(db_fd)
+        except OSError:
+            pass
+        try:
+            if os.path.exists(temp_db):
+                os.unlink(temp_db)
+        except OSError:
+            pass
 
 
 @pytest.fixture
@@ -391,6 +410,4 @@ class TestBaseModel:
                 ):
                     SampleModel.safe_create(name="test")
                     mock_logger.error.assert_called_once()
-                    assert (
-                        "Database error creating SampleModel" in mock_logger.error.call_args[0][0]
-                    )
+                    assert "Database error creating SampleModel" in mock_logger.error.call_args[0][0]

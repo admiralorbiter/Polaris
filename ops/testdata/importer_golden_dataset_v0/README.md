@@ -10,6 +10,9 @@ This directory contains sample inputs and expected outcomes for the volunteer im
 - `volunteers_duplicate_skip.csv` — demonstrates deterministic auto-dedupe resolving an existing volunteer via email.
 - `volunteers_survivorship_seed.csv` — baseline records to seed core data before exercising survivorship precedence.
 - `volunteers_survivorship_updates.csv` — follow-up records with conflicting values to demonstrate incoming overrides vs. manual wins.
+- `volunteers_idempotent_replay.csv` — exact replay of the happy-path dataset to validate idempotent dry-run/live workflows.
+- `volunteers_changed_payload.csv` — same `external_id`s as the happy-path dataset with updated contact info to assert update-vs-insert handling.
+- `volunteers_email_vs_phone.csv` — conflicting records that collide on email-only and phone-only signals to exercise deterministic dedupe heuristics.
 
 Each CSV includes a header row. Use these files with `flask importer run --source csv --file <path>` (or future automation) to exercise the pipeline.
 
@@ -23,6 +26,9 @@ Each CSV includes a header row. Use these files with `flask importer run --sourc
 | `volunteers_duplicate_skip.csv` | 2 | First row inserts into core; second auto-resolves against the existing record (`core.rows_deduped_auto=1`, `dedupe_suggestions.decision=AUTO_MERGED`, dashboard card + row badge reflect the merge). |
 | `volunteers_survivorship_seed.csv` | 2 | Seeds two volunteers with steward-verified context. Run once to establish the baseline core state. |
 | `volunteers_survivorship_updates.csv` | 2 | Re-run **after** the seed file. Expect `core.volunteers.survivorship.stats.incoming_overrides ≥ 1` (Jordan’s fresh CRM update wins). If you manually edit Taylor’s record between runs (set a custom note or phone via DQ remediation), the second row will demonstrate a manual win (`manual_wins ≥ 1`) and the run detail modal will highlight the survivorship breakdown. |
+| `volunteers_idempotent_replay.csv` | 3 | Run immediately after `volunteers_valid.csv`; expect zero new `core.rows_created`, identical `rows_updated`, and matching `external_id_map` entries aside from run timestamps. |
+| `volunteers_changed_payload.csv` | 3 | Run after `volunteers_valid.csv`; expect `core.rows_updated=3`, `rows_created=0`, and survivorship counters reflecting field-level updates (phone/email) without inserting new volunteers. |
+| `volunteers_email_vs_phone.csv` | 2 | Run after seeding happy-path data; expect auto-dedupe merges when either email or phone matches (`core.rows_deduped_auto=2`) and stable `external_id_map` entries documenting the merge source. |
 
 Document additional nuances (DQ messages, counts, etc.) as the importer matures. For IMP-11, expect the invalid CSV to yield the following per-rule counts when run via CLI or worker:
 
@@ -52,10 +58,13 @@ The emitted JSON summary now includes `"core": {"rows_created": 0, "rows_updated
 2. Update the table above (or add a new section) with expected behavior after each importer enhancement (idempotency, fuzzy dedupe, etc.).
 3. Reference this dataset from story DoR/DoD checklists so every ticket identifies the scenarios it uses.
 
-### Sprint 3 Prep (Idempotency, Dedupe & Survivorship)
+### Sprint 3 Idempotency & Dedupe Regression Playbook
 
-- **`volunteers_idempotent_replay.csv` (planned)** — identical to `volunteers_valid.csv`; rerun after an initial import to confirm zero new inserts and `rows_updated` tracking.
-- **`volunteers_changed_payload.csv` (planned)** — same `external_id` with updated contact details to exercise update-vs-insert survivorship logic.
-- **`volunteers_email_vs_phone.csv` (planned)** — conflicting records where email matches but phone differs and vice versa; validates deterministic dedupe paths (expect `rows_deduped_auto` increments when heuristics are decisive).
-- **`volunteers_survivorship_seed.csv` + `volunteers_survivorship_updates.csv` (new)** — sequential run pair; first seeds steward-verified data, second introduces conflicting source payloads so the UI and metrics surface survivorship decisions. Update the change-log expectations if precedence rules evolve.
-- Update this README with expected counters once Sprint 3 implementation lands, including `rows_updated`, `dedupe.decisions`, and change-log assertions.
+1. **Seed happy-path data**: Run `volunteers_valid.csv` once to populate core with the baseline volunteers.
+2. **Idempotent replay**: Run `volunteers_idempotent_replay.csv` in dry-run and live modes. Expect identical counters between runs (`rows_created=0`, `rows_updated=0`, `core.rows_deduped_auto=0`) and verify the emitted `idempotency_summary.json` reports `external_id_map_diff="none"`.
+3. **Update-vs-insert checks**: Execute `volunteers_changed_payload.csv` to confirm the importer surfaces `rows_updated=3`, leaves `rows_created=0`, and records field-level survivorship decisions for email/phone updates.
+4. **Signal-specific dedupe**: Replay `volunteers_email_vs_phone.csv`. Verify each row auto-merges into the existing core volunteer via email or phone match (`core.rows_deduped_auto=2`) while preserving the latest contact info per precedence.
+5. **Partial/out-of-order simulations**: Re-run a subset of rows (e.g., only `vol-001` and `vol-phone-002`) to ensure the importer treats them idempotently—repeat runs should leave `rows_created` unchanged and only increment `rows_updated` when payloads differ.
+6. **Survivorship pair**: When validating steward overrides, execute `volunteers_survivorship_seed.csv` followed by `volunteers_survivorship_updates.csv`, updating expectations if precedence logic changes.
+
+Re-run these scenarios whenever importer survivorship or dedupe logic evolves, and refresh the expected counters above so QA can quickly validate regression outcomes.

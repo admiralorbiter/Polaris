@@ -134,3 +134,4 @@ logs/
 .DS_Store
 .vscode/
 .idea/
+ci_artifacts/
