@@ -700,212 +700,169 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 **Epic**: EPIC-4  
 **Goal**: Optional Salesforce ingestion using existing queries/SOQL; incremental via watermark.
 
+### Sprint 4 Overview
+- **Theme**: Introduce a Salesforce adapter that reuses the importer pipeline, keeping the feature completely optional until licensed customers request it.
+- **Shared architecture work**: Establish adapter bootstrapping, secure credential management, and shared watermark helpers so future adapters (e.g., NationBuilder) can plug in quickly.
+- **Data & schema**: Confirm staging tables and change-log columns already support Salesforce-specific metadata (OwnerId, RecordTypeId, SystemModstamp); plan minimal migrations for watermark bookkeeping.
+- **Operational readiness**: Document deployment toggles, credential rotation SOPs, and rollback steps if Salesforce limits or schema changes break ingestion.
+- **Risks / assumptions**: Reliance on API quotas, variability in customer-specific Salesforce fields, and the need for robust backoff/retry handling across long-running exports.
+- **Clarifications requested**: Finalize which Salesforce edition(s) we target first, how we expose OAuth/username-password flows, and whether customer admins or Polaris support owns connected app provisioning.
+
 ### IMP-40 — Adapter loader & optional deps _(3 pts)_
 **User story**: As an operator, Salesforce is installable only when needed.  
 **Acceptance Criteria**
-- `[salesforce]` extra declared; clear error if misconfigured.  
+- `[salesforce]` Python extra declared; pip install without extra keeps dependencies out.  
+- Importer warns clearly when adapter enabled but deps/creds missing.  
+- Admin toggle hides Salesforce UI affordances when adapter disabled.  
 **Dependencies**: IMP-1.
+**Status**: 🔄 In planning (target code freeze: Jan 10, 2026).
+
+**Outcome Notes (Plan)**
+- Ship `pip install ".[importer-salesforce]"` extra wiring `simple_salesforce` + `salesforce-bulk` (or `salesforce-api` alternative) with version pins and hashes.
+- Extend `IMPORTER_ADAPTERS` parsing to validate `salesforce` only if extra import succeeds; surface actionable CLI error message.
+- Provide migration notes for packaging (Docker image optional layer, `requirements-optional.txt`).
+
+**Implementation Outline**
+- Add adapter registration to `importer/adapters/__init__.py`; guard import behind feature flag + extra check.
+- Implement `ensure_salesforce_adapter_ready()` that validates env vars (`SF_USERNAME`, `SF_PASSWORD`, `SF_TOKEN` or OAuth config) and connected app scope.
+- Update CLI (`flask importer adapters list`) to indicate availability and dependency status.
+- Extend admin settings page to show Salesforce card with enable/disable toggle and doc links.
+
+**Data Model & Storage**
+- No DB schema changes; store adapter config in `importer_adapter_settings` table (JSON) to cache instance URL + auth method.
+- Persist adapter health in `import_runs` metadata (`adapter_health_json`) for quick diagnostics.
+
+**Metrics & Telemetry**
+- Emit `importer_salesforce_adapter_enabled_total` gauge and auth attempt counters with success/failure labels.
+- Log adapter readiness checks with structured fields (`adapter="salesforce"`, `status`, `missing_env_vars`).
+
+**Testing Expectations**
+- **Unit**: Adapter availability checks, feature flag gating, CLI messages for missing deps.
+- **Integration**: Install extra in CI job, verify adapter registers, and disable without extra to assert clean failure.
+- **Packaging**: Smoke install on slim Docker image ensuring optional layer works.
+
+**Open Questions / Clarifications**
+- Do we support both username/password+token and OAuth JWT flows at launch, or phase OAuth later?
+- Who owns connected app creation per tenant—Polaris support or customer IT?
+- Should adapter health surfacing live in an existing admin dashboard card or a new integrations page?
 
 ### IMP-41 — Salesforce extract → staging _(8 pts)_
 **User story**: As an operator, Contacts pull incrementally into staging.  
 **Acceptance Criteria**
 - `since` watermark respected; raw payload stored; rate-limit backoff.  
 - Partial failures logged to run; retries safe.  
+- Resume from `SalesforceWatermark` record when run restarts.  
 **Dependencies**: IMP-40, IMP-3.
+**Status**: 🔄 In planning (API partnership review scheduled for Jan 15, 2026).
+
+**Outcome Notes (Plan)**
+- Use SOQL via Bulk API 2.0 for initial fetch; fallback to REST query if Bulk fails for small tenants.
+- Store raw responses under `staging_volunteers.raw_payload_json` and include `SystemModstamp`, `LastModifiedDate`, `IsDeleted` fields.
+- Introduce `importer_watermarks` table keyed by adapter + object (`salesforce.contacts`) storing `last_successful_modstamp`.
+- Rate-limit/backoff strategy: exponential backoff with jitter respecting Salesforce daily limits; instrumentation hooks for monitoring usage.
+
+**Implementation Outline**
+- Implement `SalesforceExtractor` class orchestrating auth, query chunking, and streaming into staging queue tasks.
+- Leverage Celery chaining to paginate through results; checkpoint after each batch by updating watermark record.
+- Handle partial failures: mark run status `partially_failed`, store failing batch ID, surface remediation instructions.
+- Ensure extractor honours dry-run mode by skipping staging writes but logging counts.
+
+**Data Model & Storage**
+- New table `importer_watermarks` (adapter TEXT, object TEXT, last_successful_modstamp TIMESTAMPTZ, last_run_id INT, PRIMARY KEY(adapter, object)).
+- Update `staging_volunteers` schema doc to note Salesforce-specific metadata columns.
+
+**Metrics & Telemetry**
+- Emit `importer_salesforce_batches_total{status}` counter and `importer_salesforce_batch_duration_seconds` histogram.
+- Track remaining API quota via periodic call to `limits` endpoint; surface warnings when <15%.
+- Add structured log entries for each batch with `batch_id`, `records_received`, `retry_count`.
+
+**Testing Expectations**
+- **Unit**: SOQL builder, watermark math, retry/backoff logic.
+- **Integration**: Sandbox org fixture; ingest >5k records to exercise pagination; simulate rate-limit error for retry path.
+- **Regression**: Verify restart after failure resumes at saved watermark without duplicating rows.
+- **Load**: Stress test with 100k records ensuring Celery queue throughput acceptable.
+
+**Open Questions / Clarifications**
+- Which Salesforce objects are in scope for MVP (Contacts only vs Contacts + Campaign Members)?
+- Do we encapsulate credentials in Vault/Secrets Manager, or rely on env vars initially?
+- How do we handle Salesforce multi-currency fields during staging—store raw or normalized?
 
 ### IMP-42 — Salesforce → canonical mapping v1 _(8 pts)_
 **User story**: As a dev, SF fields map to `VolunteerIngest`.  
 **Acceptance Criteria**
 - Declarative mapping file; unmapped fields surfaced in run summary.  
 - Required/format DQ applied; violations created.  
+- Mapping supports field-level transforms (e.g., picklist normalization).  
 **Dependencies**: IMP-41, IMP-11.
+**Status**: 🔄 In planning (mapping workshop set for Jan 22, 2026).
+
+**Outcome Notes (Plan)**
+- Author `config/mappings/salesforce_volunteer_v1.yaml` describing object/field map, null-handling, and custom transformers.
+- Extend mapping engine from CSV adapter to load declarative maps with adapter-specific overrides.
+- Surface unmapped Salesforce fields in run summary + dashboard card; provide CLI report `flask importer mappings diff --adapter salesforce`.
+
+**Implementation Outline**
+- Implement `SalesforceMappingTransformer` that consumes staged payload, applies normalization helpers, and yields canonical volunteer dict.
+- Inject adapter metadata (`sf_record_id`, `sf_owner_id`, `sf_record_type`) into `ingest_extras_json` for downstream analytics.
+- Reuse existing DQ rules; add Salesforce-specific rule codes (e.g., `SF_CONTACT_NO_COMM_PREF`).
+- Update remediation UX to display Salesforce source values alongside canonical fields.
+
+**Data Model & Storage**
+- Ensure `staging_volunteers.ingest_extras_json` stores Salesforce IDs + metadata.
+- Add migration for `volunteer_ingest_config` table to record active mapping version per adapter.
+- Document mapping file schema to support future adapters.
+
+**Metrics & Telemetry**
+- Emit `importer_salesforce_mapping_unmapped_total{field}` counter.
+- Log mapping version + checksum per run for reproducibility.
+- Capture transform latency metric to monitor mapping performance.
+
+**Testing Expectations**
+- **Unit**: YAML loader, per-field transformers, unmapped field detection.
+- **Integration**: End-to-end import from staging to DQ ensuring violations align with expectations; cover custom fields + picklists.
+- **Regression**: Golden dataset variant `ops/testdata/importer_salesforce_contacts_v1/` with coverage for custom field combos.
+
+**Open Questions / Clarifications**
+- Who curates the initial mapping YAML—Importer squad or Solutions team?
+- Do we ship customer-specific mapping overrides at launch, or defer to Sprint 7 versioning work?
+- How do we expose mapping diffs to customers (downloadable YAML vs dashboard UI)?
 
 ### IMP-43 — Incremental upsert & reconciliation counters _(5 pts)_
 **User story**: As an operator, I see created/updated/unchanged counts for the window.  
 **Acceptance Criteria**
 - Counters visible; `max(source_updated_at)` recorded.  
+- Run summary exposes `rows_created`, `rows_updated`, `rows_unchanged`, `rows_deleted`.  
+- Salesforce watermark advanced only after successful commit.  
 **Dependencies**: IMP-42, IMP-30.
+**Status**: 🔄 In planning (dependency: idempotent loader GA review Feb 2026).
 
----
+**Outcome Notes (Plan)**
+- Extend existing idempotent loader to consume Salesforce batches, reusing `external_id_map` with `external_system="salesforce"`.
+- Record reconciliation counters in `counts_json.core.volunteers.salesforce` including created/updated/unchanged/deactivated rows.
+- Persist `max_source_updated_at` on `import_runs` for freshness reporting and feed Sprint 6 reconciliation.
 
-## Sprint 5 — Fuzzy Dedupe + Merge UI
-**Epic**: EPIC-5  
-**Goal**: Human-in-the-loop identity resolution; auto-merge & undo.
+**Implementation Outline**
+- Implement adapter-specific loader shim orchestrating promotion of canonical rows through dedupe + survivorship.
+- On each commit, update `importer_watermarks` with highest `SystemModstamp` observed to ensure incremental behavior.
+- Handle Salesforce soft deletes by marking records as `inactive` and incrementing `rows_deleted` counter; coordinate with survivorship to avoid data loss.
+- Update admin dashboards to include Salesforce-specific counters and freshness badges.
 
-### IMP-50 — Candidate generation & scoring _(8 pts)_
-**User story**: As a steward, likely duplicates appear with scores & features.  
-**Acceptance Criteria**
-- Blocking keys (email/phone/name+zip); features (name, DOB, address, employer/school).  
-- Scores stored in `dedupe_suggestions` with features JSON; thresholds configurable.  
-**Dependencies**: IMP-31.
+**Data Model & Storage**
+- Extend `external_id_map` to flag source system (ensure indexes cover `salesforce`).
+- Add nullable `max_source_updated_at` column to `import_runs` (TIMESTAMPTZ) with migration + backfill script.
+- Store reconciliation snapshots in `import_run_reconciliation` table for future Sprint 6 consumption.
 
-### IMP-51 — Merge UI _(13 pts)_
-**User story**: As an admin, I can compare, choose field winners, and merge safely.  
-**Acceptance Criteria**
-- Side-by-side compare; field highlights; survivorship controls.  
-- On merge: `merge_log`, `external_id_map` unify, `change_log` diffs recorded.  
-- Actions: accept, reject, defer.  
-**Dependencies**: IMP-50, IMP-32.
+**Metrics & Telemetry**
+- Emit `importer_salesforce_rows_total{action}` (created/updated/unchanged/deleted) and `importer_salesforce_watermark_seconds` gauge.
+- Log reconciliation summary with deltas vs prior run; feed Grafana panel for pilot customers.
 
-### IMP-52 — Auto-merge + undo merge _(8 pts)_
-**User story**: As an operator, obvious dupes auto-merge; I can undo.  
-**Acceptance Criteria**
-- Auto-merge for score ≥ threshold; undo restores state fully.  
-**Dependencies**: IMP-51.
+**Testing Expectations**
+- **Unit**: Loader branching for update vs unchanged vs delete, watermark advancement logic, counter aggregation.
+- **Integration**: Replay incremental runs spanning create→update→delete lifecycle; assert no duplicate inserts, counters accurate, watermark advanced once.
+- **Regression**: Combine with idempotency suite to ensure Salesforce ingestion remains deterministic.
+- **Perf**: Benchmark 10k-record delta to confirm loader throughput (goal: <5 min per 10k updates).
 
-### IMP-53 — Dedupe metrics on runs _(3 pts)_
-**User story**: As an admin, I see auto-merged & needs-review counts per run.  
-**Acceptance Criteria**
-- New run columns and links to review queue.  
-**Dependencies**: IMP-50.
-
----
-
-## Sprint 6 — Reconciliation, Anomalies, Alerts
-**Epic**: EPIC-6  
-**Goal**: Detect leaks/staleness/spikes; trend views; operator alerts.
-
-### IMP-60 — Reconciliation & freshness _(8 pts)_
-**User story**: As an operator, I know if data is stale or missing.  
-**Acceptance Criteria**
-- Freshness (`now - max(source_updated_at)`); thresholds; run labels.  
-- Source vs core counts; hash parity spot checks; metrics saved to `counts_json`.  
-**Dependencies**: IMP-43.
-
-### IMP-61 — Anomaly detectors _(8 pts)_
-**User story**: As a PM, I see drift in rejects/dupes/null rates.  
-**Acceptance Criteria**
-- Delta guard (3σ), null drift (2× baseline), rule offenders ranked.  
-- Flags shown on runs and Source Health page.  
-**Dependencies**: IMP-60.
-
-### IMP-62 — Alerts (email/Slack/webhook) _(5 pts)_
-**User story**: As an operator, I’m notified on failures or critical anomalies.  
-**Acceptance Criteria**
-- Channels configurable; links point to run/queue; on/off per source.  
-**Dependencies**: IMP-61.
-
-### IMP-63 — Trend views _(5 pts)_
-**User story**: As a PM, I can view 30-day trends for ingests/rejects/dupes/freshness.  
-**Acceptance Criteria**
-- Charts render; filterable dates; export CSV/PNG.  
-**Dependencies**: IMP-60.
-
----
-
-## Sprint 7 — Mapping Versioning + Config UI + Backfills
-**Epic**: EPIC-7  
-**Goal**: Version mappings; in-app config; safe backfills.
-
-### IMP-70 — Versioned mappings _(8 pts)_
-**User story**: As a dev, I can evolve mappings without breaking history.  
-**Acceptance Criteria**
-- `mapping_version` stored on runs; UI shows current/prior; unmapped field warnings.  
-**Dependencies**: IMP-42.
-
-### IMP-71 — Config UI & thresholds _(8 pts)_
-**User story**: As an admin, I can tune thresholds, rules, and schedules.  
-**Acceptance Criteria**
-- Edit dedupe thresholds, anomaly thresholds, cron schedule, rule modes (warn/enforce); audit config changes.  
-**Dependencies**: IMP-60, IMP-61.
-
-### IMP-72 — Backfill UX & CLI _(5 pts)_
-**User story**: As an operator, I can backfill since a date, with dry-run.  
-**Acceptance Criteria**
-- `--since` param; run labeled “backfill”; concurrency caps; pausable.  
-**Dependencies**: IMP-43.
-
-### IMP-73 — Mapping diffs & suggestions _(5 pts)_
-**User story**: As a dev, I get suggestions when new SF fields appear.  
-**Acceptance Criteria**
-- Run summary lists unmapped fields with samples; exportable.  
-**Dependencies**: IMP-70.
-
----
-
-## Sprint 8 — Events & Signups/Attendance
-**Epic**: EPIC-8  
-**Goal**: Bring pipeline to Events + Signups/Attendance with cross-entity DQ.
-
-### IMP-80 — Staging + contracts for Events/Signups _(8 pts)_
-**User story**: As an operator, I can ingest events and signups via CSV/SF.  
-**Acceptance Criteria**
-- `staging_events`, `staging_signups` exist; contracts validate times & required fields.  
-**Dependencies**: IMP-2, IMP-41.
-
-### IMP-81 — Reference DQ & FK checks _(8 pts)_
-**User story**: As a steward, cross-entity references are validated.  
-**Acceptance Criteria**
-- FKs resolved via `external_id_map`/core keys; violations `REF-401` with hints.  
-**Dependencies**: IMP-80.
-
-### IMP-82 — Upsert for events & attendance _(8 pts)_
-**User story**: As an operator, events/signups upsert idempotently.  
-**Acceptance Criteria**
-- `(external_system, external_id)` maintained; hours & attendance flags correct.  
-**Dependencies**: IMP-81, IMP-30.
-
-### IMP-83 — Cross-entity dashboards _(5 pts)_
-**User story**: As a PM, I can view pipeline health across entities.  
-**Acceptance Criteria**
-- Filters by entity; combined metrics; links to entity-specific queues.  
-**Dependencies**: IMP-82.
-
----
-
-## Sprint 9 — Security, Audit, Packaging
-**Epic**: EPIC-9  
-**Goal**: Harden for PII; clear roles; audit trails; packaging & OSS readiness.
-
-### IMP-90 — RBAC & sensitive-field gating _(8 pts)_
-**User story**: As an admin, roles control visibility and actions (DOB, merges).  
-**Acceptance Criteria**
-- Roles: Admin, Data Steward, Viewer; masks for sensitive fields; merge/undo require Admin.  
-**Dependencies**: IMP-51.
-
-### IMP-91 — Audit completeness _(5 pts)_
-**User story**: As compliance, every admin action is logged.  
-**Acceptance Criteria**
-- Audits for edits, suppressions, merges, config changes; exportable trail.  
-**Dependencies**: IMP-22, IMP-51, IMP-71.
-
-### IMP-92 — Retention & PII hygiene _(5 pts)_
-**User story**: As a steward, staging/quarantine have retention (e.g., 90 days) and safe exports.  
-**Acceptance Criteria**
-- TTL jobs purge/anonymize; CSV export neutralizes formula injection.  
-**Dependencies**: IMP-21.
-
-### IMP-93 — Packaging & adapter extras _(5 pts)_
-**User story**: As a dev, I can install with or without Salesforce.  
-**Acceptance Criteria**
-- Optional deps groups `[importer]`, `[salesforce]`; README quickstart; sample data & screenshots.  
-**Dependencies**: IMP-40.
-
----
-
-## Backlog (Nice-to-Have)
-- Streaming/near-real-time ingestion (webhooks/CDC).  
-- OpenTelemetry tracing with `run_id` correlation.  
-- Household modeling (shared emails/phones for minors).  
-- Address verification (USPS/LoQate) & geocoding.  
-- Schema drift auto-PRs when mapping changes.  
-- Microservice extraction (shared DB or queue boundary).  
-- Advanced anomaly detection (seasonality via STL/Prophet).
-
----
-
-## Roles & RACI
-- **PM**: backlog, priorities, acceptance review.  
-- **Backend**: pipelines, adapters, idempotency, dedupe engine.  
-- **Full‑stack**: Runs/DQ/Merge/Health/Config UIs.  
-- **QA/Data Steward**: golden data, DQ tuning, review workflows.  
-- **Ops**: secrets, worker scaling, alert channels.
-
----
-
-## Risk Register
-- **Over‑coupling to web app** → strict module boundaries; feature flags.  
-- **Migration collisions** → namespaced tables; idempotent migrations.  
-- **Data churn from bad dedupe** → start deterministic + high thresholds; enable auto‑merge later.  
-- **Rate limits/long backfills** → concurrency caps; retry/backoff; pausable runs.  
-- **PII exposure** → RBAC, masking, audit logs, retention policies.
+**Open Questions / Clarifications**
+- Do we require two-phase commit or transactional batching between staging flush and core upsert to avoid partial watermark advancement?
+- How quickly must counters surface in existing dashboards (<1 min post-run?)
+- What is the expected SLA for reprocessing Salesforce deletes—immediate or batched nightly?
