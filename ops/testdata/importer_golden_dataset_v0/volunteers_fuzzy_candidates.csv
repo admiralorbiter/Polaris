@@ -1,0 +1,4 @@
+external_system,external_id,first_name,last_name,preferred_name,email,alternate_emails,phone,alternate_phones,dob,street,city,state_code,postal_code,country_code,employer,notes,source_updated_at
+legacy_csv,fuzzy-candidate-001,Izabella,Martinez,,izzy.martinez.alt@differentmail.com,,+14155559999,,1992-05-11,125 Palm Street,San Francisco,CA,94110,US,North Beach Tutoring,"High confidence fuzzy match - same DOB/address/employer, different email/phone",2025-10-08T10:00:00Z
+legacy_csv,fuzzy-candidate-002,Jon,Chen,,jonny.chen.alt@differentmail.com,,+14155559998,,1990-02-19,89 Elm Avenue,Oakland,CA,94607,US,Bay Robotics,"Review band fuzzy match - nickname, nearby address, same DOB/employer",2025-10-08T10:05:00Z
+legacy_csv,fuzzy-candidate-003,Gracie,Okafor,,gracie.okafor.alt@differentmail.com,,+14155559997,,1996-11-23,420 Sunset Blvd,San Jose,CA,95110,US,South Bay Medical,"Low score - different DOB, similar address/employer",2025-10-08T10:10:00Z

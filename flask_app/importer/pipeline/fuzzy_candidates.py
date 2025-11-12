@@ -10,8 +10,8 @@ from sqlalchemy.orm import joinedload
 from config.monitoring import ImporterMonitoring
 from flask_app.importer.pipeline.deterministic import match_volunteer_by_contact, normalize_email, normalize_phone
 from flask_app.importer.pipeline.fuzzy_features import (
-    ALT_CONTACT_WEIGHT,
     ADDRESS_WEIGHT,
+    ALT_CONTACT_WEIGHT,
     DOB_WEIGHT,
     EMPLOYER_WEIGHT,
     NAME_WEIGHT,
@@ -28,7 +28,15 @@ from flask_app.importer.pipeline.fuzzy_features import (
 from flask_app.models import ContactAddress, Volunteer, db
 from flask_app.models.importer import CleanVolunteer, DedupeDecision, DedupeSuggestion
 
-AUTO_MERGE_THRESHOLD = 0.95
+
+def get_auto_merge_threshold():
+    """Get auto-merge threshold from Flask config, defaulting to 0.95."""
+    from flask import current_app
+
+    return current_app.config.get("FUZZY_AUTO_MERGE_THRESHOLD", 0.95)
+
+
+AUTO_MERGE_THRESHOLD = 0.95  # Default, will be overridden by config
 REVIEW_THRESHOLD = 0.80
 BATCH_FLUSH_SIZE = 100
 
@@ -43,6 +51,7 @@ class FuzzyCandidateSummary:
     skipped_no_signals: int = 0
     skipped_no_candidates: int = 0
     skipped_deterministic: int = 0
+    auto_merged_count: int = 0
     dry_run: bool = False
 
 
@@ -334,7 +343,9 @@ def _get_primary_address(volunteer: Volunteer) -> Optional[ContactAddress]:
 
 
 def _categorize_score(score: float) -> str:
-    if score >= AUTO_MERGE_THRESHOLD:
+    """Categorize fuzzy match score into match type."""
+    threshold = get_auto_merge_threshold()
+    if score >= threshold:
         return "fuzzy_high"
     if score >= REVIEW_THRESHOLD:
         return "fuzzy_review"

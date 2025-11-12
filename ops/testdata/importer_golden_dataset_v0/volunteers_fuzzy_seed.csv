@@ -1,0 +1,4 @@
+external_system,external_id,first_name,last_name,preferred_name,email,alternate_emails,phone,alternate_phones,dob,street,city,state_code,postal_code,country_code,employer,notes,source_updated_at
+legacy_csv,fuzzy-seed-001,Isabella,Martinez,,isabella.martinez@example.org,,+14155553001,,1992-05-11,125 Palm St,San Francisco,CA,94110,US,North Beach Tutoring,"Seed data for fuzzy dedupe testing",2025-10-08T10:00:00Z
+legacy_csv,fuzzy-seed-002,Jonathan,Chen,,jonathan.chen@example.org,,+14155553002,,1990-02-19,87 Elm Ave,Oakland,CA,94607,US,Bay Robotics,"Seed data for fuzzy dedupe testing",2025-10-08T10:00:00Z
+legacy_csv,fuzzy-seed-003,Grace,Okafor,,grace.okafor@example.org,,+14155553003,,1995-11-23,410 Sunset Boulevard,San Jose,CA,95110,US,South Bay Clinics,"Seed data for fuzzy dedupe testing",2025-10-08T10:00:00Z

@@ -33,7 +33,7 @@ from flask_app.importer.pipeline.fuzzy_candidates import FuzzyCandidateSummary, 
 from flask_app.importer.utils import cleanup_upload, resolve_upload_directory
 from flask_app.models.base import db
 from flask_app.models.importer.schema import ImportRun, ImportRunStatus
-from flask_app.utils.importer import get_importer_adapters, is_importer_enabled
+from flask_app.utils.importer import is_importer_enabled
 
 
 @click.group(name="importer", invoke_without_command=True)
@@ -214,7 +214,8 @@ def _format_summary(
         f"  core_no_change     : {core_summary.rows_skipped_no_change}\n"
         f"  core_duplicates    : {core_summary.rows_skipped_duplicates}\n"
         f"  core_missing_ids   : {core_summary.rows_missing_external_id}\n"
-        f"  fuzzy_candidates   : {fuzzy_summary.suggestions_created} (high={fuzzy_summary.high_confidence}, review={fuzzy_summary.review_band})"
+        f"  fuzzy_candidates   : {fuzzy_summary.suggestions_created} "
+        f"(high={fuzzy_summary.high_confidence}, review={fuzzy_summary.review_band})"
     )
 
 
@@ -503,9 +504,7 @@ def run_salesforce(ctx, run_id: int, limit: Optional[int]):
     if run is None:
         raise click.ClickException(f"Import run {run_id} not found.")
     if run.adapter != "salesforce":
-        raise click.ClickException(
-            f"Import run {run_id} is configured for adapter '{run.adapter}', not 'salesforce'."
-        )
+        raise click.ClickException(f"Import run {run_id} is configured for adapter '{run.adapter}', not 'salesforce'.")
 
     state = app.extensions.get("importer")
     if not state:
@@ -757,41 +756,120 @@ def _retry_import_run(app, run: ImportRun) -> tuple[str, str]:
 @click.pass_context
 def debug_staging(ctx, run_id: int, limit: int):
     """Debug staging volunteer data to see what's in payload_json and normalized_json."""
-    from flask_app.models.importer.schema import StagingVolunteer
     from flask_app.importer.pipeline.dq import _compose_payload
-    
+    from flask_app.models.importer.schema import StagingVolunteer
+
     info = ctx.ensure_object(ScriptInfo)
-    app = info.load_app()
-    
+    info.load_app()
+
     rows = db.session.query(StagingVolunteer).filter_by(run_id=run_id).limit(limit).all()
     if not rows:
         click.echo(f"No staging rows found for run_id={run_id}")
         return
-    
+
     for row in rows:
         click.echo(f"\n{'='*80}")
         click.echo(f"Staging Row ID: {row.id}")
         click.echo(f"External ID: {row.external_id}")
         click.echo(f"Status: {row.status}")
-        click.echo(f"\nRAW PAYLOAD (payload_json):")
+        click.echo("\nRAW PAYLOAD (payload_json):")
         click.echo(json.dumps(row.payload_json, indent=2))
-        click.echo(f"\nNORMALIZED PAYLOAD (normalized_json):")
+        click.echo("\nNORMALIZED PAYLOAD (normalized_json):")
         click.echo(json.dumps(row.normalized_json, indent=2))
-        
+
         # Test what _compose_payload returns
         composed = _compose_payload(row)
-        click.echo(f"\nCOMPOSED PAYLOAD (what DQ rules see):")
+        click.echo("\nCOMPOSED PAYLOAD (what DQ rules see):")
         click.echo(json.dumps(dict(composed), indent=2))
-        click.echo(f"\nEmail fields:")
+        click.echo("\nEmail fields:")
         click.echo(f"  email: {composed.get('email')}")
         click.echo(f"  email_normalized: {composed.get('email_normalized')}")
         click.echo(f"  Email (capital): {composed.get('Email')}")
-        click.echo(f"\nPhone fields:")
+        click.echo("\nPhone fields:")
         click.echo(f"  phone: {composed.get('phone')}")
         click.echo(f"  phone_e164: {composed.get('phone_e164')}")
         click.echo(f"  Phone (capital): {composed.get('Phone')}")
         click.echo(f"  MobilePhone: {composed.get('MobilePhone')}")
         click.echo(f"  HomePhone: {composed.get('HomePhone')}")
+
+
+@importer_cli.command("undo-merge")
+@click.option("--merge-log-id", required=True, type=int, help="ID of the merge log entry to undo.")
+@click.option("--force", is_flag=True, help="Skip confirmation prompt.")
+@click.pass_context
+def undo_merge(ctx, merge_log_id: int, force: bool):
+    """Undo a merge operation, restoring the previous state."""
+    from flask_login import current_user
+
+    from flask_app.importer.pipeline.merge_service import MergeService
+    from flask_app.models.importer.schema import MergeLog
+
+    info = ctx.ensure_object(ScriptInfo)
+    app = info.load_app()
+
+    with app.app_context():
+        merge_log = db.session.get(MergeLog, merge_log_id)
+        if not merge_log:
+            click.echo(f"Error: Merge log {merge_log_id} not found.", err=True)
+            raise click.Abort()
+
+        # Get user ID - try current_user first, fallback to admin user
+        user_id = None
+        try:
+            if hasattr(current_user, "id") and current_user.is_authenticated:
+                user_id = current_user.id
+        except Exception:
+            pass
+
+        if not user_id:
+            # Find an admin user for CLI operations
+            from flask_app.models import User
+
+            admin_user = db.session.query(User).filter_by(is_super_admin=True).first()
+            if admin_user:
+                user_id = admin_user.id
+            else:
+                click.echo("Error: No authenticated user found. Cannot perform undo.", err=True)
+                raise click.Abort()
+
+        # Display merge details
+        click.echo(f"\nMerge Log ID: {merge_log_id}")
+        click.echo(f"Primary Contact ID: {merge_log.primary_contact_id}")
+        click.echo(f"Merged Contact ID: {merge_log.merged_contact_id}")
+        click.echo(f"Decision Type: {merge_log.decision_type}")
+        click.echo(f"Reason: {merge_log.reason or 'N/A'}")
+
+        if merge_log.metadata_json:
+            score = merge_log.metadata_json.get("score")
+            match_type = merge_log.metadata_json.get("match_type")
+            if score:
+                click.echo(f"Score: {score}")
+            if match_type:
+                click.echo(f"Match Type: {match_type}")
+
+        # Confirmation
+        if not force:
+            if not click.confirm("\nAre you sure you want to undo this merge?"):
+                click.echo("Undo cancelled.")
+                return
+
+        # Perform undo
+        try:
+            merge_service = MergeService()
+            undo_log = merge_service.undo_merge(merge_log_id, user_id=user_id)
+            db.session.commit()
+
+            click.echo(f"\n✅ Successfully undone merge log {merge_log_id}")
+            click.echo(f"Undo log ID: {undo_log.id}")
+            click.echo("Previous state has been restored.")
+        except ValueError as e:
+            click.echo(f"Error: {e}", err=True)
+            db.session.rollback()
+            raise click.Abort()
+        except Exception as e:
+            click.echo(f"Error undoing merge: {e}", err=True)
+            db.session.rollback()
+            raise click.Abort()
 
 
 @importer_cli.command("load-clean")
@@ -801,27 +879,29 @@ def load_clean_volunteers(ctx, run_id: int):
     """Load clean volunteers from a completed import run into core database."""
     from flask_app.importer.pipeline.salesforce_loader import SalesforceContactLoader
     from flask_app.models.importer.schema import ImportRun
-    
+
     info = ctx.ensure_object(ScriptInfo)
     app = info.load_app()
     if not is_importer_enabled(app):
         raise click.ClickException("Importer is disabled; enable it before loading.")
-    
+
     run = db.session.get(ImportRun, run_id)
     if run is None:
         raise click.ClickException(f"Import run {run_id} not found.")
-    
+
     if run.source != "salesforce":
-        raise click.ClickException(f"This command only works for Salesforce imports. Run {run_id} is from {run.source}.")
-    
+        raise click.ClickException(
+            f"This command only works for Salesforce imports. Run {run_id} is from {run.source}."
+        )
+
     if run.status == ImportRunStatus.RUNNING:
         raise click.ClickException(f"Import run {run_id} is still running. Wait for it to complete.")
-    
+
     click.echo(f"Loading clean volunteers from run {run_id}...")
     loader = SalesforceContactLoader(run)
     counters = loader.execute()
-    
-    click.echo(f"Completed:")
+
+    click.echo("Completed:")
     click.echo(f"  Created: {counters.created}")
     click.echo(f"  Updated: {counters.updated}")
     click.echo(f"  Unchanged: {counters.unchanged}")
@@ -833,21 +913,21 @@ def load_clean_volunteers(ctx, run_id: int):
 @click.pass_context
 def importer_stats(ctx, run_id: Optional[int]):
     """Show statistics about imported volunteers."""
-    from flask_app.models.importer.schema import CleanVolunteer, ImportRun
     from flask_app.models import Volunteer
-    
+    from flask_app.models.importer.schema import CleanVolunteer, ImportRun
+
     info = ctx.ensure_object(ScriptInfo)
-    app = info.load_app()
-    
+    info.load_app()
+
     total_volunteers = db.session.query(Volunteer).count()
     click.echo(f"Total volunteers in core database: {total_volunteers}")
-    
+
     if run_id:
         run = db.session.get(ImportRun, run_id)
         if not run:
             click.echo(f"Import run {run_id} not found.")
             return
-        
+
         clean_count = db.session.query(CleanVolunteer).filter_by(run_id=run_id).count()
         click.echo(f"\nImport Run {run_id} ({run.source}):")
         click.echo(f"  Clean volunteers promoted: {clean_count}")
@@ -859,7 +939,7 @@ def importer_stats(ctx, run_id: Optional[int]):
     else:
         # Show recent runs
         recent_runs = db.session.query(ImportRun).order_by(ImportRun.started_at.desc()).limit(5).all()
-        click.echo(f"\nRecent import runs:")
+        click.echo("\nRecent import runs:")
         for run in recent_runs:
             clean_count = db.session.query(CleanVolunteer).filter_by(run_id=run.id).count()
             click.echo(f"  Run {run.id} ({run.source}): {clean_count} clean volunteers")

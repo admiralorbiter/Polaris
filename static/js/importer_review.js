@@ -24,6 +24,7 @@
         totalPending: document.getElementById("stat-total-pending"),
         reviewBand: document.getElementById("stat-review-band"),
         highConfidence: document.getElementById("stat-high-confidence"),
+        autoMerged: document.getElementById("stat-auto-merged"),
         agingOlder: document.getElementById("stat-aging-older"),
       },
       modalElement: document.getElementById("candidate-detail-modal"),
@@ -181,6 +182,19 @@
         const scoreBadgeClass = getScoreBadgeClass(candidate.score);
         const scoreDisplay = formatScore(candidate.score);
 
+        let decisionBadge = '<span class="badge bg-secondary">' + escapeHtml(candidate.decision || "unknown") + '</span>';
+        if (candidate.decision === "pending") {
+          decisionBadge = '<span class="badge bg-warning">Pending</span>';
+        } else if (candidate.decision === "deferred") {
+          decisionBadge = '<span class="badge bg-info">Deferred</span>';
+        } else if (candidate.decision === "auto_merged") {
+          decisionBadge = '<span class="badge bg-success">Auto-merged</span>';
+        } else if (candidate.decision === "accepted") {
+          decisionBadge = '<span class="badge bg-primary">Accepted</span>';
+        } else if (candidate.decision === "rejected") {
+          decisionBadge = '<span class="badge bg-danger">Rejected</span>';
+        }
+
         card.innerHTML = `
           <div class="card-body">
             <div class="d-flex justify-content-between align-items-start mb-2">
@@ -188,6 +202,7 @@
                 <div class="d-flex align-items-center gap-2 mb-2">
                   <span class="badge ${scoreBadgeClass} score-badge">${scoreDisplay}</span>
                   <span class="badge bg-secondary">${getMatchTypeLabel(candidate.match_type)}</span>
+                  ${decisionBadge}
                   <span class="badge bg-info">Run #${candidate.run_id}</span>
                 </div>
                 <h6 class="mb-1">
@@ -197,11 +212,19 @@
                   <strong>Candidate:</strong> ${escapeHtml(candidate.candidate_name || "Unknown")}
                 </h6>
               </div>
-              <button type="button" class="btn btn-primary btn-sm review-candidate-btn" data-candidate-id="${candidate.id}">
-                <i class="fas fa-eye me-1"></i> Review
-              </button>
+              <div class="d-flex gap-2">
+                <button type="button" class="btn btn-primary btn-sm review-candidate-btn" data-candidate-id="${candidate.id}">
+                  <i class="fas fa-eye me-1"></i> Review
+                </button>
+                ${candidate.decision === "auto_merged" && candidate.merge_log_id
+                  ? `<button type="button" class="btn btn-warning btn-sm undo-merge-btn" data-merge-log-id="${candidate.merge_log_id}" data-candidate-id="${candidate.id}">
+                      <i class="fas fa-undo me-1"></i> Undo
+                    </button>`
+                  : ""}
+              </div>
             </div>
             ${candidate.created_at ? `<small class="text-muted">Created: ${formatDateTime(candidate.created_at)}</small>` : ""}
+            ${candidate.decided_at ? `<small class="text-muted d-block">Merged: ${formatDateTime(candidate.decided_at)}</small>` : ""}
           </div>
         `;
         elements.candidatesList.appendChild(card);
@@ -267,6 +290,9 @@
       }
       if (elements.statsCards.highConfidence) {
         elements.statsCards.highConfidence.textContent = stats.total_high_confidence || 0;
+      }
+      if (elements.statsCards.autoMerged) {
+        elements.statsCards.autoMerged.textContent = stats.total_auto_merged || 0;
       }
       if (elements.statsCards.agingOlder) {
         elements.statsCards.agingOlder.textContent = stats.aging_buckets?.[">48h"] || 0;
@@ -609,15 +635,57 @@
       elements.autoRefreshToggle.addEventListener("click", toggleAutoRefresh);
     }
 
+    function handleUndoMerge(mergeLogId, candidateId) {
+      if (!confirm("Are you sure you want to undo this merge? This will restore the previous state.")) {
+        return;
+      }
+
+      const url = config.apiBase.replace("/dedupe/review/api", `/dedupe/undo/${mergeLogId}`);
+      return fetch(url, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+      })
+        .then(async (response) => {
+          if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            throw new Error(data.error || `Request failed with status ${response.status}`);
+          }
+          return response.json();
+        })
+        .then(() => {
+          loadCandidates();
+          loadStats();
+          showToast("Success", "Merge undone successfully. Previous state has been restored.", "success");
+        })
+        .catch((err) => {
+          console.error("Failed to undo merge:", err);
+          showToast("Error", err.message || "Failed to undo merge.", "danger");
+        });
+    }
+
     if (elements.candidatesList) {
       elements.candidatesList.addEventListener("click", (event) => {
-        const btn = event.target.closest(".review-candidate-btn");
-        if (btn) {
-          const candidateId = parseInt(btn.dataset.candidateId, 10);
+        const reviewBtn = event.target.closest(".review-candidate-btn");
+        if (reviewBtn) {
+          const candidateId = parseInt(reviewBtn.dataset.candidateId, 10);
           if (candidateId && state.modalInstance) {
             loadCandidateDetails(candidateId).then(() => {
               state.modalInstance.show();
             });
+          }
+          return;
+        }
+
+        const undoBtn = event.target.closest(".undo-merge-btn");
+        if (undoBtn) {
+          const mergeLogId = parseInt(undoBtn.dataset.mergeLogId, 10);
+          const candidateId = parseInt(undoBtn.dataset.candidateId, 10);
+          if (mergeLogId) {
+            handleUndoMerge(mergeLogId, candidateId);
           }
         }
       });

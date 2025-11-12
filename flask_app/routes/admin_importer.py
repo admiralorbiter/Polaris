@@ -34,6 +34,7 @@ from flask_app.models import AdminLog, db
 from flask_app.models.importer.schema import (
     DataQualitySeverity,
     DataQualityStatus,
+    DedupeDecision,
     ImporterWatermark,
     ImportRun,
     ImportRunStatus,
@@ -1122,10 +1123,39 @@ def importer_dedupe_review_queue():
                     first_name = staging_json.get("first_name", "") or ""
                     last_name = staging_json.get("last_name", "") or ""
                     candidate_name = f"{first_name} {last_name}".strip() or None
+                elif c.staging_row:
+                    # Fallback: try to get name from staging row even if normalized_json is missing
+                    # This handles edge cases where staging row exists but normalized_json is None
+                    candidate_name = f"Staging Row {c.staging_row.id}" if c.staging_row else None
 
                 created_at = None
                 if c.import_run and c.import_run.created_at:
                     created_at = c.import_run.created_at.isoformat()
+
+                # Find merge_log_id for auto-merged items (for undo functionality)
+                merge_log_id = None
+                decided_at = None
+                if c.decision == DedupeDecision.AUTO_MERGED and c.primary_contact_id:
+                    from flask_app.models.importer.schema import MergeLog
+
+                    # Find MergeLog entry by matching primary_contact_id and checking undo_payload
+                    merge_logs = (
+                        db.session.query(MergeLog)
+                        .filter_by(
+                            primary_contact_id=c.primary_contact_id,
+                            decision_type="auto",
+                        )
+                        .all()
+                    )
+                    # Check undo_payload for suggestion_id match
+                    for ml in merge_logs:
+                        if ml.undo_payload and ml.undo_payload.get("suggestion_id") == c.id:
+                            merge_log_id = ml.id
+                            break
+                    if c.decided_at:
+                        decided_at = c.decided_at.isoformat()
+                elif c.decided_at:
+                    decided_at = c.decided_at.isoformat()
 
                 candidates_list.append(
                     {
@@ -1137,10 +1167,12 @@ def importer_dedupe_review_queue():
                         "primary_contact_id": c.primary_contact_id,
                         "candidate_contact_id": c.candidate_contact_id,
                         "staging_volunteer_id": c.staging_volunteer_id,
-                        "decision": c.decision.value if hasattr(c.decision, "value") else str(c.decision),
+                        "decision": c.decision.value if isinstance(c.decision, DedupeDecision) else str(c.decision),
                         "primary_name": primary_name,
                         "candidate_name": candidate_name,
                         "created_at": created_at,
+                        "decided_at": decided_at,
+                        "merge_log_id": merge_log_id,
                     }
                 )
             except Exception as e:
@@ -1317,6 +1349,34 @@ def importer_dedupe_defer_candidate(candidate_id: int):
         return jsonify({"error": "Failed to defer candidate."}), HTTPStatus.INTERNAL_SERVER_ERROR
 
 
+@admin_importer_blueprint.post("/dedupe/undo/<int:merge_log_id>")
+@login_required
+@permission_required("manage_imports", org_context=False)
+def importer_dedupe_undo_merge(merge_log_id: int):
+    """Undo a merge operation."""
+    if not _ensure_importer_enabled():
+        return jsonify({"error": "Importer is disabled."}), HTTPStatus.NOT_FOUND
+
+    try:
+        undo_log = _merge_service.undo_merge(merge_log_id, user_id=current_user.id)
+        db.session.commit()
+
+        result = {
+            "undo_merge_log_id": undo_log.id,
+            "original_merge_log_id": merge_log_id,
+            "primary_contact_id": undo_log.primary_contact_id,
+            "merged_contact_id": undo_log.merged_contact_id,
+        }
+        return jsonify(result), HTTPStatus.OK
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({"error": str(exc)}), HTTPStatus.BAD_REQUEST
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception("Failed to undo merge", exc_info=exc)
+        return jsonify({"error": "Failed to undo merge."}), HTTPStatus.INTERNAL_SERVER_ERROR
+
+
 @admin_importer_blueprint.get("/dedupe/stats")
 @login_required
 @permission_required("manage_imports", org_context=False)
@@ -1331,6 +1391,7 @@ def importer_dedupe_stats():
             "total_pending": stats.total_pending,
             "total_review_band": stats.total_review_band,
             "total_high_confidence": stats.total_high_confidence,
+            "total_auto_merged": stats.total_auto_merged,
             "aging_buckets": stats.aging_buckets,
         }
         return jsonify(result), HTTPStatus.OK

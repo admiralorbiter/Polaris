@@ -183,6 +183,11 @@ class Config:
     # Data quality validation should catch these issues instead
     EMAIL_VALIDATION_CHECK_DELIVERABILITY = False
 
+    # Fuzzy dedupe auto-merge configuration
+    FUZZY_AUTO_MERGE_THRESHOLD = float(os.environ.get("FUZZY_AUTO_MERGE_THRESHOLD", "0.95"))
+    FUZZY_AUTO_MERGE_ENABLED = os.environ.get("FUZZY_AUTO_MERGE_ENABLED", "true").lower() == "true"
+    FUZZY_AUTO_MERGE_BATCH_SIZE = int(os.environ.get("FUZZY_AUTO_MERGE_BATCH_SIZE", "50"))
+
 
 class DevelopmentConfig(Config):
     DEBUG = True

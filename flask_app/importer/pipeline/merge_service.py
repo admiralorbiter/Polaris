@@ -55,6 +55,7 @@ class QueueStats:
     total_pending: int
     total_review_band: int
     total_high_confidence: int
+    total_auto_merged: int
     aging_buckets: dict[str, int]
 
 
@@ -98,6 +99,8 @@ class MergeService:
                 query = query.filter(DedupeSuggestion.decision == DedupeDecision.PENDING)
             elif status == "deferred":
                 query = query.filter(DedupeSuggestion.decision == DedupeDecision.DEFERRED)
+            elif status == "auto_merged":
+                query = query.filter(DedupeSuggestion.decision == DedupeDecision.AUTO_MERGED)
             elif status == "review":
                 query = query.filter(
                     DedupeSuggestion.decision == DedupeDecision.PENDING,
@@ -304,18 +307,20 @@ class MergeService:
         self,
         suggestion_id: int,
         *,
-        user_id: int,
+        user_id: int | None = None,
         field_overrides: dict[str, Any] | None = None,
         notes: str | None = None,
+        decision_type: str = "manual",
     ) -> MergeLog:
         """
         Execute a merge operation for a dedupe candidate.
 
         Args:
             suggestion_id: ID of the DedupeSuggestion
-            user_id: ID of the user performing the merge
+            user_id: ID of the user performing the merge (None for auto-merge)
             field_overrides: Optional dict of field_name -> value to override survivorship
             notes: Optional notes about the merge
+            decision_type: Type of merge decision ("manual", "auto", etc.)
 
         Returns:
             Created MergeLog entry
@@ -533,24 +538,51 @@ class MergeService:
             "primary": _build_core_snapshot(primary_volunteer, field_names),
         }
 
+        # Build complete undo payload with all necessary data for restoration
+        undo_payload: dict[str, Any] = {
+            "suggestion_id": suggestion_id,
+            "merged_contact_id": merged_contact_id,
+            "changes": {
+                k: {"before": _serialize_change_value(v[0]), "after": _serialize_change_value(v[1])}
+                for k, v in changes.items()
+            },
+        }
+
+        # Store ExternalIdMap entries that were modified (for undo)
+        if merged_contact_id:
+            merged_maps_data = []
+            merged_maps = (
+                self.session.query(ExternalIdMap)
+                .filter_by(entity_type="volunteer", entity_id=merged_contact_id, is_active=True)
+                .all()
+            )
+            for map_entry in merged_maps:
+                merged_maps_data.append(
+                    {
+                        "id": map_entry.id,
+                        "external_system": map_entry.external_system,
+                        "external_id": map_entry.external_id,
+                        "entity_id": map_entry.entity_id,
+                        "is_active": map_entry.is_active,
+                    }
+                )
+            undo_payload["external_id_maps"] = merged_maps_data
+
+        # Store staging row reference if applicable
+        if suggestion.staging_row:
+            undo_payload["staging_volunteer_id"] = suggestion.staging_row.id
+
         # Create merge log entry
         merge_log = MergeLog(
             run_id=suggestion.run_id,
             primary_contact_id=primary_volunteer.id,
             merged_contact_id=merged_contact_id or primary_volunteer.id,  # Use primary if no candidate
             performed_by_user_id=user_id,
-            decision_type="manual",
+            decision_type=decision_type,
             reason=notes,
             snapshot_before=snapshot_before,
             snapshot_after=snapshot_after,
-            undo_payload={
-                "suggestion_id": suggestion_id,
-                "merged_contact_id": merged_contact_id,
-                "changes": {
-                    k: {"before": _serialize_change_value(v[0]), "after": _serialize_change_value(v[1])}
-                    for k, v in changes.items()
-                },
-            },
+            undo_payload=undo_payload,
         )
         merge_log.metadata_json = {
             "score": float(suggestion.score) if suggestion.score else None,
@@ -564,10 +596,11 @@ class MergeService:
         # Create change log entries
         for field_name, (before, after) in changes.items():
             decision = next((d for d in survivorship_result.decisions if d.field_name == field_name), None)
+            change_source = "auto_merge" if decision_type == "auto" else "manual_merge"
             metadata = {
                 "merge_log_id": merge_log.id,
                 "suggestion_id": suggestion_id,
-                "change_source": "manual_merge",
+                "change_source": change_source,
             }
             if decision:
                 metadata["survivorship"] = {
@@ -586,14 +619,17 @@ class MergeService:
                 field_name=field_name,
                 old_value=_serialize_change_value(before),
                 new_value=_serialize_change_value(after),
-                change_source="manual_merge",
+                change_source=change_source,
                 changed_by_user_id=user_id,
                 metadata_json=metadata,
             )
             self.session.add(change_entry)
 
         # Update suggestion decision
-        suggestion.decision = DedupeDecision.ACCEPTED
+        if decision_type == "auto":
+            suggestion.decision = DedupeDecision.AUTO_MERGED
+        else:
+            suggestion.decision = DedupeDecision.ACCEPTED
         suggestion.decided_at = datetime.now(timezone.utc)
         suggestion.decided_by_user_id = user_id
         suggestion.decision_notes = notes
@@ -607,6 +643,253 @@ class MergeService:
         self.session.flush()
 
         return merge_log
+
+    def auto_merge_high_confidence_candidates(
+        self,
+        run_id: int | None = None,
+        *,
+        dry_run: bool = False,
+        batch_size: int | None = None,
+    ) -> dict[str, Any]:
+        """
+        Automatically merge high-confidence fuzzy dedupe candidates.
+
+        Args:
+            run_id: Optional import run ID to limit to specific run
+            dry_run: If True, don't actually perform merges
+            batch_size: Maximum number of candidates to process (uses config default if None)
+
+        Returns:
+            Dict with counts: processed, merged, skipped, errors
+        """
+        from flask import current_app
+
+        enabled = current_app.config.get("FUZZY_AUTO_MERGE_ENABLED", True)
+        if not enabled:
+            return {"processed": 0, "merged": 0, "skipped": 0, "errors": 0}
+
+        if batch_size is None:
+            batch_size = current_app.config.get("FUZZY_AUTO_MERGE_BATCH_SIZE", 50)
+
+        # Query for high-confidence pending suggestions
+        query = (
+            self.session.query(DedupeSuggestion)
+            .options(
+                joinedload(DedupeSuggestion.primary_contact),
+                joinedload(DedupeSuggestion.staging_row),
+                joinedload(DedupeSuggestion.import_run),
+            )
+            .filter(
+                DedupeSuggestion.decision == DedupeDecision.PENDING,
+                DedupeSuggestion.match_type == "fuzzy_high",
+                DedupeSuggestion.primary_contact_id.isnot(None),
+            )
+            .order_by(DedupeSuggestion.score.desc().nulls_last(), DedupeSuggestion.id.asc())
+            .limit(batch_size)
+        )
+
+        if run_id:
+            query = query.filter(DedupeSuggestion.run_id == run_id)
+
+        candidates = query.all()
+
+        stats = {"processed": 0, "merged": 0, "skipped": 0, "errors": 0}
+
+        for suggestion in candidates:
+            stats["processed"] += 1
+
+            if dry_run:
+                stats["skipped"] += 1
+                continue
+
+            try:
+                # Execute merge with decision_type="auto"
+                self.execute_merge(
+                    suggestion.id,
+                    user_id=None,
+                    decision_type="auto",
+                    notes="Auto-merged due to high confidence score",
+                )
+                self.session.commit()
+                stats["merged"] += 1
+            except Exception as e:
+                self.session.rollback()
+                stats["errors"] += 1
+                current_app.logger.warning(
+                    f"Failed to auto-merge suggestion {suggestion.id}: {e}",
+                    exc_info=True,
+                )
+                # Continue processing other candidates
+
+        return stats
+
+    def undo_merge(self, merge_log_id: int, user_id: int) -> MergeLog:
+        """
+        Undo a merge operation by restoring state from MergeLog snapshots.
+
+        Args:
+            merge_log_id: ID of the MergeLog entry to undo
+            user_id: ID of the user performing the undo
+
+        Returns:
+            Created undo MergeLog entry
+
+        Raises:
+            ValueError: If merge_log not found, already undone, or invalid
+            RuntimeError: If undo fails
+        """
+        merge_log = self.session.get(MergeLog, merge_log_id)
+        if not merge_log:
+            raise ValueError(f"Merge log {merge_log_id} not found")
+
+        # Check if already undone - look for undo MergeLog entries
+        # We check by matching the same contacts and looking for undo decision_type
+        # with metadata referencing this merge_log_id
+        undo_candidates = (
+            self.session.query(MergeLog)
+            .filter(
+                MergeLog.primary_contact_id == merge_log.primary_contact_id,
+                MergeLog.merged_contact_id == merge_log.merged_contact_id,
+                MergeLog.decision_type == "undo",
+            )
+            .all()
+        )
+        # Check metadata_json for original_merge_log_id match
+        for undo_log in undo_candidates:
+            if undo_log.metadata_json and undo_log.metadata_json.get("original_merge_log_id") == merge_log_id:
+                raise ValueError(f"Merge log {merge_log_id} has already been undone")
+
+        if not merge_log.undo_payload:
+            raise ValueError(f"Merge log {merge_log_id} has no undo payload")
+
+        if not merge_log.snapshot_before:
+            raise ValueError(f"Merge log {merge_log_id} has no snapshot_before")
+
+        # Get primary volunteer
+        primary_volunteer = self.session.get(Volunteer, merge_log.primary_contact_id)
+        if not primary_volunteer:
+            raise ValueError(f"Primary contact {merge_log.primary_contact_id} not found")
+
+        # Build snapshot before undo (current state)
+        profile = load_profile()
+        field_names = _profile_field_names(profile)
+        snapshot_before_undo = {
+            "primary": _build_core_snapshot(primary_volunteer, field_names),
+        }
+
+        # Restore volunteer fields from snapshot_before
+        primary_snapshot = merge_log.snapshot_before.get("primary", {})
+        changes: dict[str, tuple[Any, Any]] = {}
+
+        for field_name, old_value in primary_snapshot.items():
+            if hasattr(primary_volunteer, field_name):
+                current_value = getattr(primary_volunteer, field_name)
+                if current_value != old_value:
+                    # Special handling for email/phone
+                    if field_name == "email":
+                        before, after, changed = _apply_email_change(primary_volunteer, old_value)
+                        if changed:
+                            changes[field_name] = (before, after)
+                    elif field_name == "phone_e164":
+                        before, after, changed = _apply_phone_change(primary_volunteer, old_value)
+                        if changed:
+                            changes[field_name] = (before, after)
+                    else:
+                        setattr(primary_volunteer, field_name, old_value)
+                        changes[field_name] = (current_value, old_value)
+
+        # Restore ExternalIdMap entries from undo_payload
+        undo_payload = merge_log.undo_payload
+        external_id_maps = undo_payload.get("external_id_maps", [])
+        for map_data in external_id_maps:
+            map_entry = self.session.get(ExternalIdMap, map_data.get("id"))
+            if map_entry:
+                # Restore original entity_id if it was changed
+                if map_entry.entity_id != map_data.get("entity_id"):
+                    map_entry.entity_id = map_data.get("entity_id")
+                # Restore is_active if it was deactivated
+                if not map_entry.is_active and map_data.get("is_active"):
+                    map_entry.is_active = True
+                    map_entry.deactivated_at = None
+                    map_entry.upstream_deleted_reason = None
+
+        # Delete ChangeLogEntry records created by the merge
+        # Query all change entries and filter in Python since JSON query syntax varies by DB
+        all_change_entries = (
+            self.session.query(ChangeLogEntry)
+            .filter(
+                ChangeLogEntry.entity_type == "volunteer",
+                ChangeLogEntry.entity_id == primary_volunteer.id,
+                ChangeLogEntry.change_source.in_(["manual_merge", "auto_merge"]),
+            )
+            .all()
+        )
+        change_entries = [
+            entry
+            for entry in all_change_entries
+            if entry.metadata_json and entry.metadata_json.get("merge_log_id") == merge_log_id
+        ]
+        for entry in change_entries:
+            self.session.delete(entry)
+
+        # Reset DedupeSuggestion decision back to PENDING
+        suggestion_id = undo_payload.get("suggestion_id")
+        if suggestion_id:
+            suggestion = self.session.get(DedupeSuggestion, suggestion_id)
+            if suggestion:
+                suggestion.decision = DedupeDecision.PENDING
+                suggestion.decided_at = None
+                suggestion.decided_by_user_id = None
+                suggestion.decision_notes = None
+
+        # Build snapshot after undo
+        snapshot_after_undo = {
+            "primary": _build_core_snapshot(primary_volunteer, field_names),
+        }
+
+        # Create undo MergeLog entry for audit trail
+        undo_merge_log = MergeLog(
+            run_id=merge_log.run_id,
+            primary_contact_id=merge_log.primary_contact_id,
+            merged_contact_id=merge_log.merged_contact_id,
+            performed_by_user_id=user_id,
+            decision_type="undo",
+            reason=f"Undo of merge log {merge_log_id}",
+            snapshot_before=snapshot_before_undo,
+            snapshot_after=snapshot_after_undo,
+            undo_payload=None,  # Undo of undo not supported
+        )
+        undo_merge_log.metadata_json = {
+            "original_merge_log_id": merge_log_id,
+            "original_decision_type": merge_log.decision_type,
+            "changes_restored": {
+                k: {"from": _serialize_change_value(v[0]), "to": _serialize_change_value(v[1])}
+                for k, v in changes.items()
+            },
+        }
+        self.session.add(undo_merge_log)
+
+        # Create change log entries for undo
+        for field_name, (before, after) in changes.items():
+            change_entry = ChangeLogEntry(
+                run_id=merge_log.run_id,
+                entity_type="volunteer",
+                entity_id=primary_volunteer.id,
+                field_name=field_name,
+                old_value=_serialize_change_value(before),
+                new_value=_serialize_change_value(after),
+                change_source="undo_merge",
+                changed_by_user_id=user_id,
+                metadata_json={
+                    "undo_merge_log_id": undo_merge_log.id,
+                    "original_merge_log_id": merge_log_id,
+                },
+            )
+            self.session.add(change_entry)
+
+        self.session.flush()
+
+        return undo_merge_log
 
     def reject_candidate(
         self,
@@ -712,12 +995,23 @@ class MergeService:
             or 0
         )
 
-        # High confidence (≥0.95)
+        # High confidence (≥0.95) - pending only
         total_high_confidence = (
             self.session.query(func.count(DedupeSuggestion.id))
             .filter(
                 DedupeSuggestion.decision == DedupeDecision.PENDING,
                 DedupeSuggestion.match_type == "fuzzy_high",
+                DedupeSuggestion.primary_contact_id.isnot(None),
+            )
+            .scalar()
+            or 0
+        )
+
+        # Auto-merged count
+        total_auto_merged = (
+            self.session.query(func.count(DedupeSuggestion.id))
+            .filter(
+                DedupeSuggestion.decision == DedupeDecision.AUTO_MERGED,
                 DedupeSuggestion.primary_contact_id.isnot(None),
             )
             .scalar()
@@ -770,6 +1064,7 @@ class MergeService:
             total_pending=total_pending,
             total_review_band=total_review_band,
             total_high_confidence=total_high_confidence,
+            total_auto_merged=total_auto_merged,
             aging_buckets={
                 "<24h": aging_24h,
                 "24-48h": aging_48h,
