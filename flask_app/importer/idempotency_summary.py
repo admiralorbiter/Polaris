@@ -83,6 +83,7 @@ def persist_idempotency_summary(
     dq_summary,
     clean_summary,
     core_summary,
+    fuzzy_summary=None,
 ) -> IdempotencySummary | None:
     """
     Persist an ``idempotency_summary.json`` artifact capturing core replay metrics.
@@ -144,6 +145,19 @@ def persist_idempotency_summary(
             "diff": _determine_diff(core_summary, mapping_stats),
         },
     }
+
+    if fuzzy_summary is not None:
+        summary["fuzzy"] = {
+            "rows_considered": fuzzy_summary.rows_considered,
+            "suggestions_created": fuzzy_summary.suggestions_created,
+            "high_confidence": fuzzy_summary.high_confidence,
+            "review_band": fuzzy_summary.review_band,
+            "low_score": fuzzy_summary.low_score,
+            "skipped_no_signals": fuzzy_summary.skipped_no_signals,
+            "skipped_no_candidates": fuzzy_summary.skipped_no_candidates,
+            "skipped_deterministic": fuzzy_summary.skipped_deterministic,
+            "dry_run": fuzzy_summary.dry_run,
+        }
 
     artifact_root = resolve_artifact_directory(current_app)
     run_dir = artifact_root / f"run_{run.id}"

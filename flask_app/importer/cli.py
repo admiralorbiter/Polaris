@@ -29,6 +29,7 @@ from flask_app.importer.pipeline import (
     run_minimal_dq,
     stage_volunteers_from_csv,
 )
+from flask_app.importer.pipeline.fuzzy_candidates import FuzzyCandidateSummary, generate_fuzzy_candidates
 from flask_app.importer.utils import cleanup_upload, resolve_upload_directory
 from flask_app.models.base import db
 from flask_app.models.importer.schema import ImportRun, ImportRunStatus
@@ -134,7 +135,7 @@ def _execute_csv_inline(
     *,
     dry_run: bool,
     source_system: str,
-) -> tuple[StagingSummary, DQProcessingSummary, CleanPromotionSummary, CoreLoadSummary]:
+) -> tuple[StagingSummary, DQProcessingSummary, CleanPromotionSummary, FuzzyCandidateSummary, CoreLoadSummary]:
     run_id = run.id
     run.status = ImportRunStatus.RUNNING
     run.started_at = datetime.now(timezone.utc)
@@ -150,6 +151,7 @@ def _execute_csv_inline(
             )
         dq_summary = run_minimal_dq(run, dry_run=dry_run, csv_rows=staging_summary.dry_run_rows)
         clean_summary = promote_clean_volunteers(run, dry_run=dry_run)
+        fuzzy_summary = generate_fuzzy_candidates(run, dry_run=dry_run)
         core_summary = load_core_volunteers(
             run,
             dry_run=dry_run,
@@ -163,9 +165,10 @@ def _execute_csv_inline(
             dq_summary=dq_summary,
             clean_summary=clean_summary,
             core_summary=core_summary,
+            fuzzy_summary=fuzzy_summary,
         )
         db.session.commit()
-        return staging_summary, dq_summary, clean_summary, core_summary
+        return staging_summary, dq_summary, clean_summary, fuzzy_summary, core_summary
     except Exception as exc:
         db.session.rollback()
         recovery_run = db.session.get(ImportRun, run_id)
@@ -183,6 +186,7 @@ def _format_summary(
     staging_summary: StagingSummary,
     dq_summary: DQProcessingSummary,
     clean_summary: CleanPromotionSummary,
+    fuzzy_summary: FuzzyCandidateSummary,
     core_summary: CoreLoadSummary,
 ) -> str:
     clean_promoted_value = clean_summary.rows_promoted if not clean_summary.dry_run else clean_summary.rows_considered
@@ -209,7 +213,8 @@ def _format_summary(
         f"  core_reactivated   : {core_summary.rows_reactivated}\n"
         f"  core_no_change     : {core_summary.rows_skipped_no_change}\n"
         f"  core_duplicates    : {core_summary.rows_skipped_duplicates}\n"
-        f"  core_missing_ids   : {core_summary.rows_missing_external_id}"
+        f"  core_missing_ids   : {core_summary.rows_missing_external_id}\n"
+        f"  fuzzy_candidates   : {fuzzy_summary.suggestions_created} (high={fuzzy_summary.high_confidence}, review={fuzzy_summary.review_band})"
     )
 
 
@@ -218,6 +223,7 @@ def _build_summary_payload(
     staging_summary: StagingSummary,
     dq_summary: DQProcessingSummary,
     clean_summary: CleanPromotionSummary,
+    fuzzy_summary: FuzzyCandidateSummary,
     core_summary: CoreLoadSummary,
 ) -> dict[str, object]:
     return {
@@ -255,6 +261,16 @@ def _build_summary_payload(
             "rows_soft_deleted": core_summary.rows_soft_deleted,
             "duplicate_emails": list(core_summary.duplicate_emails),
             "dry_run": core_summary.dry_run,
+        },
+        "fuzzy": {
+            "rows_considered": fuzzy_summary.rows_considered,
+            "suggestions_created": fuzzy_summary.suggestions_created,
+            "high_confidence": fuzzy_summary.high_confidence,
+            "review_band": fuzzy_summary.review_band,
+            "low_score": fuzzy_summary.low_score,
+            "skipped_no_signals": fuzzy_summary.skipped_no_signals,
+            "skipped_no_candidates": fuzzy_summary.skipped_no_candidates,
+            "skipped_deterministic": fuzzy_summary.skipped_deterministic,
         },
     }
 
@@ -613,17 +629,17 @@ def importer_run(
     if run is None:
         raise click.ClickException(f"Import run {run_id} could not be reloaded before execution.")
 
-    staging_summary, dq_summary, clean_summary, core_summary = _execute_csv_inline(
+    staging_summary, dq_summary, clean_summary, fuzzy_summary, core_summary = _execute_csv_inline(
         run,
         csv_path,
         dry_run=dry_run,
         source_system=normalized_source,
     )
-    click.echo(_format_summary(run, staging_summary, dq_summary, clean_summary, core_summary))
+    click.echo(_format_summary(run, staging_summary, dq_summary, clean_summary, fuzzy_summary, core_summary))
     if summary_json:
         click.echo(
             json.dumps(
-                _build_summary_payload(run, staging_summary, dq_summary, clean_summary, core_summary),
+                _build_summary_payload(run, staging_summary, dq_summary, clean_summary, fuzzy_summary, core_summary),
                 indent=2,
                 sort_keys=True,
             )

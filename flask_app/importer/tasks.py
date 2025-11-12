@@ -28,6 +28,7 @@ from flask_app.importer.pipeline import (
     StagingSummary,
     CoreLoadSummary,
 )
+from flask_app.importer.pipeline.fuzzy_candidates import generate_fuzzy_candidates
 from flask_app.importer.pipeline.salesforce import ingest_salesforce_contacts as run_salesforce_ingest
 from flask_app.importer.pipeline.salesforce_loader import LoaderCounters, SalesforceContactLoader
 from flask_app.importer.utils import cleanup_upload
@@ -101,6 +102,7 @@ def ingest_csv(
             )
         dq_summary = run_minimal_dq(run, dry_run=dry_run, csv_rows=staging_summary.dry_run_rows)
         clean_summary = promote_clean_volunteers(run, dry_run=dry_run)
+        fuzzy_summary = generate_fuzzy_candidates(run, dry_run=dry_run)
         core_summary = load_core_volunteers(
             run,
             dry_run=dry_run,
@@ -114,6 +116,7 @@ def ingest_csv(
             dq_summary=dq_summary,
             clean_summary=clean_summary,
             core_summary=core_summary,
+            fuzzy_summary=fuzzy_summary,
         )
         db.session.commit()
         current_app.logger.info(
@@ -128,6 +131,9 @@ def ingest_csv(
                 "importer_rows_reactivated": core_summary.rows_reactivated,
                 "importer_rows_quarantined": dq_summary.rows_quarantined,
                 "importer_dry_run": staging_summary.dry_run,
+                "importer_fuzzy_suggestions_created": fuzzy_summary.suggestions_created,
+                "importer_fuzzy_high_confidence": fuzzy_summary.high_confidence,
+                "importer_fuzzy_review": fuzzy_summary.review_band,
             },
         )
         return {
@@ -147,6 +153,10 @@ def ingest_csv(
             "core_rows_skipped_no_change": core_summary.rows_skipped_no_change,
             "core_rows_duplicates": core_summary.rows_skipped_duplicates,
             "core_rows_missing_external_id": core_summary.rows_missing_external_id,
+            "fuzzy_rows_considered": fuzzy_summary.rows_considered,
+            "fuzzy_suggestions_created": fuzzy_summary.suggestions_created,
+            "fuzzy_high_confidence": fuzzy_summary.high_confidence,
+            "fuzzy_review": fuzzy_summary.review_band,
         }
     except Exception as exc:  # pragma: no cover - defensive logging path
         db.session.rollback()
@@ -226,6 +236,7 @@ def ingest_salesforce_contacts(
         # Run DQ validation and clean promotion (same as CSV pipeline)
         dq_summary = run_minimal_dq(run, dry_run=dry_run, csv_rows=None)
         clean_summary = promote_clean_volunteers(run, dry_run=dry_run)
+        fuzzy_summary = generate_fuzzy_candidates(run, dry_run=dry_run)
 
         if dry_run:
             counters = LoaderCounters()
@@ -269,6 +280,7 @@ def ingest_salesforce_contacts(
             dq_summary=dq_summary,
             clean_summary=clean_summary,
             core_summary=core_summary,
+            fuzzy_summary=fuzzy_summary,
         )
         current_app.logger.info(
             "Salesforce import run completed",
@@ -283,6 +295,9 @@ def ingest_salesforce_contacts(
                 "salesforce_rows_deleted": counters.deleted if not dry_run else 0,
                 "salesforce_rows_unchanged": counters.unchanged if not dry_run else 0,
                 "importer_dry_run": dry_run,
+                "importer_fuzzy_suggestions_created": fuzzy_summary.suggestions_created,
+                "importer_fuzzy_high_confidence": fuzzy_summary.high_confidence,
+                "importer_fuzzy_review": fuzzy_summary.review_band,
             },
         )
         return {
@@ -294,6 +309,10 @@ def ingest_salesforce_contacts(
             "dry_run": dry_run,
             "max_system_modstamp": summary.max_modstamp.isoformat() if summary.max_modstamp else None,
             "counters": counters.to_dict(),
+            "fuzzy_rows_considered": fuzzy_summary.rows_considered,
+            "fuzzy_suggestions_created": fuzzy_summary.suggestions_created,
+            "fuzzy_high_confidence": fuzzy_summary.high_confidence,
+            "fuzzy_review": fuzzy_summary.review_band,
         }
     except Exception as exc:  # pragma: no cover - defensive logging path
         db.session.rollback()
