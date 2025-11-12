@@ -60,6 +60,7 @@
 2. **Migration testing**: When adding new extraction logic, test against both fresh imports and existing clean records to catch legacy format issues early.
 3. **Validation layering**: Implement validation at multiple stages (mapping transform, DQ rules, core loader) with clear error messages at each layer.
 4. **Debug tooling**: Continue investing in CLI debug commands (`debug-staging`, `stats`) to help operators diagnose issues quickly without database access.
+5. **Documentation**: Maintain the new Salesforce mapping guides (`docs/salesforce-mapping-guide.md`, `docs/salesforce-transforms-reference.md`, `docs/salesforce-mapping-examples.md`) as living documents when schemas evolve.
 
 ## Metrics & Observability
 
@@ -94,6 +95,7 @@
 - ✅ Reconciliation counters accurate (created/updated/unchanged/deleted)
 - ✅ Watermark advancement working correctly with two-phase commit
 - ✅ End-to-end pipeline tested with production-scale data (180k+ records)
+- ✅ Salesforce mapping expansion playbooks documented for future fields/objects
 - ⚠️ Some records skipped due to invalid emails (logged for review); consider DQ rule tuning
 
 ## Next Steps

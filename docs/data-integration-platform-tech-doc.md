@@ -810,10 +810,12 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Added `SalesforceMappingTransformer` to apply transforms (phone normalization, date parsing) and populate canonical volunteer dicts directly in `StagingVolunteer.normalized_json`.
 - Admin → Imports card now surfaces mapping metadata, unmapped-field warnings, and provides a download link for the active YAML. CLI exposes `flask importer mappings show` to inspect the spec.
 - Mapping metrics: per-run `metrics_json["salesforce"]` records unmapped fields/errors; Prometheus counter `importer_salesforce_mapping_unmapped_total{field}` tracks hotspots.
+- Detailed guidance for extending mappings (new fields, transforms, or Salesforce objects) now lives in `docs/salesforce-mapping-guide.md`, `docs/salesforce-transforms-reference.md`, and `docs/salesforce-mapping-examples.md`.
 
 **Testing Expectations**
 - **Unit**: YAML loader validation, transformer behavior, mapping CLI command.
 - **Integration**: Salesforce pipeline test ensures mapped payloads land in staging and unmapped counters stay in sync.
+- **Documentation**: When making mapping changes, cross-reference the mapping guide to ensure vertical (new fields) and horizontal (new objects) updates follow the documented workflow.
 
 **Open Questions / Clarifications**
 - ✅ Mapping curated internally (single Contact spec for v1); customer overrides scheduled for Sprint 7.

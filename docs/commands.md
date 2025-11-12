@@ -30,7 +30,7 @@
 - `flask importer adapters list --auth-ping`  
   Perform the standard readiness check and attempt a live Salesforce authentication. Emits Prometheus counters (`importer_salesforce_auth_attempts_total`) for success/failure.
 - `flask importer mappings show`  
-  Print the active Salesforce mapping YAML (respects `IMPORTER_SALESFORCE_MAPPING_PATH`). Useful for reviewing field coverage or exporting the config.
+  Print the active Salesforce mapping YAML (respects `IMPORTER_SALESFORCE_MAPPING_PATH`). Useful for reviewing field coverage or exporting the config. Pipe to disk to diff changes (`flask importer mappings show > /tmp/sf_mapping.yaml`). Pair this with the Salesforce mapping guides in `docs/salesforce-mapping-guide.md` and `docs/salesforce-transforms-reference.md` when planning schema updates.
 
 ### Housekeeping
 - `flask importer cleanup-uploads --max-age-hours <hours>`  
