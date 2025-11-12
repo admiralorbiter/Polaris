@@ -97,33 +97,43 @@ def generate_fuzzy_candidates(import_run, *, dry_run: bool = False) -> FuzzyCand
             phone=clean_row.phone_e164,
         )
 
-        # Check if deterministic match corresponds to the same external_id FROM THE CURRENT RUN
-        # If so, skip fuzzy matching (it's the same record being re-imported in this run)
-        # Otherwise, allow fuzzy matching to find matches against OTHER volunteers
-        skip_fuzzy = False
-        if deterministic_result.is_match and deterministic_result.volunteer_id and clean_row.external_id:
-            from flask_app.models.importer.schema import ExternalIdMap
+        # Skip fuzzy matching if there's a deterministic match (perfect email+phone match)
+        # This means the record already exists and will be handled by deterministic matching
+        # in the load_core step, so no fuzzy review is needed
+        if deterministic_result.is_match and deterministic_result.volunteer_id:
+            skip_fuzzy = False
+            if clean_row.external_id:
+                from flask_app.models.importer.schema import ExternalIdMap
 
-            # Check if this volunteer has the same external_id FROM THE CURRENT RUN
-            # (meaning we're processing the same row twice in the same run)
-            id_map = (
-                session.query(ExternalIdMap)
-                .filter(
-                    ExternalIdMap.entity_id == deterministic_result.volunteer_id,
-                    ExternalIdMap.entity_type == "volunteer",
-                    ExternalIdMap.external_system == clean_row.external_system,
-                    ExternalIdMap.external_id == clean_row.external_id,
-                    ExternalIdMap.run_id == import_run.id,  # Only skip if from CURRENT run
+                # Check if this volunteer has the same external_id FROM THE CURRENT RUN
+                # (meaning we're processing the same row twice in the same run)
+                id_map = (
+                    session.query(ExternalIdMap)
+                    .filter(
+                        ExternalIdMap.entity_id == deterministic_result.volunteer_id,
+                        ExternalIdMap.entity_type == "volunteer",
+                        ExternalIdMap.external_system == clean_row.external_system,
+                        ExternalIdMap.external_id == clean_row.external_id,
+                        ExternalIdMap.run_id == import_run.id,  # Only skip if from CURRENT run
+                    )
+                    .first()
                 )
-                .first()
-            )
-            # If found in current run, it's a duplicate row in this run - skip fuzzy matching
-            if id_map:
+                if id_map:
+                    # Duplicate row in same run - definitely skip
+                    skip_fuzzy = True
+                else:
+                    # Deterministic match exists but not from current run
+                    # This means it's a perfect match that will be handled deterministically
+                    # in load_core, so skip fuzzy matching
+                    skip_fuzzy = True
+            else:
+                # No external_id, but we have a deterministic match - skip fuzzy matching
+                # because it's already a perfect match that will be handled deterministically
                 skip_fuzzy = True
 
-        if skip_fuzzy:
-            summary.skipped_deterministic += 1
-            continue
+            if skip_fuzzy:
+                summary.skipped_deterministic += 1
+                continue
 
         # Use deterministic matches as starting point for fuzzy matching
         # This helps when we have partial matches (e.g., email matches but phone doesn't)

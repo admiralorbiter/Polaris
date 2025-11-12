@@ -18,6 +18,7 @@ from flask_app.models import (
     EducationLevel,
     EmailType,
     Gender,
+    LocalStatus,
     PhoneType,
     PreferredLanguage,
     RaceEthnicity,
@@ -297,7 +298,7 @@ class TestVolunteerRoutes:
                     "preferred_language": PreferredLanguage.ENGLISH.value,
                     "title": "Engineer",
                     "industry": "Technology",
-                    "is_local": True,
+                    "is_local": LocalStatus.LOCAL.value,
                     "do_not_call": False,
                     "do_not_email": False,
                     "do_not_contact": False,
@@ -585,7 +586,7 @@ class TestVolunteerRoutes:
                     "preferred_language": PreferredLanguage.SPANISH.value,
                     "title": "Director",
                     "industry": "Education",
-                    "is_local": False,
+                    "is_local": LocalStatus.NON_LOCAL.value,
                     "do_not_call": True,
                     "do_not_email": False,
                     "do_not_contact": False,
@@ -611,7 +612,7 @@ class TestVolunteerRoutes:
             assert updated_volunteer.clearance_status == ClearanceStatus.PENDING
             assert updated_volunteer.title == "Director"
             assert updated_volunteer.industry == "Education"
-            assert updated_volunteer.is_local is False
+            assert updated_volunteer.is_local == LocalStatus.NON_LOCAL
             assert updated_volunteer.do_not_call is True
 
     def test_volunteers_edit_post_remove_email(self, client, test_user, app):

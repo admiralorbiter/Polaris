@@ -198,6 +198,16 @@ def register_volunteer_routes(app):
                 language_enum = PreferredLanguage(form.preferred_language.data) if form.preferred_language.data else None
                 clearance_enum = ClearanceStatus(form.clearance_status.data) if form.clearance_status.data else None
 
+                # Convert is_local string value to enum
+                is_local_enum = None
+                if form.is_local.data:
+                    try:
+                        is_local_enum = LocalStatus(form.is_local.data)
+                    except ValueError:
+                        is_local_enum = LocalStatus.UNKNOWN
+                else:
+                    is_local_enum = LocalStatus.UNKNOWN
+
                 contact = Volunteer(
                     contact_type=ContactType.VOLUNTEER,
                     first_name=form.first_name.data.strip(),
@@ -210,7 +220,7 @@ def register_volunteer_routes(app):
                     race=race_enum,
                     birthdate=form.birthdate.data if form.birthdate.data else None,
                     education_level=education_enum,
-                    is_local=form.is_local.data,
+                    is_local=is_local_enum,
                     do_not_call=form.do_not_call.data,
                     do_not_email=form.do_not_email.data,
                     do_not_contact=form.do_not_contact.data,

@@ -20,6 +20,7 @@ class FakeResponse:
         self._json_data = json_data or {}
         self.text = text
         self.headers = headers or {}
+        self.ok = status_code < 400  # Add 'ok' attribute for requests compatibility
 
     def raise_for_status(self):
         if self.status_code >= 400:
@@ -63,11 +64,20 @@ class FakeSession:
 
 
 def test_build_contacts_soql_without_watermark():
+    # Without watermark but with volunteer filter (default)
     soql = build_contacts_soql()
     assert soql.startswith("SELECT Id, AccountId, FirstName")
     assert "FROM Contact" in soql
-    assert "WHERE" not in soql
+    assert "WHERE" in soql  # Volunteer filter is always applied by default
+    assert "Contact_Type__c" in soql
     assert soql.endswith("ORDER BY SystemModstamp ASC")
+    
+    # Without watermark and without volunteer filter
+    soql_no_filter = build_contacts_soql(filter_volunteers=False)
+    assert soql_no_filter.startswith("SELECT Id, AccountId, FirstName")
+    assert "FROM Contact" in soql_no_filter
+    assert "WHERE" not in soql_no_filter
+    assert soql_no_filter.endswith("ORDER BY SystemModstamp ASC")
 
 
 def test_build_contacts_soql_with_watermark_and_limit():

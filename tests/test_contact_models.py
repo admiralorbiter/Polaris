@@ -26,6 +26,7 @@ from flask_app.models import (
     EmailType,
     EmergencyContact,
     Gender,
+    LocalStatus,
     Organization,
     PhoneType,
     PreferredLanguage,
@@ -156,7 +157,7 @@ class TestContactModel:
                 race=RaceEthnicity.WHITE,
                 birthdate=birthdate,
                 education_level=EducationLevel.BACHELORS,
-                is_local=True,
+                is_local=LocalStatus.LOCAL,
                 type="General",
                 do_not_call=False,
                 do_not_email=False,
@@ -1709,10 +1710,10 @@ class TestContactEdgeCases:
     def test_can_volunteer_in_person(self, app):
         """Test can_volunteer_in_person method"""
         with app.app_context():
-            contact = Contact(first_name="Test", last_name="Contact", is_local=True)
+            contact = Contact(first_name="Test", last_name="Contact", is_local=LocalStatus.LOCAL)
             assert contact.can_volunteer_in_person() is True
 
-            contact2 = Contact(first_name="Test", last_name="Contact", is_local=False)
+            contact2 = Contact(first_name="Test", last_name="Contact", is_local=LocalStatus.NON_LOCAL)
             assert contact2.can_volunteer_in_person() is False
 
     def test_update_age_group_error_handling(self, app):

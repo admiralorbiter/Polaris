@@ -109,3 +109,111 @@ def test_loader_handles_deletes(app):
     assert not entry.is_active
 
 
+def test_loader_applies_contact_preferences(app):
+    """Test that contact preferences are applied to volunteer records."""
+    from flask_app.models import Volunteer
+    
+    _ensure_watermark()
+    run = _create_run()
+    
+    # Create payload with contact preferences
+    payload = _make_payload("004")
+    payload["contact_preferences"] = {
+        "do_not_call": True,
+        "do_not_email": False,
+        "do_not_contact": True,
+    }
+    _add_staging_row(run, 1, payload)
+    
+    loader = SalesforceContactLoader(run)
+    loader.execute()
+    
+    # Verify contact preferences were applied
+    entry = ExternalIdMap.query.filter_by(external_system="salesforce", external_id="004").first()
+    assert entry is not None
+    volunteer = db.session.get(Volunteer, entry.entity_id)
+    assert volunteer is not None
+    assert volunteer.do_not_call is True
+    assert volunteer.do_not_email is False
+    assert volunteer.do_not_contact is True
+
+
+def test_loader_contact_preferences_defaults_to_false(app):
+    """Test that contact preferences default to False when not provided."""
+    from flask_app.models import Volunteer
+    
+    _ensure_watermark()
+    run = _create_run()
+    
+    # Create payload without contact preferences
+    payload = _make_payload("005")
+    # No contact_preferences key
+    _add_staging_row(run, 1, payload)
+    
+    loader = SalesforceContactLoader(run)
+    loader.execute()
+    
+    # Verify defaults are False
+    entry = ExternalIdMap.query.filter_by(external_system="salesforce", external_id="005").first()
+    assert entry is not None
+    volunteer = db.session.get(Volunteer, entry.entity_id)
+    assert volunteer is not None
+    assert volunteer.do_not_call is False
+    assert volunteer.do_not_email is False
+    assert volunteer.do_not_contact is False
+
+
+def test_loader_contact_preferences_string_normalization(app):
+    """Test that string boolean values in contact preferences are normalized."""
+    from flask_app.models import Volunteer
+    
+    _ensure_watermark()
+    run = _create_run()
+    
+    # Create payload with string boolean values
+    payload = _make_payload("006")
+    payload["contact_preferences"] = {
+        "do_not_call": "true",  # String, not bool
+        "do_not_email": "false",
+        "do_not_contact": "1",  # Should be treated as True
+    }
+    _add_staging_row(run, 1, payload)
+    
+    loader = SalesforceContactLoader(run)
+    loader.execute()
+    
+    # Verify string values were normalized to booleans
+    entry = ExternalIdMap.query.filter_by(external_system="salesforce", external_id="006").first()
+    assert entry is not None
+    volunteer = db.session.get(Volunteer, entry.entity_id)
+    assert volunteer is not None
+    assert volunteer.do_not_call is True
+    assert volunteer.do_not_email is False
+    assert volunteer.do_not_contact is True
+
+
+def test_loader_stores_email_bounced_date_in_metadata(app):
+    """Test that EmailBouncedDate is stored in ExternalIdMap metadata."""
+    from datetime import datetime
+    
+    _ensure_watermark()
+    run = _create_run()
+    
+    # Create payload with email bounced date
+    payload = _make_payload("007")
+    payload["metadata"] = {
+        **payload["metadata"],
+        "email_bounced_date": "2024-01-15T10:30:00.000Z",
+    }
+    _add_staging_row(run, 1, payload)
+    
+    loader = SalesforceContactLoader(run)
+    loader.execute()
+    
+    # Verify email_bounced_date is stored in ExternalIdMap metadata
+    entry = ExternalIdMap.query.filter_by(external_system="salesforce", external_id="007").first()
+    assert entry is not None
+    metadata = entry.metadata_json or {}
+    assert "email_bounced_date" in metadata.get("last_payload", {}).get("metadata", {})
+
+

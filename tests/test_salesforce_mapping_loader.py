@@ -77,3 +77,48 @@ fields:
         spec_cached = get_active_salesforce_mapping()
         assert spec_cached is spec
 
+
+def test_get_active_salesforce_mapping_cache_invalidation(app, monkeypatch, tmp_path):
+    """Test that mapping cache is invalidated when file modification time changes."""
+    import time
+    
+    mapping_yaml = tmp_path / "mapping.yaml"
+    mapping_yaml.write_text(
+        """
+version: 1
+adapter: salesforce
+object: Contact
+fields:
+  - source: Id
+    target: external_id
+    required: true
+""",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setitem(app.config, "IMPORTER_SALESFORCE_MAPPING_PATH", str(mapping_yaml))
+    with app.app_context():
+        spec1 = get_active_salesforce_mapping()
+        assert spec1.version == 1
+        
+        # Wait a moment to ensure different mtime
+        time.sleep(0.1)
+        
+        # Update the file
+        mapping_yaml.write_text(
+            """
+version: 2
+adapter: salesforce
+object: Contact
+fields:
+  - source: Id
+    target: external_id
+    required: true
+""",
+            encoding="utf-8",
+        )
+        
+        # Should reload and get new version
+        spec2 = get_active_salesforce_mapping()
+        assert spec2.version == 2
+        assert spec2 is not spec1  # Should be a new instance
