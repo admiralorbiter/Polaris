@@ -26,7 +26,7 @@ from flask_app.importer.pipeline.fuzzy_features import (
     weighted_score,
 )
 from flask_app.models import ContactAddress, Volunteer, db
-from flask_app.models.importer import CleanVolunteer, DedupeDecision, DedupeSuggestion
+from flask_app.models.importer import CleanVolunteer, DedupeDecision, DedupeSuggestion, ImportRun
 
 
 def get_auto_merge_threshold():
@@ -37,7 +37,7 @@ def get_auto_merge_threshold():
 
 
 AUTO_MERGE_THRESHOLD = 0.95  # Default, will be overridden by config
-REVIEW_THRESHOLD = 0.80
+REVIEW_THRESHOLD = 0.60  # Lowered to account for employer not being stored in Volunteer model
 BATCH_FLUSH_SIZE = 100
 
 
@@ -97,19 +97,62 @@ def generate_fuzzy_candidates(import_run, *, dry_run: bool = False) -> FuzzyCand
             phone=clean_row.phone_e164,
         )
 
-        if deterministic_result.is_match:
+        # Check if deterministic match corresponds to the same external_id FROM THE CURRENT RUN
+        # If so, skip fuzzy matching (it's the same record being re-imported in this run)
+        # Otherwise, allow fuzzy matching to find matches against OTHER volunteers
+        skip_fuzzy = False
+        if deterministic_result.is_match and deterministic_result.volunteer_id and clean_row.external_id:
+            from flask_app.models.importer.schema import ExternalIdMap
+
+            # Check if this volunteer has the same external_id FROM THE CURRENT RUN
+            # (meaning we're processing the same row twice in the same run)
+            id_map = (
+                session.query(ExternalIdMap)
+                .filter(
+                    ExternalIdMap.entity_id == deterministic_result.volunteer_id,
+                    ExternalIdMap.entity_type == "volunteer",
+                    ExternalIdMap.external_system == clean_row.external_system,
+                    ExternalIdMap.external_id == clean_row.external_id,
+                    ExternalIdMap.run_id == import_run.id,  # Only skip if from CURRENT run
+                )
+                .first()
+            )
+            # If found in current run, it's a duplicate row in this run - skip fuzzy matching
+            if id_map:
+                skip_fuzzy = True
+
+        if skip_fuzzy:
             summary.skipped_deterministic += 1
             continue
 
+        # Use deterministic matches as starting point for fuzzy matching
+        # This helps when we have partial matches (e.g., email matches but phone doesn't)
         candidate_ids = set(deterministic_result.email_match_ids + deterministic_result.phone_match_ids)
-        candidate_ids.update(
-            _find_candidates_by_name_zip(
+
+        # Try to find candidates by name+zip if we have postal code
+        if postal_code:
+            name_zip_matches = _find_candidates_by_name_zip(
                 session,
                 clean_row.first_name,
                 clean_row.last_name,
                 postal_code,
             )
-        )
+            candidate_ids.update(name_zip_matches)
+
+        # Fallback: if no matches found and we have last name, try broader search
+        # This helps when addresses aren't created yet or zip codes don't match exactly
+        if not candidate_ids and clean_row.last_name:
+            # Find volunteers with matching last name and same first letter of first name
+            last_norm = clean_row.last_name.strip().lower()
+            first_norm = clean_row.first_name.strip().lower() if clean_row.first_name else ""
+            query = session.query(Volunteer.id).filter(
+                func.lower(Volunteer.last_name) == last_norm,
+            )
+            if first_norm:
+                query = query.filter(func.substr(func.lower(Volunteer.first_name), 1, 1) == first_norm[0])
+            # Limit to reasonable number to avoid matching too many
+            broader_matches = [row[0] for row in query.limit(10).all()]
+            candidate_ids.update(broader_matches)
 
         if not candidate_ids:
             summary.skipped_no_candidates += 1
@@ -188,6 +231,84 @@ def generate_fuzzy_candidates(import_run, *, dry_run: bool = False) -> FuzzyCand
     return summary
 
 
+def _update_dedupe_counts(import_run: ImportRun, fuzzy_summary: FuzzyCandidateSummary) -> None:
+    """
+    Update dedupe counts in import_run.counts_json and metrics_json.
+
+    This function queries the DedupeSuggestion table to get accurate counts
+    after all dedupe operations (including auto-merge) have completed.
+    """
+    from sqlalchemy import func
+
+    # Query actual counts from database
+    rows_auto_merged = (
+        db.session.query(func.count(DedupeSuggestion.id))
+        .filter(
+            DedupeSuggestion.run_id == import_run.id,
+            DedupeSuggestion.decision == DedupeDecision.AUTO_MERGED,
+        )
+        .scalar()
+        or 0
+    )
+    rows_manual_review = (
+        db.session.query(func.count(DedupeSuggestion.id))
+        .filter(
+            DedupeSuggestion.run_id == import_run.id,
+            DedupeSuggestion.decision == DedupeDecision.PENDING,
+        )
+        .scalar()
+        or 0
+    )
+    rows_total_suggestions = (
+        db.session.query(func.count(DedupeSuggestion.id)).filter(DedupeSuggestion.run_id == import_run.id).scalar() or 0
+    )
+
+    # Update Prometheus metrics
+    if not fuzzy_summary.dry_run:
+        if ImporterMonitoring.DEDUPE_AUTO_PER_RUN_TOTAL:
+            ImporterMonitoring.DEDUPE_AUTO_PER_RUN_TOTAL.labels(
+                run_id=str(import_run.id), source=import_run.source or "unknown"
+            ).inc(rows_auto_merged)
+        if ImporterMonitoring.DEDUPE_MANUAL_REVIEW_PER_RUN_TOTAL:
+            ImporterMonitoring.DEDUPE_MANUAL_REVIEW_PER_RUN_TOTAL.labels(
+                run_id=str(import_run.id), source=import_run.source or "unknown"
+            ).inc(rows_manual_review)
+
+    # Update counts_json
+    counts = dict(import_run.counts_json or {})
+    dedupe_counts = counts.setdefault("dedupe", {}).setdefault("volunteers", {})
+    dedupe_counts.update(
+        {
+            "rows_auto_merged": rows_auto_merged if not fuzzy_summary.dry_run else 0,
+            "rows_manual_review": rows_manual_review if not fuzzy_summary.dry_run else 0,
+            "rows_total_suggestions": rows_total_suggestions if not fuzzy_summary.dry_run else 0,
+            "dry_run": fuzzy_summary.dry_run,
+        }
+    )
+    import_run.counts_json = counts
+
+    # Update metrics_json
+    metrics = dict(import_run.metrics_json or {})
+    dedupe_metrics = metrics.setdefault("dedupe", {}).setdefault("volunteers", {})
+    dedupe_metrics.update(
+        {
+            "rows_auto_merged": rows_auto_merged,
+            "rows_manual_review": rows_manual_review,
+            "rows_total_suggestions": rows_total_suggestions,
+            "rows_considered": fuzzy_summary.rows_considered,
+            "suggestions_created": fuzzy_summary.suggestions_created,
+            "high_confidence": fuzzy_summary.high_confidence,
+            "review_band": fuzzy_summary.review_band,
+            "low_score": fuzzy_summary.low_score,
+            "skipped_no_signals": fuzzy_summary.skipped_no_signals,
+            "skipped_no_candidates": fuzzy_summary.skipped_no_candidates,
+            "skipped_deterministic": fuzzy_summary.skipped_deterministic,
+            "dry_run": fuzzy_summary.dry_run,
+        }
+    )
+    import_run.metrics_json = metrics
+
+
 def _extract_value(payload: Dict[str, object], keys: Sequence[str]) -> Optional[str]:
     for key in keys:
         value = payload.get(key)
@@ -252,7 +373,7 @@ def _find_candidates_by_name_zip(session, first_name: str, last_name: str, posta
 
     query = (
         session.query(Volunteer.id)
-        .join(ContactAddress, Volunteer.addresses)
+        .join(ContactAddress)
         .filter(
             func.lower(Volunteer.last_name) == last_norm,
             ContactAddress.is_primary.is_(True),

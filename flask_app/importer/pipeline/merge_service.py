@@ -684,12 +684,12 @@ class MergeService:
                 DedupeSuggestion.match_type == "fuzzy_high",
                 DedupeSuggestion.primary_contact_id.isnot(None),
             )
-            .order_by(DedupeSuggestion.score.desc().nulls_last(), DedupeSuggestion.id.asc())
-            .limit(batch_size)
         )
 
         if run_id:
             query = query.filter(DedupeSuggestion.run_id == run_id)
+
+        query = query.order_by(DedupeSuggestion.score.desc().nulls_last(), DedupeSuggestion.id.asc()).limit(batch_size)
 
         candidates = query.all()
 

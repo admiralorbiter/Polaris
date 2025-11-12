@@ -112,6 +112,11 @@ def ingest_csv(
             )
             fuzzy_summary.auto_merged_count = auto_merge_stats.get("merged", 0)
 
+        # Update dedupe counts in counts_json/metrics_json
+        from flask_app.importer.pipeline.fuzzy_candidates import _update_dedupe_counts
+
+        _update_dedupe_counts(run, fuzzy_summary)
+
         core_summary = load_core_volunteers(
             run,
             dry_run=dry_run,

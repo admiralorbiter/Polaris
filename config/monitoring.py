@@ -328,6 +328,24 @@ class ImporterMonitoring:
         if Counter
         else None
     )
+    DEDUPE_AUTO_PER_RUN_TOTAL = (
+        Counter(
+            "importer_dedupe_auto_per_run_total",
+            "Total auto-merged dedupe candidates per run.",
+            labelnames=("run_id", "source"),
+        )
+        if Counter
+        else None
+    )
+    DEDUPE_MANUAL_REVIEW_PER_RUN_TOTAL = (
+        Counter(
+            "importer_dedupe_manual_review_per_run_total",
+            "Total manual review dedupe candidates per run.",
+            labelnames=("run_id", "source"),
+        )
+        if Counter
+        else None
+    )
     SURVIVORSHIP_DECISIONS_TOTAL = (
         Counter(
             "importer_survivorship_decisions_total",

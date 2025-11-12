@@ -195,13 +195,14 @@
             <th scope="col" data-sort="finished_at">Finished</th>
             <th scope="col">Rows (staged/validated/quarantined)</th>
             <th scope="col">Core (inserted/duplicates)</th>
+            <th scope="col">Dedupe</th>
             <th scope="col">Duration</th>
             <th scope="col" class="text-end">Actions</th>
           </tr>
         </thead>
         <tbody id="runs-table-body">
           <tr>
-            <td colspan="9" class="text-center py-5 text-muted">Use the filters above and refresh to load importer runs.</td>
+            <td colspan="10" class="text-center py-5 text-muted">Use the filters above and refresh to load importer runs.</td>
           </tr>
         </tbody>
       </table>
@@ -259,6 +260,8 @@
           </dd>
             <dt class="col-sm-3">Auto-resolved duplicates</dt>
             <dd class="col-sm-9" data-field="rows_deduped_auto"></dd>
+            <dt class="col-sm-3">Dedupe Candidates</dt>
+            <dd class="col-sm-9" data-field="rows_dedupe_auto"></dd>
             <dt class="col-sm-3">Error Summary</dt>
             <dd class="col-sm-9">
               <pre class="bg-light border rounded p-3 small" data-field="error_summary"></pre>

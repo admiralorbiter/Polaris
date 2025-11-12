@@ -15,7 +15,8 @@ from sqlalchemy import func
 
 from config.monitoring import ImporterMonitoring
 from config.survivorship import SurvivorshipProfile, load_profile
-from flask_app.models import ContactEmail, ContactPhone, EmailType, PhoneType, Volunteer, db
+from flask_app.models import ContactAddress, ContactEmail, ContactPhone, EmailType, PhoneType, Volunteer, db
+from flask_app.models.contact.enums import AddressType
 from flask_app.models.importer.schema import (
     ChangeLogEntry,
     CleanVolunteer,
@@ -490,11 +491,36 @@ def _coerce_string(value: object | None) -> str | None:
 
 
 def _create_volunteer_from_candidate(candidate: CleanVolunteerPayload) -> Volunteer:
+    payload = candidate.normalized_payload
+
+    # Extract and parse birthdate
+    birthdate = None
+    dob_str = payload.get("dob") or payload.get("date_of_birth") or payload.get("birthdate")
+    if dob_str:
+        try:
+            from datetime import datetime
+
+            if isinstance(dob_str, str):
+                # Try ISO format first (YYYY-MM-DD)
+                if len(dob_str) >= 10:
+                    birthdate = datetime.strptime(dob_str[:10], "%Y-%m-%d").date()
+                else:
+                    # Try other common formats
+                    for fmt in ["%m/%d/%Y", "%d/%m/%Y", "%Y-%m-%d"]:
+                        try:
+                            birthdate = datetime.strptime(dob_str, fmt).date()
+                            break
+                        except ValueError:
+                            continue
+        except (ValueError, TypeError, AttributeError):
+            pass
+
     volunteer = Volunteer(
         first_name=candidate.first_name,
         last_name=candidate.last_name,
-        preferred_name=_coerce_string(candidate.normalized_payload.get("preferred_name")),
-        middle_name=_coerce_string(candidate.normalized_payload.get("middle_name")),
+        preferred_name=_coerce_string(payload.get("preferred_name")),
+        middle_name=_coerce_string(payload.get("middle_name")),
+        birthdate=birthdate,
         source=candidate.external_system,
     )
     db.session.add(volunteer)
@@ -520,6 +546,32 @@ def _create_volunteer_from_candidate(candidate: CleanVolunteerPayload) -> Volunt
         )
         volunteer.phones.append(phone)
         db.session.add(phone)
+
+    # Create address if address fields are present
+    # (payload already extracted above)
+    street = _coerce_string(
+        payload.get("street") or payload.get("street_address") or payload.get("address") or payload.get("address_line1")
+    )
+    city = _coerce_string(payload.get("city") or payload.get("locality"))
+    state = _coerce_string(payload.get("state") or payload.get("state_code"))
+    postal_code = _coerce_string(payload.get("postal_code") or payload.get("zip") or payload.get("zip_code"))
+    country = _coerce_string(payload.get("country") or payload.get("country_code")) or "US"
+
+    if street and city and state and postal_code:
+        address = ContactAddress(
+            contact_id=volunteer.id,
+            address_type=AddressType.HOME,
+            street_address_1=street,
+            street_address_2=_coerce_string(payload.get("street_address_2") or payload.get("address_line2")),
+            city=city,
+            state=state,
+            postal_code=postal_code,
+            country=country,
+            is_primary=True,
+        )
+        volunteer.addresses.append(address)
+        db.session.add(address)
+
     return volunteer
 
 

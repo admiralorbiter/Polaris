@@ -152,6 +152,23 @@ def _execute_csv_inline(
         dq_summary = run_minimal_dq(run, dry_run=dry_run, csv_rows=staging_summary.dry_run_rows)
         clean_summary = promote_clean_volunteers(run, dry_run=dry_run)
         fuzzy_summary = generate_fuzzy_candidates(run, dry_run=dry_run)
+
+        # Auto-merge high-confidence candidates if enabled and not dry_run
+        if not dry_run:
+            from flask_app.importer.pipeline.merge_service import MergeService
+
+            merge_service = MergeService()
+            auto_merge_stats = merge_service.auto_merge_high_confidence_candidates(
+                run_id=run.id,
+                dry_run=False,
+            )
+            fuzzy_summary.auto_merged_count = auto_merge_stats.get("merged", 0)
+
+        # Update dedupe counts in counts_json/metrics_json
+        from flask_app.importer.pipeline.fuzzy_candidates import _update_dedupe_counts
+
+        _update_dedupe_counts(run, fuzzy_summary)
+
         core_summary = load_core_volunteers(
             run,
             dry_run=dry_run,
@@ -215,7 +232,11 @@ def _format_summary(
         f"  core_duplicates    : {core_summary.rows_skipped_duplicates}\n"
         f"  core_missing_ids   : {core_summary.rows_missing_external_id}\n"
         f"  fuzzy_candidates   : {fuzzy_summary.suggestions_created} "
-        f"(high={fuzzy_summary.high_confidence}, review={fuzzy_summary.review_band})"
+        f"(high={fuzzy_summary.high_confidence}, review={fuzzy_summary.review_band})\n"
+        f"  fuzzy_skipped      : signals={fuzzy_summary.skipped_no_signals}, "
+        f"candidates={fuzzy_summary.skipped_no_candidates}, "
+        f"deterministic={fuzzy_summary.skipped_deterministic}, "
+        f"low_score={fuzzy_summary.low_score}"
     )
 
 

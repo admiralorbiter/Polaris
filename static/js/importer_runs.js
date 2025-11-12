@@ -71,6 +71,14 @@
       });
     }
 
+    function renderDedupeBadge(count, runId, status, badgeClass, label) {
+      if (!count || count === 0) {
+        return "";
+      }
+      const reviewUrl = `${config.api.adminBase}/dedupe/review?run_id=${runId}&status=${status}`;
+      return `<a href="${reviewUrl}" class="badge bg-${badgeClass} text-decoration-none me-1" title="View ${label} candidates for this run">${count} ${label}</a>`;
+    }
+
     function summarizeDedupe(runs) {
       return runs.reduce(
         (acc, run) => {
@@ -190,7 +198,7 @@
       elements.tableBody.innerHTML = "";
       if (!runs.length) {
         const row = document.createElement("tr");
-        row.innerHTML = `<td colspan="9" class="text-center py-5 text-muted">No runs matched your filters.</td>`;
+        row.innerHTML = `<td colspan="10" class="text-center py-5 text-muted">No runs matched your filters.</td>`;
         elements.tableBody.appendChild(row);
         return;
       }
@@ -199,6 +207,8 @@
         const row = document.createElement("tr");
         row.dataset.runId = String(run.id);
         const dryRunBadge = run.dry_run ? '<span class="badge bg-warning text-dark ms-2">DRY RUN</span>' : "";
+        const dedupeAutoBadge = renderDedupeBadge(run.rows_dedupe_auto ?? 0, run.id, "auto_merged", "success", "Auto-merged");
+        const dedupeReviewBadge = renderDedupeBadge(run.rows_dedupe_manual_review ?? 0, run.id, "pending", "warning", "Needs Review");
         row.innerHTML = `
           <th scope="row"><button type="button" class="btn btn-link p-0 run-detail-link" data-run-id="${run.id}">${run.id}</button></th>
           <td>${run.source || "—"} ${dryRunBadge}</td>
@@ -223,6 +233,11 @@
             </div>
             <div class="small text-muted">
               ${run.rows_skipped_duplicates} dupes · ${run.rows_missing_external_id} missing IDs
+            </div>
+          </td>
+          <td>
+            <div class="small">
+              ${dedupeAutoBadge}${dedupeReviewBadge}
             </div>
           </td>
           <td>${formatDuration(run.duration_seconds)}</td>
@@ -581,6 +596,27 @@
           value > 0
             ? `${value} row${value === 1 ? "" : "s"} auto-resolved`
             : "No deterministic duplicates resolved";
+      }
+
+      const dedupeAutoField = elements.modalContent.querySelector('[data-field="rows_dedupe_auto"]');
+      if (dedupeAutoField) {
+        const autoValue = Number(detail.rows_dedupe_auto ?? 0);
+        const reviewValue = Number(detail.rows_dedupe_manual_review ?? 0);
+        if (autoValue > 0 || reviewValue > 0) {
+          const reviewUrl = `${config.api.adminBase}/dedupe/review?run_id=${detail.run_id}`;
+          dedupeAutoField.innerHTML = `
+            <div class="mb-2">
+              <a href="${reviewUrl}&status=auto_merged" class="badge bg-success text-decoration-none me-2">
+                ${autoValue} Auto-merged
+              </a>
+              <a href="${reviewUrl}&status=pending" class="badge bg-warning text-decoration-none">
+                ${reviewValue} Needs Review
+              </a>
+            </div>
+          `;
+        } else {
+          dedupeAutoField.textContent = "No dedupe candidates";
+        }
       }
 
       renderSurvivorshipSummary(detail.survivorship);

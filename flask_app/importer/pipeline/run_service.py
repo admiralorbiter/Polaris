@@ -18,7 +18,7 @@ from sqlalchemy.exc import NoResultFound
 from sqlalchemy.orm import Session
 
 from flask_app.models import AdminLog, User, db
-from flask_app.models.importer.schema import ImportRun, ImportRunStatus
+from flask_app.models.importer.schema import DedupeDecision, DedupeSuggestion, ImportRun, ImportRunStatus
 
 DEFAULT_PAGE = 1
 DEFAULT_PAGE_SIZE = 25
@@ -130,6 +130,8 @@ class RunSummary:
     rows_skipped_duplicates: int
     rows_skipped_no_change: int
     rows_deduped_auto: int
+    rows_dedupe_auto: int
+    rows_dedupe_manual_review: int
     rows_missing_external_id: int
     rows_soft_deleted: int
     triggered_by: Mapping[str, Any] | None
@@ -329,6 +331,26 @@ class ImportRunService:
         rows_missing_external_id = int(core_counts.get("rows_missing_external_id", 0) or 0)
         rows_soft_deleted = int(core_counts.get("rows_soft_deleted", 0) or 0)
 
+        # Query dedupe suggestion counts for this run
+        rows_dedupe_auto = (
+            self.session.query(func.count(DedupeSuggestion.id))
+            .filter(
+                DedupeSuggestion.run_id == run.id,
+                DedupeSuggestion.decision == DedupeDecision.AUTO_MERGED,
+            )
+            .scalar()
+            or 0
+        )
+        rows_dedupe_manual_review = (
+            self.session.query(func.count(DedupeSuggestion.id))
+            .filter(
+                DedupeSuggestion.run_id == run.id,
+                DedupeSuggestion.decision == DedupeDecision.PENDING,
+            )
+            .scalar()
+            or 0
+        )
+
         return RunSummary(
             id=run.id,
             source=run.source,
@@ -348,6 +370,8 @@ class ImportRunService:
             rows_skipped_duplicates=rows_skipped_duplicates,
             rows_skipped_no_change=rows_skipped_no_change,
             rows_deduped_auto=rows_deduped_auto,
+            rows_dedupe_auto=rows_dedupe_auto,
+            rows_dedupe_manual_review=rows_dedupe_manual_review,
             rows_missing_external_id=rows_missing_external_id,
             rows_soft_deleted=rows_soft_deleted,
             triggered_by=triggered_by_user,

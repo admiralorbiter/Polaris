@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from pathlib import Path
 
-from flask import Blueprint, current_app, jsonify, render_template, request, send_file, url_for
+from flask import Blueprint, current_app, jsonify, make_response, render_template, request, send_file, url_for
 from flask_login import current_user, login_required
 
 from config.monitoring import ImporterMonitoring
@@ -1398,6 +1398,140 @@ def importer_dedupe_stats():
     except Exception as exc:
         current_app.logger.exception("Failed to fetch dedupe stats", exc_info=exc)
         return jsonify({"error": "Failed to fetch queue statistics."}), HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+@admin_importer_blueprint.get("/dedupe/export")
+@login_required
+@permission_required("manage_imports", org_context=False)
+def importer_dedupe_export():
+    """Export dedupe summaries as CSV or JSON."""
+    if not _ensure_importer_enabled():
+        return jsonify({"error": "Importer is disabled."}), HTTPStatus.NOT_FOUND
+
+    format_type = request.args.get("format", "json").lower()
+    run_id = request.args.get("run_id", type=int)
+    status = request.args.get("status")
+
+    if format_type not in ("csv", "json"):
+        return jsonify({"error": "Format must be 'csv' or 'json'."}), HTTPStatus.BAD_REQUEST
+
+    try:
+        candidates, total = _merge_service.get_review_queue(
+            status=status,
+            match_type=None,
+            run_id=run_id,
+            limit=10000,  # Large limit for export
+            offset=0,
+        )
+
+        if format_type == "json":
+            result = []
+            for c in candidates:
+                primary_name = None
+                if c.primary_contact:
+                    primary_name = (
+                        f"{c.primary_contact.first_name or ''} {c.primary_contact.last_name or ''}".strip() or None
+                    )
+
+                candidate_name = None
+                if c.candidate_contact:
+                    candidate_name = (
+                        f"{c.candidate_contact.first_name or ''} {c.candidate_contact.last_name or ''}".strip() or None
+                    )
+                elif c.staging_row and c.staging_row.normalized_json:
+                    staging_json = c.staging_row.normalized_json
+                    first_name = staging_json.get("first_name", "") or ""
+                    last_name = staging_json.get("last_name", "") or ""
+                    candidate_name = f"{first_name} {last_name}".strip() or None
+
+                result.append(
+                    {
+                        "id": c.id,
+                        "run_id": c.run_id,
+                        "score": float(c.score) if c.score else None,
+                        "match_type": c.match_type,
+                        "decision": c.decision.value if isinstance(c.decision, DedupeDecision) else str(c.decision),
+                        "primary_contact_id": c.primary_contact_id,
+                        "candidate_contact_id": c.candidate_contact_id,
+                        "primary_name": primary_name,
+                        "candidate_name": candidate_name,
+                        "created_at": c.created_at.isoformat() if c.created_at else None,
+                        "decided_at": c.decided_at.isoformat() if c.decided_at else None,
+                    }
+                )
+
+            response = make_response(jsonify({"total": total, "candidates": result}), HTTPStatus.OK)
+            response.headers[
+                "Content-Disposition"
+            ] = f'attachment; filename="dedupe_export_{run_id or "all"}_{status or "all"}.json"'
+            return response
+
+        else:  # CSV
+            import csv
+            import io
+
+            output = io.StringIO()
+            writer = csv.writer(output)
+            writer.writerow(
+                [
+                    "ID",
+                    "Run ID",
+                    "Score",
+                    "Match Type",
+                    "Decision",
+                    "Primary Contact ID",
+                    "Candidate Contact ID",
+                    "Primary Name",
+                    "Candidate Name",
+                    "Created At",
+                    "Decided At",
+                ]
+            )
+
+            for c in candidates:
+                primary_name = None
+                if c.primary_contact:
+                    primary_name = (
+                        f"{c.primary_contact.first_name or ''} {c.primary_contact.last_name or ''}".strip() or None
+                    )
+
+                candidate_name = None
+                if c.candidate_contact:
+                    candidate_name = (
+                        f"{c.candidate_contact.first_name or ''} {c.candidate_contact.last_name or ''}".strip() or None
+                    )
+                elif c.staging_row and c.staging_row.normalized_json:
+                    staging_json = c.staging_row.normalized_json
+                    first_name = staging_json.get("first_name", "") or ""
+                    last_name = staging_json.get("last_name", "") or ""
+                    candidate_name = f"{first_name} {last_name}".strip() or None
+
+                writer.writerow(
+                    [
+                        c.id,
+                        c.run_id,
+                        float(c.score) if c.score else "",
+                        c.match_type or "",
+                        c.decision.value if isinstance(c.decision, DedupeDecision) else str(c.decision),
+                        c.primary_contact_id or "",
+                        c.candidate_contact_id or "",
+                        primary_name or "",
+                        candidate_name or "",
+                        c.created_at.isoformat() if c.created_at else "",
+                        c.decided_at.isoformat() if c.decided_at else "",
+                    ]
+                )
+
+            response = make_response(output.getvalue(), HTTPStatus.OK)
+            response.headers["Content-Type"] = "text/csv; charset=utf-8"
+            response.headers[
+                "Content-Disposition"
+            ] = f'attachment; filename="dedupe_export_{run_id or "all"}_{status or "all"}.csv"'
+            return response
+
+    except Exception as exc:
+        current_app.logger.exception("Failed to export dedupe summaries", exc_info=exc)
+        return jsonify({"error": "Failed to export dedupe summaries."}), HTTPStatus.INTERNAL_SERVER_ERROR
 
 
 def register_importer_admin_routes(app):
