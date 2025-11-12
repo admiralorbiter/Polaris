@@ -48,6 +48,9 @@
 - `docs/commands.md` — CLI command reference with troubleshooting and debugging tips
 - `docs/importer-dor.md` — Definition of Ready checklist for importer tickets
 - `docs/importer-dod.md` — Definition of Done checklist for importer tickets
+- `docs/salesforce-mapping-guide.md` — Salesforce mapping architecture, vertical/horizontal scaling guidance, and troubleshooting
+- `docs/salesforce-transforms-reference.md` — Transform registry reference with patterns for custom mapping transforms
+- `docs/salesforce-mapping-examples.md` — Copy/paste mapping recipes and real-world examples for expanding adapters
 
 **Test Data & Scenarios**:
 - `ops/testdata/importer_golden_dataset_v0/README.md` — Golden dataset documentation with expected outcomes
@@ -61,7 +64,7 @@
 - **EPIC-2**: Runs dashboard + DQ inbox (required/format) + remediation.  
 - **EPIC-3**: Deterministic dedupe + idempotent upsert + external ID map.  
 - **EPIC-4**: Salesforce adapter (optional) + incremental.  
-- **EPIC-5**: Fuzzy dedupe + Merge UI + survivorship + undo.  
+- **EPIC-5**: Fuzzy Dedupe + Merge UI + survivorship + undo.  
 - **EPIC-6**: Reconciliation, anomaly detection, alerts, trends.  
 - **EPIC-7**: Mapping versioning, config UI, backfill tooling.  
 - **EPIC-8**: Events & Signups/Attendance + cross-entity DQ.  
@@ -485,7 +488,7 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Dashboard includes dry-run filter state in API payloads for analytics
 
 **Known Limitations & Follow-ups**:
-- DQ inbox lacks bulk actions (suppress/mark won’t fix) — backlog for Sprint 3+
+- DQ inbox lacks bulk actions (suppress/mark won't fix) — backlog for Sprint 3+
 - Remediation runs execute sequentially; batching noted for evaluation in Sprint 3
 - Need expanded golden dataset scenarios for idempotent replays and deterministic dedupe (Sprint 3 prep)
 
@@ -732,7 +735,7 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Added `project.optional-dependencies["importer-salesforce"]` and `requirements-optional.txt` (with hashes) so operators install extras via `pip install ".[importer-salesforce]"` or `pip install -r requirements-optional.txt`.
 - Runtime readiness uses `importer.adapters.salesforce.check_salesforce_adapter_readiness()` to validate optional deps, creds, and (optionally) live auth; failures surface actionable messages in logs, CLI, and the admin UI.
 - New CLI surface: `flask importer adapters list [--auth-ping]` renders status per adapter (CSV, Salesforce) and can perform a live auth ping when dependencies/creds are present.
-- Admin Importer dashboard now contains an “Adapter Availability” card (under Admin → Imports) with status pill, toggle indicator, and setup guide link (configurable via `IMPORTER_SALESFORCE_DOC_URL`).
+- Admin Importer dashboard now contains an "Adapter Availability" card (under Admin → Imports) with status pill, toggle indicator, and setup guide link (configurable via `IMPORTER_SALESFORCE_DOC_URL`).
 - `ImportRun.adapter_health_json` stores a snapshot of adapter readiness when a run is queued (CLI or admin), improving post-mortem diagnostics.
 - Deployment note: include `requirements-optional.txt` in the optional Docker layer that bakes Salesforce support; omit the file when producing the slim base image.
 
@@ -853,7 +856,50 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 
 ## Sprint 5 — Fuzzy Dedupe + Merge UI
 **Epic**: EPIC-5  
+**Status**: 🗓️ Planned (post-Sprint 4)
 **Goal**: Human-in-the-loop identity resolution; auto-merge & undo.
+
+### Sprint 5 Overview
+- Complete the identity-resolution loop by layering fuzzy scoring on top of deterministic dedupe delivered in Sprint 3.
+- Ship an operator-facing merge experience that mirrors survivorship policy decisions captured in Sprint 3.
+- Automate "obvious" merges while keeping undo safety nets and detailed audit trails.
+- Extend dashboards/metrics so stewards can see dedupe throughput, manual workload, and automation coverage.
+
+### Scope Highlights
+- Expand dedupe engine with feature extraction, scoring, and configurable thresholds.
+- Build Merge UI flows (list, compare, merge, defer) with survivorship controls.
+- Implement auto-merge pipelines with undo mechanics and notifications.
+- Update Runs dashboard with dedupe metrics and drill-down links into review queues.
+
+### Pre-Sprint Dependencies & Prep
+- Golden dataset: add fuzzy-match scenarios (name variants, shared households, address proximity).
+- Update survivorship documentation (`apply_survivorship` profile) with UI copy and help text.
+- Align product/ops on threshold defaults and manual review workflows.
+- Ensure audit log schema can record merge/undo events (verify fields on `merge_log`, `change_log`).
+
+### Testing & QA Strategy
+- Extend regression suite with fuzzy-dedupe cases (scores around thresholds, conflicting identities).
+- UI tests for merge flows (side-by-side diffing, field-level selections, error handling).
+- Property-based tests for feature scoring to guard against regressions in normalization.
+- Performance testing on candidate generation for large tenant datasets (~100k volunteers).
+
+### Metrics & Observability
+- Prometheus counters: `importer_dedupe_candidates_total`, `importer_dedupe_auto_total`, `importer_dedupe_manual_total`.
+- Histogram for candidate scoring latency; gauge for review queue size.
+- Structured logs capturing `dedupe_score`, `match_type`, `decision`, `actor` (for manual merges).
+- Dashboard widgets summarizing auto vs manual merges, undo rate, and median resolution time.
+
+### Risks & Mitigations
+- **False positives**: keep aggressive thresholds behind feature flag; require manual confirmation for borderline scores.
+- **Undo complexity**: implement atomic merge transactions with reversible snapshots stored in `merge_log`.
+- **Performance**: batch candidate generation and reuse deterministic caches (email/phone) to limit fuzzy comparisons.
+- **Operator adoption**: deliver training materials and in-product help text derived from survivorship docs.
+
+### Support & Follow-up Work
+- Update admin help center with merge workflow runbook.
+- Coordinate with analytics to add dedupe KPIs to Ops dashboards.
+- Build post-sprint migration script to backfill `dedupe_suggestions` for existing staging rows (if needed).
+- Ensure the new Salesforce mapping docs (Sprint 4 deliverable) call out dedupe feature dependencies where relevant.
 
 ### IMP-50 — Candidate generation & scoring _(8 pts)_
 **User story**: As a steward, likely duplicates appear with scores & features.  
@@ -861,6 +907,17 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Blocking keys (email/phone/name+zip); features (name, DOB, address, employer/school).
 - Scores stored in `dedupe_suggestions` with features JSON; thresholds configurable.
 **Dependencies**: IMP-31.
+**Implementation Notes (planned)**
+- Introduce feature extraction service composing deterministic keys (email, phone) with fuzzy features (Jaro–Winkler name, DOB proximity, address token overlap, employer/school similarity).
+- Persist features JSON on `dedupe_suggestions` to power UI explainability and offline analysis.
+- Provide configuration for feature weights/thresholds via settings module (hooked to Sprint 7 Config UI).
+- Batch candidate generation in Celery tasks to avoid long blocking transactions; reuse staging `normalized_json` when available.
+
+**Testing Expectations**
+- Unit: feature calculators, scoring aggregation, threshold evaluation.
+- Integration: ingest golden dataset with known duplicates; verify candidate list accuracy and score bands.
+- Performance: benchmark candidate generation on 50k+ volunteers, ensuring <5 min runtime with caching.
+- Regression: confirm deterministic dedupe paths unchanged; fuzzy pipeline should fall back gracefully when data sparse.
 
 ### IMP-51 — Merge UI _(13 pts)_
 **User story**: As an admin, I can compare, choose field winners, and merge safely.  
@@ -869,24 +926,99 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - On merge: `merge_log`, `external_id_map` unify, `change_log` diffs recorded.
 - Actions: accept, reject, defer.
 **Dependencies**: IMP-50, IMP-32.
+**Implementation Notes (planned)**
+- React (or Flask template) component renders side-by-side views with highlighting off features JSON from IMP-50.
+- Integrate survivorship engine (`apply_survivorship`) allowing per-field override; record decisions in `change_log`.
+- Provide bulk actions (accept/reject) and comment log for steward notes.
+- Enforce RBAC: only Admin/Data Steward roles may merge; viewer sees read-only comparison.
+- Expose API endpoints for fetching candidate details, merging, deferring, and undo triggers.
+
+**Testing Expectations**
+- UI: Cypress (or equivalent) flows for review, field toggle, merge execution, undo.
+- Backend: Unit tests for merge transaction, undo rollback, audit logging.
+- Accessibility: keyboard navigation, screen reader announcements for diffs.
+- Security: verify RBAC enforcement and CSRF protection on merge actions.
 
 ### IMP-52 — Auto-merge + undo merge _(8 pts)_
 **User story**: As an operator, obvious dupes auto-merge; I can undo.  
 **Acceptance Criteria**
 - Auto-merge for score ≥ threshold; undo restores state fully.
 **Dependencies**: IMP-51.
+**Implementation Notes (planned)**
+- Define high-confidence threshold (≥0.95) aligned with IMP-50 scoring; run auto-merge as background job with rate limiting.
+- Capture full pre/post snapshots in `merge_log` for undo; include survivorship outcomes and provenance.
+- Provide UI/CLI `undo-merge` command with safety confirmations and audit logging.
+- Implement notification hooks (email/Slack) for auto-merge batches with summary stats (successful, skipped, errors).
+
+**Testing Expectations**
+- Unit: auto-merge decision logic, undo rollback idempotency.
+- Integration: simulate batch of high-confidence duplicates; verify counts, audit entries, and undo path.
+- Chaos: inject failures mid-merge to ensure transaction rollback leaves data consistent.
+- Monitoring: confirm metrics for auto-merge/undo publish as expected.
 
 ### IMP-53 — Dedupe metrics on runs _(3 pts)_
 **User story**: As an admin, I see auto-merged & needs-review counts per run.  
 **Acceptance Criteria**
 - New run columns and links to review queue.
 **Dependencies**: IMP-50.
+**Implementation Notes (planned)**
+- Extend Runs dashboard API to include dedupe counters (`rows_dedupe_auto`, `rows_dedupe_manual_review`).
+- Surface drill-down links into Merge UI filtered by run/threshold band.
+- Add export option for dedupe summaries (CSV/JSON) to feed Ops reporting.
+- Update Prometheus metrics with run labels for dedupe outcomes.
+
+**Testing Expectations**
+- Unit: serialization of new counters, permissions on dashboard endpoints.
+- Integration: run importer with synthetic duplicates; ensure counts populate and UI renders badges.
+- Observability: verify alerts trigger when manual review queue backlog exceeds threshold.
 
 ---
 
 ## Sprint 6 — Reconciliation, Anomalies, Alerts
 **Epic**: EPIC-6  
+**Status**: 🗓️ Planned (post-Sprint 5)
 **Goal**: Detect leaks/staleness/spikes; trend views; operator alerts.
+
+### Sprint 6 Overview
+- Establish guardrails that surface stale or missing data quickly, reducing mean time to detection for source anomalies.
+- Give operators proactive alerts so they can intervene before downstream teams feel data quality pain.
+- Provide trend visualizations that highlight regressions in ingest volume, duplicates, or DQ violations over time.
+
+### Scope Highlights
+- Reconciliation service comparing source payloads vs core loads with freshness tracking.
+- Anomaly detectors leveraging historical baselines for reject/null/drift metrics.
+- Multi-channel alerting (email/Slack/webhook) with tunable thresholds and run deep-links.
+- Trend dashboards for PM/ops stakeholders with export support.
+
+### Pre-Sprint Dependencies & Prep
+- Finalize metric schema (`counts_json`, `metrics_json`) to accommodate reconciliation stats.
+- Partner with analytics to define baselines used for anomaly detection (14-day rolling averages, etc.).
+- Ensure alert channels and secrets management patterns are in place (Vault/ENV) with runbooks.
+- Capture operator requirements for alert escalation policies and service levels.
+
+### Testing & QA Strategy
+- Unit tests for reconciliation calculators, anomaly scoring functions, and alert fan-out logic.
+- Integration tests simulating stale source data, spike in rejects, duplicate surge.
+- Load tests on reconciliation queries to validate performance at scale (large `import_runs` history).
+- End-to-end dry runs verifying alerts reach configured channels with correct payload.
+
+### Metrics & Observability
+- Counters/gauges: `importer_reconciliation_mismatch_total`, `importer_freshness_lag_seconds`, `importer_anomaly_flags_total{type}`.
+- Alert delivery metrics (success/failure) for each channel.
+- Dashboard tiles summarizing freshness lag, reject rate trend, anomaly flag distribution.
+- Structured logs for reconciliation runs including diff summaries and anomaly explanations.
+
+### Risks & Mitigations
+- **False alarms**: Start in "warn-only" mode, use rolling baselines, and expose config UI to tune thresholds.
+- **Alert fatigue**: Provide deduping window and severity levels; integrate with Ops on escalation rules.
+- **Performance**: Pre-compute aggregates via scheduled jobs to avoid real-time heavy queries.
+- **Secrets management**: Use consistent secret storage for webhook credentials; add synthetic monitoring.
+
+### Support & Follow-up Work
+- Draft incident response playbook for alert types (freshness breach, reject spike, anomaly flag).
+- Train Ops on interpreting reconciliation dashboards; include example screenshots.
+- Coordinate with reliability team for pager integration if needed.
+- Connect Sprint 5 dedupe metrics so anomalies include dedupe-related drift warnings when relevant.
 
 ### IMP-60 — Reconciliation & freshness _(8 pts)_
 **User story**: As an operator, I know if data is stale or missing.  
@@ -894,6 +1026,17 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Freshness (now - max(source_updated_at)); thresholds; run labels.
 - Source vs core counts; hash parity spot checks; metrics saved to `counts_json`.
 **Dependencies**: IMP-43.
+**Implementation Notes (planned)**
+- Compute source vs core counts per entity in near-real time, storing results in `counts_json.reconciliation` with per-entity breakdowns.
+- Track `max(source_updated_at)` and `max(core_updated_at)` to calculate freshness lag; annotate runs with badges when lag exceeds thresholds.
+- Provide reconciliation drill-down UI with diff snapshots (counts, hashes) and quick links to impacted runs/entities.
+- Store hash parity checksums for sampling canonical payloads to detect silent drift.
+
+**Testing Expectations**
+- Unit: reconciliation calculators, freshness lag formatting, hash comparison utilities.
+- Integration: simulate mismatched counts and stale data; ensure UI/API highlights issues and metrics update.
+- Regression: confirm reconciliation logic respects dry-run mode and doesn't advance watermarks.
+- Performance: verify queries remain performant with 180k+ staging rows and long lookback windows.
 
 ### IMP-61 — Anomaly detectors _(8 pts)_
 **User story**: As a PM, I see drift in rejects/dupes/null rates.  
@@ -901,107 +1044,399 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Delta guard (3σ), null drift (2× baseline), rule offenders ranked.
 - Flags shown on runs and Source Health page.
 **Dependencies**: IMP-60.
+**Implementation Notes (planned)**
+- Implement statistical guards: z-score/rolling median to flag spikes in rejects, duplicates, null rates, or dedupe automation gaps.
+- Persist anomaly metadata in `import_runs.anomaly_flags` with type, severity, baseline window, and supporting metrics.
+- Provide Source Health page summarizing recent anomalies with recommended actions (link to docs/runbooks).
+- Allow operators to acknowledge/resolve anomalies, feeding into Ops reporting.
+
+**Testing Expectations**
+- Unit: anomaly scoring math, normalization of baselines, severity assignment.
+- Integration: synthetic data generating spikes/declines; confirm anomalies surface and interplay with reconciliation badges.
+- Alert integration: ensure anomaly flags propagate to IMP-62 alert system with dedupe suppression windows.
+- Observability: ensure metrics for anomalies align with dashboards (counts per type, resolutions).
 
 ### IMP-62 — Alerts (email/Slack/webhook) _(5 pts)_
 **User story**: As an operator, I'm notified on failures or critical anomalies.  
 **Acceptance Criteria**
 - Channels configurable; links point to run/queue; on/off per source.
 **Dependencies**: IMP-61.
+**Implementation Notes (planned)**
+- Support multiple alert channels via pluggable transport interface (email SMTP, Slack webhook, generic webhook).
+- Configurable per-source thresholds and notification preferences (warn vs enforce) stored in config service (Sprint 7 integration).
+- Include deep links to run detail, DQ inbox, merge queue depending on alert type.
+- Log delivery outcomes, retries, and escalate on repeated failures.
+
+**Testing Expectations**
+- Unit: channel fan-out, payload templating, retry/backoff logic.
+- Integration: send alerts to sandbox endpoints verifying formatting and links.
+- Security: validate webhook payload signing/secret usage.
+- Monitoring: alert delivery metrics and synthetic heartbeat alerts to detect silent failures.
 
 ### IMP-63 — Trend views _(5 pts)_
 **User story**: As a PM, I can view 30-day trends for ingests/rejects/dupes/freshness.  
 **Acceptance Criteria**
 - Charts render; filterable dates; export CSV/PNG.
 **Dependencies**: IMP-60.
+**Implementation Notes (planned)**
+- Build dashboard module (charts/tables) visualizing rolling metrics: ingests, rejects, dedupe actions, freshness, anomaly counts.
+- Implement backend endpoints aggregating data with pagination and export to CSV/PNG.
+- Provide filters by source, entity, severity, date range; support compare-to-baseline overlays.
+- Add "share report" feature generating snapshot links for stakeholders.
+
+**Testing Expectations**
+- UI: chart rendering, filter combinations, export/download functionality.
+- Backend: aggregation accuracy, pagination correctness, performance under long ranges (90 days).
+- Accessibility: ensure charts have alternative text or table representations.
+- Observability: confirm dashboards update within expected latency (<5 minutes post-run).
 
 ---
 
 ## Sprint 7 — Mapping Versioning + Config UI + Backfills
 **Epic**: EPIC-7  
+**Status**: 🗓️ Planned (post-Sprint 6)
 **Goal**: Version mappings; in-app config; safe backfills.
+
+### Sprint 7 Overview
+- Introduce governance around mapping changes so teams can iterate safely without breaking historical runs.
+- Deliver in-app configuration for importer thresholds, schedules, and rule modes to reduce env-variable churn.
+- Provide first-class backfill tooling supporting safe reprocessing and historical imports.
+
+### Scope Highlights
+- Versioned mapping storage with run-level traceability and diff tooling.
+- Config UI enabling threshold tweaks, rule severity changes, schedule management, and adapter toggles.
+- Backfill UX/CLI supporting `--since` windows, pausable runs, and dry-run validation.
+- Mapping diff/suggestion system surfacing unmapped Salesforce fields post-ingest.
+
+### Pre-Sprint Dependencies & Prep
+- Finalize mapping documentation (delivered Sprint 4) and determine versioning metadata requirements (`mapping_version`, checksum, changelog).
+- Align with Security/Compliance on configuration audit logging expectations.
+- Gather operator requirements for backfill workflows (pause/resume, progress visibility, concurrency constraints).
+- Ensure database migrations in place for new config tables, mapping history, and backfill metadata.
+
+### Testing & QA Strategy
+- Unit tests for mapping version loader, config service, and CLI backfill scheduler.
+- Integration tests performing mapping version upgrades and rollbacks; verify run traceability.
+- UI/UX tests for Config UI (form validation, audit logging visibility) and backfill screens.
+- Dry-run simulations for backfill to confirm no unintended core writes.
+
+### Metrics & Observability
+- Counters: `importer_mapping_version_total`, `importer_backfill_runs_total`, `importer_config_change_total`.
+- Audit log entries recording config changes (who/when/what) surfaced in admin UI.
+- Monitoring for backfill progress (rows processed, ETA) and error rates.
+- Structured logs linking mapping version to run IDs for downstream analytics.
+
+### Risks & Mitigations
+- **Mapping drift**: enforce review workflow with automated diff summaries and docs references.
+- **Config misuse**: implement RBAC gating and validation rules; add "preview impact" tooltips.
+- **Backfill overload**: include concurrency caps, throttle settings, and Ops notifications before large runs.
+- **Version rollback complexity**: store prior versions and provide CLI/UI rollback actions with warnings.
+
+### Support & Follow-up Work
+- Update mapping guide with versioning instructions and Config UI documentation.
+- Produce runbook for executing large backfills (pre-checks, monitoring, rollback).
+- Coordinate with Ops to schedule maintenance windows for heavy backfills.
+- Ensure anomaly detectors (Sprint 6) respect backfill context to avoid false alarms.
 
 ### IMP-70 — Versioned mappings _(8 pts)_
 **User story**: As a dev, I can evolve mappings without breaking history.  
 **Acceptance Criteria**
 - `mapping_version` stored on runs; UI shows current/prior; unmapped field warnings.
 **Dependencies**: IMP-42.
+**Implementation Notes (planned)**
++- Store mapping specs with version metadata (`version`, `checksum`, `released_at`, `notes`) in dedicated table and reference from runs.
++- CLI/CI tooling to validate mapping changes (lint, diff, test) before promotion.
++- Admin UI showing current/previous mapping versions with diff viewer and download links.
++- Provide migration path for existing installs (auto-register v1 mapping on upgrade).
++
++**Testing Expectations**
++- Unit: mapping persistence, version retrieval, diff generation utilities.
++- Integration: run imports across version upgrades ensuring run records capture correct mapping reference.
++- Regression: ensure `IMPORTER_SALESFORCE_MAPPING_PATH` override still works for custom deployments.
++- Security: verify only authorized roles can promote or rollback mappings.
 
 ### IMP-71 — Config UI & thresholds _(8 pts)_
 **User story**: As an admin, I can tune thresholds, rules, and schedules.  
 **Acceptance Criteria**
 - Edit dedupe thresholds, anomaly thresholds, cron schedule, rule modes (warn/enforce); audit config changes.
 **Dependencies**: IMP-60, IMP-61.
+**Implementation Notes (planned)**
++- Build configuration service storing importer settings (dedupe thresholds, anomaly thresholds, schedules, rule modes) with audit trail.
++- UI forms with live validation, preview of impacted metrics, and "draft vs applied" states.
++- Integrate with Celery beat/cron to update schedules dynamically without redeploy.
++- Record config changes in `change_log`/audit log for compliance reporting.
++
++**Testing Expectations**
++- Unit: config schema validation, RBAC enforcement, audit logging.
++- Integration: modify thresholds and confirm dedupe/anomaly pipelines pick up changes immediately.
++- UI: accessibility, error handling, diff preview for new vs current values.
++- Security: protect against CSRF/injection; ensure secrets (if any) masked.
 
 ### IMP-72 — Backfill UX & CLI _(5 pts)_
 **User story**: As an operator, I can backfill since a date, with dry-run.  
 **Acceptance Criteria**
 - `--since` param; run labeled "backfill"; concurrency caps; pausable.
 **Dependencies**: IMP-43.
+**Implementation Notes (planned)**
++- Extend CLI (`flask importer backfill --since <date>`) and Admin UI wizard guiding operators through dry-run, scope selection, concurrency limits.
++- Track backfill runs with labels (backfill, dry-run) and progress state (queued, running, paused, completed).
++- Provide pause/resume controls and checkpointing so long backfills can be safely interrupted.
++- Ensure backfills integrate with anomaly detectors (muting or adjusting thresholds) to avoid noise.
++
++**Testing Expectations**
++- Unit: CLI argument parsing, checkpoint persistence, resume logic.
++- Integration: run backfill scenarios (dry-run, full run) and validate no duplicate inserts thanks to idempotency.
++- Operational: stress test concurrency controls and pause/resume under load.
++- UX: confirm progress indicators and notifications update in real time.
 
 ### IMP-73 — Mapping diffs & suggestions _(5 pts)_
 **User story**: As a dev, I get suggestions when new SF fields appear.  
 **Acceptance Criteria**
 - Run summary lists unmapped fields with samples; exportable.
 **Dependencies**: IMP-70.
+**Implementation Notes (planned)**
++- After each run, analyze unmapped Salesforce fields and store samples; surface them in mapping UI with suggestions.
++- Provide "generate stub mapping entry" actions to accelerate adoption of new fields.
++- Export unmapped field report (CSV/JSON) for stakeholder review.
++- Integrate with docs to prompt updates to mapping guide when new fields accepted.
++
++**Testing Expectations**
++- Unit: unmapped field detection, suggestion generation, export formatting.
++- Integration: simulate schema drift (new fields) and verify UI/API surfaces suggestions.
++- Regression: ensure existing mapped fields not flagged due to case differences or aliases.
++- Analytics: confirm metrics count unmapped suggestions for prioritization dashboards.
 
 ---
 
 ## Sprint 8 — Events & Signups/Attendance
 **Epic**: EPIC-8  
+**Status**: 🗓️ Planned (post-Sprint 7)
 **Goal**: Bring pipeline to Events + Signups/Attendance with cross-entity DQ.
+
+### Sprint 8 Overview
+- Extend importer architecture beyond volunteers to cover Events, Shifts, and Signups/Attendance.
+- Enforce cross-entity data quality, ensuring references resolve and attendance metrics stay accurate.
+- Update dashboards and reconciliation logic to span multiple entity types.
+
+### Scope Highlights
+- New staging/clean schemas for events and signups, with canonical contracts defined.
+- Reference validation leveraging `external_id_map` and core foreign keys.
+- Idempotent upsert flows for events/attendance, including concurrency-safe hour calculations.
+- Cross-entity dashboards and health views aggregating pipeline performance.
+
+### Pre-Sprint Dependencies & Prep
+- Define canonical Event/Signup contracts (fields, required relationships, statuses) and document them.
+- Expand golden dataset with multi-entity scenarios (events with multiple shifts, signups referencing volunteers/events, invalid references).
+- Review Salesforce mapping requirements (Contacts → Events) and determine adapter changes (e.g., Campaigns, CampaignMembers).
+- Ensure backfill tooling (Sprint 7) supports multi-entity flows.
+
+### Testing & QA Strategy
+- Unit tests for new staging models, reference resolution helpers, and attendance calculations.
+- Integration tests covering ingest → DQ → upsert for events and signups (CSV + Salesforce adapters).
+- Cross-entity DQ tests ensuring invalid references quarantined with actionable errors.
+- End-to-end tests verifying dashboards display combined metrics and filters behave correctly.
+
+### Metrics & Observability
+- Counters: `importer_events_rows_total{action}`, `importer_signups_rows_total{action}`, reference failure metrics.
+- Dashboards showing event ingest throughput, signup attendance ratios, and reference violation trends.
+- Logs capturing event/attendance anomalies (hours mismatch, double-booked volunteers).
+- Reconciliation updates (Sprint 6) to cover new entity types.
+
+### Risks & Mitigations
+- **Schema complexity**: isolate per-entity staging tables and maintain contract docs to prevent confusion.
+- **Reference integrity**: enforce FK resolution before load; provide remediation flows for missing volunteers/events.
+- **Performance**: apply batching strategies to signups (high volume) and track memory usage.
+- **User adoption**: refresh training materials to cover new entity workflows and dashboards.
+
+### Support & Follow-up Work
+- Update contracts documentation (overview + mapping guide) to include events/signups models.
+- Provide onboarding materials for event coordinators using new dashboards.
+- Align analytics on KPI definitions (attendance rate, no-show rate) and ensure metrics pipeline consistent.
+- Prepare migration plan for existing event data (if any) to new importer pathways.
 
 ### IMP-80 — Staging + contracts for Events/Signups _(8 pts)_
 **User story**: As an operator, I can ingest events and signups via CSV/SF.  
 **Acceptance Criteria**
 - `staging_events`, `staging_signups` exist; contracts validate times & required fields.
 **Dependencies**: IMP-2, IMP-41.
+**Implementation Notes (planned)**
++- Create `staging_events`, `staging_signups` tables mirroring volunteer staging patterns (status, payload, normalized JSON, checksum).
++- Define canonical contracts for events (title, start/end, location) and signups (volunteer/event references, attendance, hours).
++- Update CSV adapter and Salesforce adapter to emit canonical payloads; include mapping YAMLs for new objects.
++- Document new contracts in `docs/data-integration-platform-overview.md` and mapping guides.
++
++**Testing Expectations**
++- Unit: schema migrations, contract validators, adapter payload normalization.
++- Integration: import golden dataset for events & signups ensuring staging rows created and normalized.
++- Regression: verify volunteer pipeline unaffected by new staging tables.
++- Docs: confirm contract documentation updated with field lists and examples.
 
 ### IMP-81 — Reference DQ & FK checks _(8 pts)_
 **User story**: As a steward, cross-entity references are validated.  
 **Acceptance Criteria**
 - FKs resolved via `external_id_map`/core keys; violations REF-401 with hints.
 **Dependencies**: IMP-80.
+**Implementation Notes (planned)**
++- Implement reference validators ensuring `signups` link to existing volunteers/events via `external_id_map` or core IDs.
++- Surfacing violations with codes (e.g., `REF_EVENT_MISSING`, `REF_VOLUNTEER_MISSING`) and remediation hints.
++- Provide remediation workflow to create missing references or adjust mapping before requeue.
++- Log reference resolution stats for monitoring (success vs fallback vs failure).
++
++**Testing Expectations**
++- Unit: reference lookup helpers, violation writers, remediation endpoints.
++- Integration: simulate missing volunteers/events and ensure quarantine flow works end-to-end.
++- Regression: confirm reference DQ does not block valid imports or introduce race conditions.
++- Observability: verify metrics/alerts fire when reference violation rate spikes.
 
 ### IMP-82 — Upsert for events & attendance _(8 pts)_
 **User story**: As an operator, events/signups upsert idempotently.  
 **Acceptance Criteria**
 - `(external_system, external_id)` maintained; hours & attendance flags correct.
 **Dependencies**: IMP-81, IMP-30.
+**Implementation Notes (planned)**
++- Reuse idempotent upsert helpers with `(external_system, external_id)` keys for events and signups.
++- Handle attendance updates: update hours, status, and handle reinstatements/cancellations gracefully.
++- Capture change logs, survivorship decisions (e.g., manual overrides vs import updates) for attendance records.
++- Integrate with dedupe/external ID map to avoid duplicate volunteer assignments.
++
++**Testing Expectations**
++- Unit: upsert branching (create/update/unchanged) for events and signups.
++- Integration: re-import same data to confirm idempotency; test updates to attendance/hours.
++- Performance: evaluate batch processing for high-volume attendance data (thousands per run).
++- Monitoring: ensure counts appear in reconciliation/trend dashboards.
 
 ### IMP-83 — Cross-entity dashboards _(5 pts)_
 **User story**: As a PM, I can view pipeline health across entities.  
 **Acceptance Criteria**
 - Filters by entity; combined metrics; links to entity-specific queues.
 **Dependencies**: IMP-82.
+**Implementation Notes (planned)**
++- Extend Runs dashboard and Source Health views with entity filters/tabs summarizing volunteers, events, signups.
++- Provide combined metrics (e.g., volunteer attendance rate, event coverage) with drill-downs to relevant queues.
++- Support exports for ops reporting and embed charts into stakeholder dashboards.
++- Align with Sprint 6 trend view components for consistent look and feel.
++
++**Testing Expectations**
++- UI: verify filters, tabs, and combined charts render across devices.
++- Backend: ensure aggregation endpoints support multi-entity queries efficiently.
++- Accessibility: confirm tables/charts accessible and properly labeled.
++- Ops validation: gather feedback from PM/Ops on dashboard usefulness before GA.
 
 ---
 
 ## Sprint 9 — Security, Audit, Packaging
 **Epic**: EPIC-9  
+**Status**: 🗓️ Planned (post-Sprint 8)
 **Goal**: Harden for PII; clear roles; audit trails; packaging & OSS readiness.
+
+### Sprint 9 Overview
+- Enforce role-based access and sensitive-field protections to meet privacy and compliance obligations.
+- Close audit gaps by ensuring every admin/steward action is captured and exportable.
+- Implement data retention and hygiene policies, including safe export handling.
+- Package importer features for distribution (optional dependencies, quickstart docs) to support OSS/community adoption.
+
+### Scope Highlights
+- RBAC enforcement across importer UI/API with sensitive-field masking.
+- Comprehensive audit logging pipeline with export tooling.
+- Retention jobs and CSV injection protections for quarantines/exports.
+- Packaging improvements: optional dependency groups, installer docs, samples.
+
+### Pre-Sprint Dependencies & Prep
+- Align with legal/compliance on data retention windows, masking requirements, and audit export formats.
+- Review existing audit tables/logs for gaps identified in Sprints 1–8 (merge undo, config changes, backfills).
+- Coordinate with DevRel/Docs on packaging quickstarts and OSS positioning.
+- Ensure security review of RBAC design, including threat modeling.
+
+### Testing & QA Strategy
+- Unit tests for RBAC policy enforcement, audit log writers, retention jobs.
+- Security tests (manual/automated) for privilege escalation, sensitive data exposure, export sanitization.
+- Integration tests for packaging flow (pip install extras, optional adapter enablement) and smoke tests for new install path.
+- Compliance validation: generate sample audit exports and retention reports for review.
+
+### Metrics & Observability
+- Counters: `importer_audit_events_total{action}`, `importer_retention_jobs_total`, `importer_sensitive_field_access_total`.
+- Logs capturing RBAC denials and retention job outcomes.
+- Alerting on retention job failures or audit export errors.
+- OSS download metrics or telemetry (if applicable) to monitor adoption.
+
+### Risks & Mitigations
+- **RBAC regressions**: add automated policy tests and maintain matrix in docs.
+- **Audit gaps**: maintain checklist of importer actions; require sign-off before release.
+- **Retention job incidents**: run jobs in dry-run mode first; include safety checks/time limits.
+- **Packaging drift**: add CI job to install extras and run smoke tests; document support boundaries.
+
+### Support & Follow-up Work
+- Produce security runbooks (incident response, breach notification contacts, access reviews).
+- Train support staff on RBAC roles and sensitive-field escalation paths.
+- Publish packaging quickstart (README, screenshots, sample data) and coordinate with marketing.
+- Plan ongoing compliance reviews (annual) and map to importer features.
 
 ### IMP-90 — RBAC & sensitive-field gating _(8 pts)_
 **User story**: As an admin, roles control visibility and actions (DOB, merges).  
 **Acceptance Criteria**
 - Roles: Admin, Data Steward, Viewer; masks for sensitive fields; merge/undo require Admin.
 **Dependencies**: IMP-51.
-
-### IMP-91 — Audit completeness _(5 pts)_
-**User story**: As compliance, every admin action is logged.  
-**Acceptance Criteria**
-- Audits for edits, suppressions, merges, config changes; exportable trail.
-**Dependencies**: IMP-22, IMP-51, IMP-71.
-
-### IMP-92 — Retention & PII hygiene _(5 pts)_
-**User story**: As a steward, staging/quarantine have retention (e.g., 90 days) and safe exports.  
-**Acceptance Criteria**
-- TTL jobs purge/anonymize; CSV export neutralizes formula injection.
-**Dependencies**: IMP-21.
-
-### IMP-93 — Packaging & adapter extras _(5 pts)_
-**User story**: As a dev, I can install with or without Salesforce.  
-**Acceptance Criteria**
-- Optional deps groups `[importer]`, `[salesforce]`; README quickstart; sample data & screenshots.
-**Dependencies**: IMP-40.
+**Implementation Notes (planned)**
++- Define role matrix (Admin, Data Steward, Viewer) with granular permissions (view sensitive fields, execute merges, change config).
++- Implement policy enforcement at API/service layers; mask sensitive attributes in responses for non-privileged users.
++- Add security logging for access to sensitive data and privileged actions.
++- Update UI to respect masking (e.g., reveal-on-demand with audit log entry).
++
++**Testing Expectations**
++- Unit: policy checks, masking helpers, RBAC decorators.
++- Integration: role-based scenarios ensuring unauthorized actions blocked and logged.
++- Security: penetration tests for privilege escalation and data leakage.
++- UX: confirm role-based UI adjustments (disabled buttons, tooltips) behave correctly.
+ 
+ ### IMP-91 — Audit completeness _(5 pts)_
+ **User story**: As compliance, every admin action is logged.  
+@@
+-**Dependencies**: IMP-22, IMP-51, IMP-71.
++**Dependencies**: IMP-22, IMP-51, IMP-71.
++**Implementation Notes (planned)**
++- Expand audit logger to cover merges/undo, remediation edits, config changes, backfill actions, alert acknowledgements.
++- Store structured audit events with actor, action, entity, before/after diffs, context metadata.
++- Provide export APIs (CSV/JSON) with filters (date, user, action) and integrity checks (hash/signature optional).
++- Integrate with retention/archival workflows (e.g., S3 storage) per compliance timelines.
++
++**Testing Expectations**
++- Unit: audit event creation, serialization, export formatting.
++- Integration: run representative workflows ensuring audit entries produced and retrievable.
++- Compliance: validate sample exports with governance stakeholders.
++- Performance: ensure audit writes don't impact request latency; consider async batching if needed.
+ 
+ ### IMP-92 — Retention & PII hygiene _(5 pts)_
+ **User story**: As a steward, staging/quarantine have retention (e.g., 90 days) and safe exports.  
+@@
+-**Dependencies**: IMP-21.
++**Dependencies**: IMP-21.
++**Implementation Notes (planned)**
++- Implement retention jobs (scheduled) to purge or anonymize staging/quarantine data past configured window.
++- Provide dry-run mode for retention jobs with reporting before destructive actions.
++- Harden CSV exports against injection (escape special characters, provide sanitized preview) and add encrypted export option if needed.
++- Update documentation/runbooks with retention schedules, manual override process, and compliance sign-offs.
++
++**Testing Expectations**
++- Unit: retention eligibility logic, anonymization helpers, export sanitization functions.
++- Integration: execute retention job in sandbox verifying records purged/anonymized correctly, backups taken when required.
++- Security: ensure exported files sanitized and access-controlled.
++- Monitoring: track retention job metrics and alerts on failures.
+ 
+ ### IMP-93 — Packaging & adapter extras _(5 pts)_
+ **User story**: As a dev, I can install with or without Salesforce.  
+@@
+-**Dependencies**: IMP-40.
++**Dependencies**: IMP-40.
++**Implementation Notes (planned)**
++- Maintain optional dependency groups (`[importer]`, `[salesforce]`, potential future `[events]`) with hashed lockfiles.
++- Publish installation guides (pip, Docker, Heroku) with sample configs and screenshots.
++- Add smoke test suite executed in CI for each extras bundle to ensure dependencies resolve and basic commands run.
++- Provide OSS packaging artifacts (README badges, contribution guide, code owners) and ensure security posture documented.
++
++**Testing Expectations**
++- CI: install each extras group and execute minimal smoke tests (CLI run, mapping show, worker ping).
++- Documentation: verify quickstart steps accurate via fresh environment walkthrough.
++- Packaging: ensure optional adapters stay optional—core app runs without Salesforce deps.
++- Compliance: confirm license notices and third-party dependency tracking up to date.
 
 ---

@@ -1,0 +1,105 @@
+# Importer Merge Workflow Runbook (Sprint 5)
+
+Audience: Data Stewards and Admins who will review fuzzy dedupe candidates and manage merge decisions.
+
+## 1. Access & Permissions
+
+- **Roles**
+  - **Admin**: Full access (review, merge, undo, adjust thresholds).
+  - **Data Steward**: Review queue access, can merge/reject/defer; may undo merges they performed (pending final policy decision).
+  - **Viewer**: Read-only access to review queue, cannot take action.
+- Verify your role under `Admin ▸ Users ▸ Roles` before Sprint 5 launches.
+
+## 2. Daily Checklist
+
+1. Open `Admin ▸ Importer ▸ Duplicate Review`.
+2. Filter by `Status = Needs Review` (queue badges show total + aging).
+3. Work items from oldest to newest, focusing on SLA agreed with Ops (default: 1 business day).
+4. Monitor “Auto merges today” and “Undo rate” cards for anomalies.
+
+## 3. Reviewing a Candidate
+
+Each candidate panel shows:
+
+- **Score & band**: numeric score (0–1). Badge indicates `Auto`, `Review`, or `New`. Scores ≥0.95 auto-merged; 0.80–0.95 require review.
+- **Top signals**: key features contributing to the score (name similarity, DOB match, address distance, alternate email/phone matches).
+- **Source payloads**:
+  - Candidate (staged record) with normalized fields.
+  - Primary contact (core record) with last updated timestamp and manual edits flagged.
+- **Survivorship preview**: field-level changes that would occur if merged (values, tiers, manual override indicator).
+
+### Decision Steps
+
+1. **Confirm identity**
+   - Compare name variations (nickname vs legal name).
+   - Check DOB, address, employer/school, alternate emails/phones.
+   - Review audit trail for manual edits (ensures we do not undo steward overrides unintentionally).
+2. **Choose an action**
+   - **Merge**: Confident it is the same person. Optionally adjust winners per field if manual data should stay.
+   - **Not a duplicate**: Confident they are different people (provide reason for audit log).
+   - **Defer**: Unsure; leave comment with open question. Candidate remains in queue and surfaces in backlog reporting.
+
+## 4. Merge Execution
+
+1. Click **Review** on a candidate.
+2. Inspect “Survivorship outcome” table; edit field winners if necessary.
+3. Provide optional steward note (recommended for tricky cases).
+4. Click **Merge**.
+5. Verify success toast and that the candidate disappears from the queue.
+
+### Post-merge expectations
+
+- `MergeLog` entry created with snapshots + dedupe metadata.
+- `ChangeLogEntry` entries emitted for each field change (visible under volunteer detail ▸ Audit).
+- `importer_dedupe_manual_total{match_type}` counter increments.
+- Manual merge appears in run dashboard with steward attribution.
+
+## 5. Undoing a Merge
+
+Use undo when a merge was incorrect or premature.
+
+1. Navigate to `Admin ▸ Importer ▸ Merge History` (or volunteer detail ▸ Merge history).
+2. Locate the merge entry (filter by steward, date, or score).
+3. Click **Undo merge**.
+4. Review the undo payload summary (contacts, field changes, ID map entries) and confirm.
+5. Verify the queue shows separate volunteers again; `MergeLog.undo_payload` records the reversal.
+
+**Important**: Undo availability may be limited to Admins (confirm final policy). Always document the reason in the prompted text box for compliance.
+
+## 6. Handling Auto-merges
+
+- Auto-merges (deterministic + fuzzy high confidence) appear in Merge History with `decision_type = deterministic_auto` or `fuzzy_auto`.
+- They do **not** require steward action but should be spot-checked daily:
+  - Review the Auto merges table for outliers (unexpected names, addresses).
+  - Undo any incorrect auto-merge and flag the record to Ops for threshold review.
+- Monitor **Undo rate**; escalate to Engineering if >5% within 7-day window.
+
+## 7. Escalation & Exceptions
+
+| Scenario | Action |
+|----------|--------|
+| Household/shared contact info | Defer and tag Ops lead; consider creating household link instead of merging. |
+| Conflicting compliance fields (e.g., consent) | Defer and escalate to Compliance contact. |
+| System outages preventing Merge UI access | Notify Engineering; record duplicates manually and resume once service restored. |
+
+## 8. Metrics to Watch
+
+- `Auto merges today` – should trend upward as fuzzy dedupe matures.
+- `Manual review queue` – keep backlog < 50 items; alert triggers above this threshold.
+- `Undo rate` – maintain <5% of auto merges.
+- `Average resolution time` – target < 24 hours for manual reviews.
+
+## 9. Reference Materials
+
+- [Sprint 5 Survivorship & Threshold Decisions](./sprint5-survivorship-decisions.md)
+- [Golden Dataset Fuzzy Scenarios](../ops/testdata/importer_golden_dataset_v0/README.md)
+- Importer Tech Doc — Sprint 5 section for implementation roadmap.
+
+## 10. Open Questions
+
+Record the final policy decisions here once approved:
+
+- **Manual review SLA**: __________
+- **Undo permissions (roles)**: __________
+- **Notification cadence**: __________
+- **Escalation contacts**: __________

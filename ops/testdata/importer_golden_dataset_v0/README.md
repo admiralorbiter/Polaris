@@ -13,6 +13,8 @@ This directory contains sample inputs and expected outcomes for the volunteer im
 - `volunteers_idempotent_replay.csv` — exact replay of the happy-path dataset to validate idempotent dry-run/live workflows.
 - `volunteers_changed_payload.csv` — same `external_id`s as the happy-path dataset with updated contact info to assert update-vs-insert handling.
 - `volunteers_email_vs_phone.csv` — conflicting records that collide on email-only and phone-only signals to exercise deterministic dedupe heuristics.
+- `volunteers_fuzzy_seed.csv` — seeds high-fidelity volunteer profiles (DOB, address, employer) used as the baseline for fuzzy dedupe scenarios in Sprint 5.
+- `volunteers_fuzzy_candidates.csv` — near-duplicate volunteers intentionally crafted to land in different fuzzy dedupe score bands (auto-merge, manual review, new record).
 
 Each CSV includes a header row. Use these files with `flask importer run --source csv --file <path>` (or future automation) to exercise the pipeline.
 
@@ -29,6 +31,8 @@ Each CSV includes a header row. Use these files with `flask importer run --sourc
 | `volunteers_idempotent_replay.csv` | 3 | Run immediately after `volunteers_valid.csv`; expect zero new `core.rows_created`, identical `rows_updated`, and matching `external_id_map` entries aside from run timestamps. |
 | `volunteers_changed_payload.csv` | 3 | Run after `volunteers_valid.csv`; expect `core.rows_updated=3`, `rows_created=0`, and survivorship counters reflecting field-level updates (phone/email) without inserting new volunteers. |
 | `volunteers_email_vs_phone.csv` | 2 | Run after seeding happy-path data; expect auto-dedupe merges when either email or phone matches (`core.rows_deduped_auto=2`) and stable `external_id_map` entries documenting the merge source. |
+| `volunteers_fuzzy_seed.csv` | 3 | Seeds full-profile volunteers (DOB, address, employer) that act as the “ground truth” for fuzzy dedupe scoring. Run once before any fuzzy candidate scenarios so reference data exists in staging/core. |
+| `volunteers_fuzzy_candidates.csv` | 3 | Run after `volunteers_fuzzy_seed.csv` (and deterministic seeds). Expected outcomes **once Sprint 5 is delivered**:<br/>• Row 1 (`fuzzy-candidate-001`) should land in the high-confidence band (score ≥0.95) and auto-merge when fuzzy dedupe is enabled.<br/>• Row 2 (`fuzzy-candidate-002`) should fall into the manual review band (0.80–0.95) and surface in the Merge UI queue.<br/>• Row 3 (`fuzzy-candidate-003`) should remain a new volunteer (<0.80) and insert into core without creating a suggestion. |
 
 Document additional nuances (DQ messages, counts, etc.) as the importer matures. For IMP-11, expect the invalid CSV to yield the following per-rule counts when run via CLI or worker:
 
@@ -66,5 +70,15 @@ The emitted JSON summary now includes `"core": {"rows_created": 0, "rows_updated
 4. **Signal-specific dedupe**: Replay `volunteers_email_vs_phone.csv`. Verify each row auto-merges into the existing core volunteer via email or phone match (`core.rows_deduped_auto=2`) while preserving the latest contact info per precedence.
 5. **Partial/out-of-order simulations**: Re-run a subset of rows (e.g., only `vol-001` and `vol-phone-002`) to ensure the importer treats them idempotently—repeat runs should leave `rows_created` unchanged and only increment `rows_updated` when payloads differ.
 6. **Survivorship pair**: When validating steward overrides, execute `volunteers_survivorship_seed.csv` followed by `volunteers_survivorship_updates.csv`, updating expectations if precedence logic changes.
+
+### Sprint 5 Fuzzy Dedupe Playbook (prep)
+
+1. **Seed fuzzy baseline**: Run `volunteers_fuzzy_seed.csv` to add enriched volunteers (DOB, address, employer) that future fuzzy matches will reference. Confirm staging rows persist the additional attributes.
+2. **Execute fuzzy scenarios**: After the baseline run, process `volunteers_fuzzy_candidates.csv`.
+   - `fuzzy-candidate-001`: Expect a high-confidence score driven by matching DOB, address, and alternate phone/email aliases (auto-merge once thresholds configured ≥0.95).
+   - `fuzzy-candidate-002`: Expect a borderline score (nickname + nearby address). This should enqueue to the Merge UI review band so stewards can adjudicate.
+   - `fuzzy-candidate-003`: Expect a truly new volunteer—the differing DOB, city, and phone should drive the score below the review threshold.
+3. **Document scores**: Once Sprint 5 scoring is implemented, record the observed scores and decisions here so QA can regress future changes.
+4. **Automated regression**: Incorporate both CSVs into the fuzzy dedupe regression suite (planned Sprint 5) so candidate generation + merge outcomes stay stable over time.
 
 Re-run these scenarios whenever importer survivorship or dedupe logic evolves, and refresh the expected counters above so QA can quickly validate regression outcomes.
