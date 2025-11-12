@@ -492,6 +492,11 @@ class MergeLog(BaseModel):
     snapshot_before: Mapped[dict | None] = mapped_column(db.JSON, nullable=True)
     snapshot_after: Mapped[dict | None] = mapped_column(db.JSON, nullable=True)
     undo_payload: Mapped[dict | None] = mapped_column(db.JSON, nullable=True)
+    metadata_json: Mapped[dict | None] = mapped_column(
+        db.JSON,
+        nullable=True,
+        comment="Merge metadata (score, match_type, features_json, survivorship_decisions, field_overrides).",
+    )
 
     import_run = relationship("ImportRun", back_populates="merge_events")
     primary_contact = relationship("Contact", foreign_keys=[primary_contact_id])

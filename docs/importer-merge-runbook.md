@@ -99,7 +99,16 @@ Use undo when a merge was incorrect or premature.
 
 Record the final policy decisions here once approved:
 
-- **Manual review SLA**: __________
-- **Undo permissions (roles)**: __________
-- **Notification cadence**: __________
-- **Escalation contacts**: __________
+- **Manual review SLA**: ⚠️ **To be determined** (default: 1 business day recommended)
+- **Undo permissions (roles)**: ⚠️ **To be determined** (pending final policy decision; currently Admins can undo)
+- **Notification cadence**: ⚠️ **Not yet implemented** (TODO: Sprint 6 - auto-merge notifications)
+- **Escalation contacts**: ⚠️ **To be determined** (pending escalation policy)
+
+**Sprint 5 Completion Status**: ✅ Merge workflow implemented and documented; policy decisions pending.
+
+**Implementation Notes**:
+- ✅ Merge UI available at `Admin ▸ Importer ▸ Duplicate Review`
+- ✅ Undo functionality available via `importer_dedupe_undo_merge` endpoint
+- ✅ Queue statistics available via `importer_dedupe_stats` endpoint
+- ⚠️ Auto-merge notifications not yet implemented (TODO: Sprint 6)
+- ⚠️ Export functionality not yet implemented (TODO: Sprint 6)

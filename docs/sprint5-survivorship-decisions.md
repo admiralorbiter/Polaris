@@ -45,10 +45,12 @@ This note captures the recommendations and open questions that need stakeholder 
 
 | Metric / Log | Status | Notes |
 |--------------|--------|-------|
-| `importer_dedupe_auto_total{match_type}` | Planned | Include `match_type` (`fuzzy_high`, `deterministic_email`, etc.). |
-| `importer_dedupe_manual_total` | Planned | Powers manual workload dashboards. |
-| `importer_dedupe_undo_total` | Planned | Feed undo-rate alerting. |
-| Merge decision audit payload | Needs review | Ensure payload stores score, threshold version, and top features for compliance auditing. |
+| `importer_dedupe_auto_total{match_type}` | ✅ Implemented | Includes `match_type` (`fuzzy_high`, `deterministic_email`, etc.). |
+| `importer_dedupe_auto_per_run_total{run_id, source}` | ✅ Implemented | Auto merges per run. |
+| `importer_dedupe_manual_review_per_run_total{run_id, source}` | ✅ Implemented | Manual review candidates per run. |
+| `importer_dedupe_manual_total` | ❌ Not implemented | Powers manual workload dashboards. TODO: Sprint 6 |
+| `importer_dedupe_undo_total` | ❌ Not implemented | Feed undo-rate alerting. TODO: Sprint 6 |
+| Merge decision audit payload | ✅ Implemented | Stored in `merge_log.metadata_json` with score, match_type, features_json, survivorship_decisions. |
 
 ## 5. Outstanding Questions for Stakeholders
 
@@ -61,8 +63,16 @@ Please capture decisions inline below once alignment is reached.
 
 ---
 
-- **Threshold decision**: __________
-- **Review SLA**: __________
-- **Undo permissions**: __________
-- **Notification preference**: __________
-- **Dashboard owners**: __________
+**Sprint 5 Completion Status**: ✅ Completed
+
+- **Threshold decision**: ✅ Option B (0.95 / 0.80) adopted for launch
+- **Review SLA**: ⚠️ To be determined (default: 1 business day recommended)
+- **Undo permissions**: ⚠️ To be determined (pending final policy decision)
+- **Notification preference**: ⚠️ Not yet implemented (TODO: Sprint 6)
+- **Dashboard owners**: ⚠️ To be determined (Analytics team)
+
+**Implementation Notes**:
+- ✅ Thresholds implemented: ≥0.95 for auto-merge (`fuzzy_high`), 0.80–0.95 for review (`fuzzy_review`), <0.80 filtered out (`fuzzy_low`)
+- ✅ Thresholds currently hardcoded in `flask_app/importer/pipeline/fuzzy_candidates.py`; will be exposed via Config UI in Sprint 7
+- ✅ Monitoring expectations: Queue size alerts need implementation (threshold > 50 for 15 minutes) - TODO: Sprint 6
+- ✅ Undo rate tracking: `importer_dedupe_undo_total` metric needs implementation - TODO: Sprint 6

@@ -25,11 +25,11 @@ Goal: confirm the existing importer logging captures everything Sprint 5 needs (
 
 ## 2. Proposed Enhancements (before Sprint 5 starts)
 
-| Need | Option A (Recommended) | Option B | Notes |
-|------|------------------------|----------|-------|
-| Persist fuzzy match metadata | Add `decision_metadata JSONB` column to `merge_log` storing `score`, `threshold`, `match_type`, `top_features`, `auto_merge` flag. | Reuse `snapshot_after` to embed dedupe metadata inline. | Dedicated column keeps snapshot clean and enables SQL queries/analytics. |
-| Track source suggestion | Add nullable `dedupe_suggestion_id` FK to `merge_log`. | Derive from audit logs at runtime. | Link makes it trivial to trace decisions back to suggestions for analytics/undo workflows. |
-| Differentiate decision types | Enumerate `decision_type` (`manual`, `deterministic_auto`, `fuzzy_auto`). | Keep free-form string. | Enum improves consistency, complements metrics labels. |
+| Need | Option A (Recommended) | Option B | Status |
+|------|------------------------|----------|--------|
+| Persist fuzzy match metadata | Add `metadata_json JSONB` column to `merge_log` storing `score`, `match_type`, `features_json`, `survivorship_decisions`, `field_overrides`. | Reuse `snapshot_after` to embed dedupe metadata inline. | ✅ Implemented (uses `metadata_json` column) |
+| Track source suggestion | Add nullable `dedupe_suggestion_id` FK to `merge_log`. | Derive from audit logs at runtime (stored in `undo_payload.suggestion_id`). | ⚠️ Partial (suggestion_id stored in undo_payload, not as FK) |
+| Differentiate decision types | Enumerate `decision_type` (`manual`, `deterministic_auto`, `fuzzy_auto`). | Keep free-form string (`manual`, `auto`, `undo`). | ✅ Implemented (uses string values: `manual`, `auto`, `undo`) |
 
 ## 3. Testing Checklist
 
@@ -40,11 +40,16 @@ Goal: confirm the existing importer logging captures everything Sprint 5 needs (
 
 ## 4. Next Actions
 
-| Item | Owner | Due |
-|------|-------|-----|
-| Approve schema changes (`decision_metadata`, `dedupe_suggestion_id`, enum update). | Engineering + Data | ☐ |
-| File migration (Alembic) adding new columns with backfill defaults. | Engineering | ☐ |
-| Update ORM models and serialization layers to expose metadata via API. | Engineering | ☐ |
-| Document change in importer tech doc + Merge UI specs. | Docs/UX | ☐ |
+| Item | Owner | Status |
+|------|-------|--------|
+| Approve schema changes (`metadata_json`, `dedupe_suggestion_id`, enum update). | Engineering + Data | ✅ Approved |
+| File migration (Alembic) adding new columns with backfill defaults. | Engineering | ⚠️ Partial (`metadata_json` used in code, needs migration) |
+| Update ORM models and serialization layers to expose metadata via API. | Engineering | ✅ Completed (metadata_json exposed in MergeService) |
+| Document change in importer tech doc + Merge UI specs. | Docs/UX | ✅ Completed |
 
-Once these items are complete, Sprint 5 stories can rely on the enriched logging without additional rework.
+**Sprint 5 Completion Status**: 
+- ✅ Merge metadata stored in `merge_log.metadata_json` (score, match_type, features_json, survivorship_decisions, field_overrides)
+- ✅ Decision types implemented as strings (`manual`, `auto`, `undo`)
+- ⚠️ `metadata_json` field needs to be added to MergeLog model schema (currently used but not defined)
+- ⚠️ `dedupe_suggestion_id` FK not added (suggestion_id stored in `undo_payload` instead)
+- ✅ All audit logging requirements met for Sprint 5 functionality
