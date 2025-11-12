@@ -21,10 +21,76 @@ This guide explains how Polaris maps Salesforce data into the importer pipeline 
 
 ### Data Flow
 
-1. **Extract**: Salesforce extractor builds SOQL (Bulk API 2.0) with watermark filtering (`SystemModstamp`) and volunteer filtering (`Contact_Type__c`).
+The complete pipeline follows an **E-L-T-L** (Extract → Load → Transform → Load) pattern:
+
+1. **Extract**: Salesforce extractor builds SOQL (Bulk API 2.0) with watermark filtering (`SystemModstamp`) and volunteer filtering (`Contact_Type__c`). Raw records are written to `staging_volunteers` with `payload_json` containing the original Salesforce data.
 2. **Transform**: Transformer applies YAML specification, creating canonical payloads (`normalized_json`) and collecting unmapped fields/errors. Records without email/phone are flagged with `metadata.missing_contact_info = True`.
-3. **DQ**: Minimal rules (`VOL_EMAIL_FORMAT`, `VOL_PHONE_E164`) run against canonical payloads. Missing contact info creates metadata flags by default; optional DQ warnings can be enabled via `IMPORTER_WARN_ON_MISSING_CONTACT`.
-4. **Clean/Load**: Valid rows promote into `clean_volunteers`, then `SalesforceContactLoader` performs idempotent upsert with survivorship.
+3. **DQ (Data Quality)**: Minimal rules (`VOL_EMAIL_FORMAT`, `VOL_PHONE_E164`) run against canonical payloads. Missing contact info creates metadata flags by default; optional DQ warnings can be enabled via `IMPORTER_WARN_ON_MISSING_CONTACT`. Valid rows are promoted to `clean_volunteers`.
+4. **Load**: `SalesforceContactLoader` performs idempotent upsert with survivorship, writing to core `volunteers` and `contacts` tables. Uses `ExternalIdMap` for tracking and watermark advancement.
+
+### Complete Pipeline Stages
+
+For a comprehensive understanding of how to build new mappings, here's the full pipeline breakdown:
+
+#### Stage 1: Extract (Adapter Layer)
+- **File**: `flask_app/importer/adapters/salesforce/extractor.py`
+- **Purpose**: Query external system and stream raw records
+- **Output**: Raw payloads written to `staging_*` tables
+- **Key Components**:
+  - SOQL query builder (`build_contacts_soql()`)
+  - Bulk API 2.0 job execution
+  - Watermark-based incremental filtering
+  - Field selection (must include all fields referenced in mapping)
+
+#### Stage 2: Stage (Staging Layer)
+- **File**: `flask_app/importer/pipeline/salesforce.py`
+- **Purpose**: Write raw records to staging tables for audit/replay
+- **Output**: `StagingVolunteer` records with `payload_json` and `normalized_json`
+- **Key Components**:
+  - Mapping spec loading (`get_active_salesforce_mapping()`)
+  - Transformer application (`SalesforceMappingTransformer.transform()`)
+  - Batch commits for performance
+  - Metadata flagging (e.g., `missing_contact_info`)
+
+#### Stage 3: Transform (Mapping Layer)
+- **File**: `flask_app/importer/mapping/__init__.py`
+- **Purpose**: Convert source-specific data to canonical format
+- **Input**: Raw Salesforce payload from `payload_json`
+- **Output**: Canonical dictionary in `normalized_json`
+- **Key Components**:
+  - YAML mapping spec parsing
+  - Field mapping with defaults and transforms
+  - Nested structure creation
+  - Error collection for missing required fields
+
+#### Stage 4: DQ (Data Quality Layer)
+- **File**: `flask_app/importer/pipeline/dq.py`
+- **Purpose**: Validate canonical payloads against business rules
+- **Output**: Valid rows → `clean_volunteers`, invalid rows → quarantine
+- **Key Components**:
+  - Rule evaluation (`EmailOrPhoneRule`, `EmailFormatRule`, etc.)
+  - Severity levels (ERROR vs WARNING)
+  - Quarantine vs logging decisions
+
+#### Stage 5: Clean (Clean Layer)
+- **File**: `flask_app/importer/pipeline/clean.py`
+- **Purpose**: Promote validated rows to clean tables
+- **Output**: `CleanVolunteer` records ready for loading
+- **Key Components**:
+  - DQ validation pass
+  - Checksum computation for change detection
+  - Load action assignment (`inserted`, `updated`, `unchanged`)
+
+#### Stage 6: Load (Core Layer)
+- **File**: `flask_app/importer/pipeline/salesforce_loader.py`
+- **Purpose**: Idempotent upsert into core domain tables
+- **Output**: Core `volunteer` and `contact` records
+- **Key Components**:
+  - `ExternalIdMap` lookup for existing records
+  - Create vs update decision
+  - Survivorship policy application
+  - Watermark advancement
+  - Contact preference application (bypasses survivorship)
 
 ## 2. Mapping File Structure Reference
 
@@ -87,18 +153,110 @@ Each `fields` entry defines how to populate a canonical field:
 
 ## 3. Vertical Scaling: Adding Fields & Transforms
 
-### 3.1 Adding a New Field
+### 3.1 Adding a New Field: Complete Workflow
 
-1. **Locate mapping**: open `config/mappings/salesforce_contact_v1.yaml` (or relevant file configured via `IMPORTER_SALESFORCE_MAPPING_PATH`).
-2. **Add field entry**:
-   ```yaml
-   - source: Custom_Field__c
-     target: engagement.last_touchpoint
-   ```
-3. **Optional**: specify `required`, `default`, or `transform` as needed.
-4. **Update tests**: extend fixtures or unit tests in `tests/test_salesforce_mapping_transformer.py` if coverage needed.
-5. **Dry-run**: execute `flask importer run-salesforce --dry-run` with sample data to verify mapping.
-6. **Monitor**: validate run metrics for unmapped fields or transform errors.
+When adding a new field to the pipeline, you must touch multiple stages. Here's the complete checklist:
+
+#### Step 1: Add Field to Extractor (Extract Stage)
+**File**: `flask_app/importer/adapters/salesforce/extractor.py`
+
+Add the Salesforce field to the SOQL query:
+```python
+# In DEFAULT_CONTACT_FIELDS or build_contacts_soql()
+"Custom_Field__c",  # Add to field list
+```
+
+**Why**: The extractor must fetch the field from Salesforce before it can be mapped.
+
+#### Step 2: Add Mapping Entry (Transform Stage)
+**File**: `config/mappings/salesforce_contact_v1.yaml`
+
+Add the field mapping:
+```yaml
+- source: Custom_Field__c
+  target: engagement.last_touchpoint
+  # Optional:
+  # required: false
+  # default: null
+  # transform: parse_datetime
+```
+
+**Why**: The mapping spec defines how source fields become canonical fields.
+
+#### Step 3: Apply Field in Loader (Load Stage)
+**File**: `flask_app/importer/pipeline/salesforce_loader.py`
+
+If the field needs special handling (beyond default survivorship), update `_handle_create()` and `_handle_update()`:
+
+```python
+# In _handle_create() or _handle_update()
+if "engagement" in payload:
+    engagement = payload.get("engagement", {})
+    if "last_touchpoint" in engagement:
+        volunteer.last_touchpoint = engagement["last_touchpoint"]
+```
+
+**Why**: Some fields need custom logic (e.g., contact preferences bypass survivorship, dates need parsing, etc.).
+
+#### Step 4: Update Core Model (If New Column Needed)
+**File**: `flask_app/models/contact/base.py` or `flask_app/models/volunteer.py`
+
+If the field doesn't exist in the core schema:
+```python
+# Add column to model
+last_touchpoint = db.Column(db.DateTime, nullable=True)
+```
+
+**Why**: The core model must have a place to store the data.
+
+#### Step 5: Test & Validate
+1. **Dry-run**: `flask importer run-salesforce --dry-run`
+2. **Check staging**: Verify `normalized_json` contains the new field
+3. **Check clean**: Verify `clean_volunteers.payload_json` has the field
+4. **Check core**: Verify the field appears in the final `volunteer` record
+5. **Monitor metrics**: Check for unmapped fields or transform errors
+
+#### Quick Reference: Field Addition Checklist
+
+- [ ] Field added to extractor SOQL query
+- [ ] Field mapped in YAML mapping spec
+- [ ] Field applied in loader (if special handling needed)
+- [ ] Core model updated (if new column needed)
+- [ ] Tests updated (if applicable)
+- [ ] Dry-run executed and verified
+- [ ] Production import tested
+
+### 3.1.1 Common Field Patterns
+
+**Boolean with Default**:
+```yaml
+- source: DoNotCall
+  target: contact_preferences.do_not_call
+  default: false  # Ensures field is always present, even if Salesforce returns None
+```
+
+**Nested Structure**:
+```yaml
+- source: Email
+  target: email.primary
+- source: HomePhone
+  target: phone.home
+```
+
+**Date/Datetime**:
+```yaml
+- source: LastModifiedDate
+  target: metadata.last_modified
+  transform: parse_datetime
+```
+
+**Metadata Only** (not stored in core):
+```yaml
+- source: EmailBouncedDate
+  target: metadata.email_bounced_date
+  transform: parse_datetime
+# Then in loader, store in ExternalIdMap.metadata_json instead of volunteer record
+```
 
 ### 3.2 Creating Custom Transforms
 
@@ -143,6 +301,7 @@ def _build_transform_registry() -> Dict[str, Any]:
 
 - **Nested contact info**: `email.primary`, `email.home`, `phone.mobile`, `phone.primary`.
 - **Preferred type fields**: map picklists to `email.preferred_type` or `phone.preferred_type` to inform UI.
+- **Contact preferences**: map boolean flags to nested `contact_preferences.*` structure (e.g., `DoNotCall` → `contact_preferences.do_not_call`).
 - **Dates and timestamps**: use `parse_date` for `YYYY-MM-DD`, `parse_datetime` for ISO 8601 (appends `Z` if missing timezone).
 - **Lookup IDs**: map raw IDs into `metadata` or canonical references (further resolution handled downstream).
 - **Multi-select picklists**: create custom transform that splits values (`value.split(';')`) into arrays.
@@ -150,9 +309,12 @@ def _build_transform_registry() -> Dict[str, Any]:
 
 ## 4. Horizontal Scaling: Adding Salesforce Objects
 
-While Sprint 4 implemented Contacts, the architecture supports additional objects (Campaign, CampaignMember, Event). To onboard a new object:
+While Sprint 4 implemented Contacts, the architecture supports additional objects (Campaign, CampaignMember, Event). To onboard a new object, you must implement the full pipeline.
 
-### 4.1 Create Mapping File
+### 4.1 Complete Workflow: Adding a New Salesforce Object
+
+#### Step 1: Create Mapping File
+**File**: `config/mappings/salesforce_<object>_v1.yaml`
 
 1. Copy the existing mapping: `cp config/mappings/salesforce_contact_v1.yaml config/mappings/salesforce_campaign_member_v1.yaml`.
 2. Update metadata:
@@ -163,6 +325,158 @@ While Sprint 4 implemented Contacts, the architecture supports additional object
    ```
 3. Define `fields` for the new canonical contract (e.g., `signup` entity).
 4. Place file under version control. Reference via `IMPORTER_SALESFORCE_MAPPING_PATH` (per object support is a Sprint 7 goal; for now single mapping active per environment).
+
+#### Step 2: Extend Extractor
+**File**: `flask_app/importer/adapters/salesforce/extractor.py`
+
+Add SOQL builder function:
+```python
+def build_campaign_member_soql(
+    last_modstamp: datetime | None = None,
+    limit: int | None = None,
+) -> str:
+    """Build SOQL query for CampaignMember objects."""
+    fields = [
+        "Id", "CampaignId", "ContactId", "Status",
+        "SystemModstamp", "CreatedDate", "LastModifiedDate",
+        # ... add all fields needed
+    ]
+    base_query = f"SELECT {', '.join(fields)} FROM CampaignMember"
+    # Add WHERE clauses for watermark filtering
+    # ...
+    return base_query
+```
+
+**Why**: Each object needs its own query builder with appropriate field selection and filtering.
+
+#### Step 3: Create Staging Table (If Needed)
+**File**: `flask_app/models/importer/schema.py`
+
+If the new object needs a different staging table:
+```python
+class StagingEvent(db.Model):
+    __tablename__ = "staging_events"
+    # Similar structure to StagingVolunteer
+    id = db.Column(db.Integer, primary_key=True)
+    run_id = db.Column(db.Integer, db.ForeignKey("import_runs.id"), nullable=False)
+    external_id = db.Column(db.String(255), nullable=False)
+    external_system = db.Column(db.String(50), nullable=False)
+    payload_json = db.Column(db.JSON, nullable=False)
+    normalized_json = db.Column(db.JSON, nullable=True)
+    # ...
+```
+
+**Why**: Staging tables store raw and normalized data per entity type.
+
+#### Step 4: Create Ingestion Function
+**File**: `flask_app/importer/pipeline/salesforce.py`
+
+Add ingestion function:
+```python
+def ingest_salesforce_events(
+    *,
+    import_run: ImportRun,
+    extractor: SalesforceExtractor,
+    watermark: ImporterWatermark,
+    staging_batch_size: int,
+    dry_run: bool,
+    logger: logging.Logger,
+    record_limit: int | None = None,
+) -> SalesforceIngestSummary:
+    """Stream Salesforce Events into staging."""
+    # Similar structure to ingest_salesforce_contacts()
+    # 1. Build SOQL
+    # 2. Load mapping spec
+    # 3. Transform and stage records
+    # 4. Return summary
+```
+
+**Why**: Each object needs its own ingestion orchestration.
+
+#### Step 5: Create Clean Table (If Needed)
+**File**: `flask_app/models/importer/schema.py`
+
+```python
+class CleanEvent(db.Model):
+    __tablename__ = "clean_events"
+    # Similar to CleanVolunteer
+    # Links to StagingEvent
+    # Stores validated canonical payloads
+```
+
+#### Step 6: Create Loader
+**File**: `flask_app/importer/pipeline/salesforce_loader.py` (or new file)
+
+```python
+class SalesforceEventLoader:
+    """Two-phase loader for Salesforce Events."""
+    
+    def __init__(self, run: ImportRun, session: Session | None = None):
+        self.run = run
+        self.session = session or db.session
+    
+    def execute(self) -> LoaderCounters:
+        # 1. Snapshot clean rows
+        # 2. Apply create/update/delete logic
+        # 3. Use ExternalIdMap with entity_type="event"
+        # 4. Advance watermark
+        # 5. Return counters
+```
+
+**Why**: Each entity type needs its own loader with appropriate upsert logic.
+
+#### Step 7: Create Core Model (If Needed)
+**File**: `flask_app/models/event.py` or similar
+
+```python
+class Event(db.Model):
+    __tablename__ = "events"
+    id = db.Column(db.Integer, primary_key=True)
+    # ... core fields
+```
+
+#### Step 8: Wire Up Task
+**File**: `flask_app/importer/tasks.py`
+
+Add Celery task:
+```python
+@shared_task(name="importer.pipeline.ingest_salesforce_events", bind=True)
+def ingest_salesforce_events(self, *, run_id: int, dry_run: bool = False) -> dict[str, Any]:
+    # Orchestrate: extract → stage → DQ → clean → load
+    # Similar to ingest_salesforce_contacts()
+```
+
+#### Step 9: Add CLI Command
+**File**: `flask_app/importer/cli.py`
+
+```python
+@importer_cli.command("run-salesforce-events")
+@click.option("--dry-run", is_flag=True)
+def run_salesforce_events(dry_run: bool):
+    # Create ImportRun
+    # Execute task
+    # Display results
+```
+
+#### Step 10: Update UI (If Needed)
+**File**: `flask_app/routes/importer.py` and templates
+
+Add UI for the new object type in the Admin Importer interface.
+
+### 4.1.1 Quick Reference: New Object Checklist
+
+- [ ] Mapping file created (`config/mappings/salesforce_<object>_v1.yaml`)
+- [ ] Extractor function added (`build_<object>_soql()`)
+- [ ] Staging table created (if new entity type)
+- [ ] Ingestion function created (`ingest_salesforce_<object>()`)
+- [ ] Clean table created (if new entity type)
+- [ ] Loader class created (`Salesforce<Object>Loader`)
+- [ ] Core model created/updated
+- [ ] Celery task added
+- [ ] CLI command added
+- [ ] UI updated (if needed)
+- [ ] Tests written
+- [ ] Documentation updated
 
 ### 4.2 Extend Extractor
 
@@ -314,13 +628,142 @@ The `is_local` field on volunteers uses a `LocalStatus` enum with the following 
 - Stored in `contacts.is_local` column as enum type
 - Default value is `LocalStatus.UNKNOWN`
 
-## 11. References
+### 10.2 Contact Preference Fields
 
-- `config/mappings/salesforce_contact_v1.yaml`
-- `flask_app/importer/mapping/__init__.py`
-- `flask_app/importer/adapters/salesforce/extractor.py`
-- `flask_app/importer/pipeline/salesforce.py`
-- `flask_app/importer/pipeline/salesforce_loader.py`
-- `docs/data-integration-platform-tech-doc.md`
-- `docs/sprint4-retrospective.md`
-- `docs/importer-feature-flag.md`
+Contact preference fields control how volunteers can be contacted and are imported from Salesforce:
+
+- **`do_not_call`**: Maps from Salesforce `DoNotCall` field. When `true`, indicates the volunteer should not be called.
+- **`do_not_email`**: Maps from Salesforce `HasOptedOutOfEmail` field. When `true`, indicates the volunteer has opted out of email communications.
+- **`do_not_contact`**: Maps from Salesforce `npsp__Do_Not_Contact__c` field (NPSP managed package). When `true`, indicates the volunteer should not be contacted via any method.
+
+**Current behavior:**
+- Imported from Salesforce during contact sync
+- Stored in `contact_preferences` nested structure in normalized payload
+- Applied directly to volunteer records during load phase (bypasses survivorship)
+- Default to `False` if not present in Salesforce
+- Incoming Salesforce values override existing values during imports
+
+**Implementation:**
+- Mapped in `config/mappings/salesforce_contact_v1.yaml` under `contact_preferences.*` targets
+- Applied in `SalesforceContactLoader._handle_create()` and `_handle_update()` methods
+- Stored as boolean columns on `contacts` table: `do_not_call`, `do_not_email`, `do_not_contact`
+
+### 10.3 Email Bounce Tracking
+
+The `EmailBouncedDate` field from Salesforce tracks when an email address bounced:
+
+- **Source**: Salesforce `EmailBouncedDate` field (datetime)
+- **Target**: `metadata.email_bounced_date` in normalized payload
+- **Storage**: Stored in `ExternalIdMap.metadata_json` for audit/tracking purposes
+
+**Current behavior:**
+- Imported and parsed as datetime using `parse_datetime` transform
+- Stored in metadata, not as a core field on the Contact model
+- Available for tracking and reporting purposes
+- Can be accessed via `ExternalIdMap.metadata_json["email_bounced_date"]`
+
+**Implementation:**
+- Mapped in `config/mappings/salesforce_contact_v1.yaml` to `metadata.email_bounced_date`
+- Stored in `ExternalIdMap.metadata_json` during load phase
+- Not displayed in UI by default (metadata field)
+
+## 11. Quick Start: Adding a New Field End-to-End
+
+This section provides a concrete example of adding a new field through the entire pipeline.
+
+### Example: Adding `Volunteer_Skills__c` Field
+
+**Goal**: Import volunteer skills from Salesforce and store in core database.
+
+#### Step 1: Add to Extractor
+```python
+# flask_app/importer/adapters/salesforce/extractor.py
+DEFAULT_CONTACT_FIELDS = [
+    # ... existing fields ...
+    "Volunteer_Skills__c",  # Add this
+]
+```
+
+#### Step 2: Add to Mapping
+```yaml
+# config/mappings/salesforce_contact_v1.yaml
+fields:
+  # ... existing fields ...
+  - source: Volunteer_Skills__c
+    target: skills.volunteer_skills
+    # Optional: transform if it's a multi-select picklist
+    # transform: split_semicolon
+```
+
+#### Step 3: Add Transform (If Needed)
+```python
+# flask_app/importer/mapping/__init__.py
+def _build_transform_registry() -> Dict[str, Any]:
+    def split_semicolon(value: Any) -> list[str]:
+        """Split semicolon-separated values into list."""
+        if not value:
+            return []
+        return [v.strip() for v in str(value).split(';') if v.strip()]
+    
+    return {
+        # ... existing transforms ...
+        "split_semicolon": split_semicolon,
+    }
+```
+
+#### Step 4: Update Core Model
+```python
+# flask_app/models/volunteer.py
+class Volunteer(Contact):
+    # ... existing fields ...
+    volunteer_skills = db.Column(db.JSON, nullable=True)  # Store as JSON array
+```
+
+#### Step 5: Apply in Loader
+```python
+# flask_app/importer/pipeline/salesforce_loader.py
+def _handle_update(self, entry, payload, payload_hash, clean_row):
+    # ... existing code ...
+    
+    # Apply skills
+    if "skills" in payload:
+        skills = payload.get("skills", {})
+        if "volunteer_skills" in skills:
+            volunteer.volunteer_skills = skills["volunteer_skills"]
+```
+
+#### Step 6: Test
+```bash
+# Dry-run to verify
+flask importer run-salesforce --dry-run
+
+# Check staging records
+flask importer debug-staging --run-id <id> --record <sequence>
+
+# Verify in database
+# Check staging_volunteers.normalized_json for "skills"
+# Check clean_volunteers.payload_json for "skills"
+# Check volunteers.volunteer_skills for final value
+```
+
+### Common Pitfalls
+
+1. **Field not in SOQL**: If you forget Step 1, the field won't be extracted from Salesforce.
+2. **Missing default**: Boolean fields should have `default: false` to ensure they're always present.
+3. **Transform not registered**: If you use a transform, make sure it's in `_build_transform_registry()`.
+4. **Loader not applying**: If the field needs special handling, don't forget Step 5.
+5. **Cache not cleared**: After changing mapping YAML, restart the app/worker to clear cache.
+
+## 12. References
+
+- `config/mappings/salesforce_contact_v1.yaml` - Example mapping file
+- `flask_app/importer/mapping/__init__.py` - Mapping transformer and registry
+- `flask_app/importer/adapters/salesforce/extractor.py` - SOQL query builder
+- `flask_app/importer/pipeline/salesforce.py` - Staging orchestration
+- `flask_app/importer/pipeline/salesforce_loader.py` - Core loading logic
+- `flask_app/importer/pipeline/dq.py` - Data quality rules
+- `flask_app/importer/pipeline/clean.py` - Clean promotion
+- `docs/data-integration-platform-tech-doc.md` - Technical deep dive
+- `docs/data-integration-platform-overview.md` - High-level architecture
+- `docs/sprint4-retrospective.md` - Implementation history
+- `docs/importer-feature-flag.md` - Feature flag documentation

@@ -53,6 +53,18 @@ fields:
   - source: Last_Volunteer_Date__c
     target: engagement.last_volunteer_date
     transform: parse_date
+  - source: DoNotCall
+    target: contact_preferences.do_not_call
+    default: false
+  - source: HasOptedOutOfEmail
+    target: contact_preferences.do_not_email
+    default: false
+  - source: npsp__Do_Not_Contact__c
+    target: contact_preferences.do_not_contact
+    default: false
+  - source: EmailBouncedDate
+    target: metadata.email_bounced_date
+    transform: parse_datetime
   - source: SystemModstamp
     target: metadata.source_modstamp
     transform: parse_datetime

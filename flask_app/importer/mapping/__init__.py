@@ -122,18 +122,36 @@ def load_mapping(path: str | Path) -> MappingSpec:
 def get_active_salesforce_mapping() -> MappingSpec:
     """
     Load the configured Salesforce mapping spec (cached per app context).
+    Cache is invalidated if the file modification time or checksum changes.
     """
 
     config_path = current_app.config.get("IMPORTER_SALESFORCE_MAPPING_PATH")
     if not config_path:
         raise MappingLoadError("IMPORTER_SALESFORCE_MAPPING_PATH is not configured.")
+    config_path = Path(config_path)
     cache_key = "_importer_sf_mapping_cache"
-    cache: dict[str, MappingSpec] = current_app.extensions.setdefault(cache_key, {})
+    cache: dict[str, tuple[MappingSpec, float, str]] = current_app.extensions.setdefault(cache_key, {})
     cache_key_lookup = str(config_path)
-    spec = cache.get(cache_key_lookup)
-    if spec is None:
-        spec = load_mapping(config_path)
-        cache[cache_key_lookup] = spec
+    
+    # Check if we have a cached spec and if the file has changed
+    cached_entry = cache.get(cache_key_lookup)
+    if cached_entry:
+        cached_spec, cached_mtime, cached_checksum = cached_entry
+        current_mtime = config_path.stat().st_mtime
+        # Reload if file modification time changed
+        if current_mtime != cached_mtime:
+            # File changed, reload
+            current_app.logger.debug(f"Mapping file changed, reloading: {config_path}")
+            spec = load_mapping(config_path)
+            cache[cache_key_lookup] = (spec, current_mtime, spec.checksum)
+            return spec
+        # File hasn't changed, use cached spec
+        return cached_spec
+    
+    # No cache entry, load and cache
+    spec = load_mapping(config_path)
+    mtime = config_path.stat().st_mtime
+    cache[cache_key_lookup] = (spec, mtime, spec.checksum)
     return spec
 
 
@@ -183,8 +201,23 @@ class SalesforceMappingTransformer:
                         value = transform_fn(value)
                     except Exception as exc:  # pragma: no cover - defensive path
                         errors.append(f"Transform '{field.transform}' failed for {field.target}: {exc}")
+            # Skip only None and empty strings, but include False (boolean) values
+            # Note: False is not None and False != "", so it will pass through
+            # However, if we have a boolean default and the value is None/empty, we should use the default
             if value is None or value == "":
-                continue
+                # If we have a boolean default, use it (don't skip)
+                if isinstance(field.default, bool):
+                    value = field.default
+                else:
+                    continue
+            # Normalize boolean values from Salesforce (handles both bool and string "true"/"false")
+            if isinstance(field.default, bool) or isinstance(value, bool):
+                if isinstance(value, str):
+                    # Convert string representations to bool
+                    value = value.lower() in ("true", "1", "yes", "y", "on")
+                elif not isinstance(value, bool) and value is not None:
+                    # Convert other types to bool if default is bool
+                    value = bool(value)
             _set_nested_value(canonical, field.target, value)
 
         return TransformResult(

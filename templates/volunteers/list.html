@@ -17,35 +17,38 @@
 
     <!-- Search Bar -->
     <div class="mb-3">
-        <form method="GET" action="{{ url_for('volunteers_list') }}" class="d-flex gap-2">
-            <div class="input-group flex-grow-1" style="max-width: 500px;">
-                <span class="input-group-text">
-                    <i class="fas fa-search"></i>
-                </span>
-                <input type="text" 
-                       class="form-control" 
-                       name="search" 
-                       id="searchInput"
-                       placeholder="Search by name, email, phone, title, or industry..." 
-                       value="{{ search_term }}">
+        <form method="GET" action="{{ url_for('volunteers_list') }}" class="d-flex flex-column gap-2">
+            <div class="d-flex gap-2">
+                <div class="input-group flex-grow-1" style="max-width: 500px;">
+                    <span class="input-group-text">
+                        <i class="fas fa-search"></i>
+                    </span>
+                    <input type="text" 
+                           class="form-control" 
+                           name="search" 
+                           id="searchInput"
+                           placeholder="Search by name, email, phone, title, or industry..." 
+                           value="{{ search_term }}">
+                    {% if search_term %}
+                    <a href="{{ url_for('volunteers_list', sort=sort_column, order=sort_order) }}" 
+                       class="btn btn-outline-secondary" 
+                       title="Clear search">
+                        <i class="fas fa-times"></i>
+                    </a>
+                    {% endif %}
+                </div>
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-search"></i> Search
+                </button>
                 {% if search_term %}
-                <a href="{{ url_for('volunteers_list', sort=sort_column, order=sort_order) }}" 
-                   class="btn btn-outline-secondary" 
-                   title="Clear search">
-                    <i class="fas fa-times"></i>
-                </a>
+                <div class="d-flex align-items-center ms-2">
+                    <span class="text-muted">
+                        {{ volunteers.total }} result{{ 's' if volunteers.total != 1 else '' }} found
+                    </span>
+                </div>
                 {% endif %}
             </div>
-            <button type="submit" class="btn btn-primary">
-                <i class="fas fa-search"></i> Search
-            </button>
-            {% if search_term %}
-            <div class="d-flex align-items-center ms-2">
-                <span class="text-muted">
-                    {{ volunteers.total }} result{{ 's' if volunteers.total != 1 else '' }} found
-                </span>
-            </div>
-            {% endif %}
+            
             <!-- Preserve sort parameters -->
             {% if sort_column %}
             <input type="hidden" name="sort" value="{{ sort_column }}">
@@ -112,6 +115,21 @@
                            class="text-decoration-none text-white sortable-header">
                             Status
                             {% if sort_column == 'status' %}
+                                {% if sort_order == 'asc' %}
+                                    <i class="fas fa-sort-up ms-1"></i>
+                                {% else %}
+                                    <i class="fas fa-sort-down ms-1"></i>
+                                {% endif %}
+                            {% else %}
+                                <i class="fas fa-sort ms-1" style="opacity: 0.5;"></i>
+                            {% endif %}
+                        </a>
+                    </th>
+                    <th>
+                        <a href="{{ url_for('volunteers_list', search=search_term, sort='do_not_call', order='asc' if sort_column != 'do_not_call' or sort_order == 'desc' else 'desc') }}" 
+                           class="text-decoration-none text-white sortable-header">
+                            Contact Preferences
+                            {% if sort_column == 'do_not_call' %}
                                 {% if sort_order == 'asc' %}
                                     <i class="fas fa-sort-up ms-1"></i>
                                 {% else %}
@@ -202,6 +220,22 @@
                         {% else %}
                             <span class="badge bg-secondary">Inactive</span>
                         {% endif %}
+                    </td>
+                    <td>
+                        <div class="d-flex gap-2 align-items-center">
+                            {% if volunteer.do_not_call %}
+                                <i class="fas fa-phone-slash text-warning" title="Do Not Call"></i>
+                            {% endif %}
+                            {% if volunteer.do_not_email %}
+                                <i class="fas fa-envelope-slash text-warning" title="Do Not Email"></i>
+                            {% endif %}
+                            {% if volunteer.do_not_contact %}
+                                <i class="fas fa-ban text-danger" title="Do Not Contact"></i>
+                            {% endif %}
+                            {% if not volunteer.do_not_call and not volunteer.do_not_email and not volunteer.do_not_contact %}
+                                <span class="text-muted">—</span>
+                            {% endif %}
+                        </div>
                     </td>
                     <td>
                         {% if volunteer.total_volunteer_hours %}

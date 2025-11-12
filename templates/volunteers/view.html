@@ -412,6 +412,46 @@
                         <span>{{ volunteer.updated_at.strftime('%Y-%m-%d %H:%M:%S') }}</span>
                     </div>
                     {% endif %}
+                    {% if volunteer.source %}
+                    <div class="info-item">
+                        <label>Source:</label>
+                        <span>{{ volunteer.source }}</span>
+                    </div>
+                    {% endif %}
+                    {% if external_id_map %}
+                    <div class="info-item mt-3">
+                        <label>Salesforce Import Info:</label>
+                        <div class="small text-muted">
+                            <div>External ID: <code>{{ external_id_map.external_id }}</code></div>
+                            {% if external_id_map.metadata_json %}
+                                {% set metadata = external_id_map.metadata_json %}
+                                {% if metadata.get("email_bounced_date") %}
+                                <div class="mt-1">Email Bounced: <code>{{ metadata.email_bounced_date }}</code></div>
+                                {% endif %}
+                                {% if metadata.get("last_payload") %}
+                                {% set payload = metadata.last_payload %}
+                                {% if payload.get("contact_preferences") %}
+                                {% set prefs = payload.contact_preferences %}
+                                <details class="mt-2">
+                                    <summary class="text-primary" style="cursor: pointer;">View Contact Preferences from Salesforce</summary>
+                                    <div class="mt-2 p-2 bg-light rounded">
+                                        <div class="small">
+                                            <div><strong>Do Not Call:</strong> {{ prefs.get("do_not_call", false) | string | title }}</div>
+                                            <div><strong>Do Not Email:</strong> {{ prefs.get("do_not_email", false) | string | title }}</div>
+                                            <div><strong>Do Not Contact:</strong> {{ prefs.get("do_not_contact", false) | string | title }}</div>
+                                        </div>
+                                        <details class="mt-2">
+                                            <summary class="text-muted" style="cursor: pointer; font-size: 0.85em;">Raw JSON</summary>
+                                            <pre class="mb-0 small mt-1">{{ payload.contact_preferences | tojson if payload.contact_preferences else '{}' }}</pre>
+                                        </details>
+                                    </div>
+                                </details>
+                                {% endif %}
+                                {% endif %}
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endif %}
                 </div>
             </div>
         </div>

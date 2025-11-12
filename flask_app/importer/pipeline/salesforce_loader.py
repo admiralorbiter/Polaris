@@ -232,11 +232,40 @@ class SalesforceContactLoader:
             volunteer.phones.append(phone)
             self.session.add(phone)
         
+        # Apply contact preferences from payload
+        contact_prefs = payload.get("contact_preferences", {})
+        # Log if contact preferences are missing or if we're applying them
+        if not contact_prefs:
+            current_app.logger.debug(f"No contact_preferences in payload for new volunteer (external_id: {external_id})")
+        # Normalize boolean values (handle both bool and string representations)
+        def _normalize_bool(value):
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                return value.lower() in ("true", "1", "yes", "y", "on")
+            return bool(value) if value is not None else False
+        
+        do_not_call_val = _normalize_bool(contact_prefs.get("do_not_call", False))
+        do_not_email_val = _normalize_bool(contact_prefs.get("do_not_email", False))
+        do_not_contact_val = _normalize_bool(contact_prefs.get("do_not_contact", False))
+        
+        # Log if we're setting contact preferences to True
+        if do_not_call_val or do_not_email_val or do_not_contact_val:
+            current_app.logger.info(f"Setting contact preferences for new volunteer (external_id: {external_id}): do_not_call={do_not_call_val}, do_not_email={do_not_email_val}, do_not_contact={do_not_contact_val}")
+        
+        volunteer.do_not_call = do_not_call_val
+        volunteer.do_not_email = do_not_email_val
+        volunteer.do_not_contact = do_not_contact_val
+        
         # Create ExternalIdMap entry
         metadata = {
             "payload_hash": payload_hash,
             "last_payload": payload,
         }
+        # Store EmailBouncedDate in metadata if present
+        payload_metadata = payload.get("metadata", {})
+        if payload_metadata.get("email_bounced_date"):
+            metadata["email_bounced_date"] = payload_metadata.get("email_bounced_date")
         entry = ExternalIdMap(
             entity_type=ENTITY_TYPE,
             entity_id=volunteer.id,
@@ -321,11 +350,42 @@ class SalesforceContactLoader:
                 volunteer.phones.append(phone)
                 self.session.add(phone)
         
+        # Apply contact preferences from payload
+        contact_prefs = payload.get("contact_preferences", {})
+        # Log if contact preferences are missing or if we're applying them
+        external_id = entry.external_id or clean_row.external_id or ""
+        if not contact_prefs:
+            current_app.logger.debug(f"No contact_preferences in payload for volunteer {volunteer.id} (external_id: {external_id})")
+        # Normalize boolean values (handle both bool and string representations)
+        def _normalize_bool(value):
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                return value.lower() in ("true", "1", "yes", "y", "on")
+            return bool(value) if value is not None else False
+        
+        do_not_call_val = _normalize_bool(contact_prefs.get("do_not_call", False))
+        do_not_email_val = _normalize_bool(contact_prefs.get("do_not_email", False))
+        do_not_contact_val = _normalize_bool(contact_prefs.get("do_not_contact", False))
+        
+        # Log if we're setting contact preferences to True
+        if do_not_call_val or do_not_email_val or do_not_contact_val:
+            current_app.logger.info(f"Setting contact preferences for volunteer {volunteer.id} (external_id: {external_id}): do_not_call={do_not_call_val}, do_not_email={do_not_email_val}, do_not_contact={do_not_contact_val}")
+        
+        volunteer.do_not_call = do_not_call_val
+        volunteer.do_not_email = do_not_email_val
+        volunteer.do_not_contact = do_not_contact_val
+        
         # Update ExternalIdMap
         entry.is_active = True
         entry.deactivated_at = None
         entry.upstream_deleted_reason = None
-        entry.metadata_json = {"payload_hash": payload_hash, "last_payload": payload}
+        metadata = {"payload_hash": payload_hash, "last_payload": payload}
+        # Store EmailBouncedDate in metadata if present
+        payload_metadata = payload.get("metadata", {})
+        if payload_metadata.get("email_bounced_date"):
+            metadata["email_bounced_date"] = payload_metadata.get("email_bounced_date")
+        entry.metadata_json = metadata
         entry.last_seen_at = datetime.now(timezone.utc)
         
         # Update clean_row

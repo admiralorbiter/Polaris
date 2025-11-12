@@ -41,12 +41,33 @@ def register_volunteer_routes(app):
             search_term = request.args.get("search", "").strip()
             sort_column = request.args.get("sort", "name")
             sort_order = request.args.get("order", "asc")
+            
+            # Contact preference filters
+            filter_do_not_call = request.args.get("filter_do_not_call", "").strip().lower()
+            filter_do_not_email = request.args.get("filter_do_not_email", "").strip().lower()
+            filter_do_not_contact = request.args.get("filter_do_not_contact", "").strip().lower()
 
             # Base query with eager loading
             query = Volunteer.query.options(
                 joinedload(Volunteer.emails),
                 joinedload(Volunteer.phones)
             )
+
+            # Apply contact preference filters
+            if filter_do_not_call == "true":
+                query = query.filter(Volunteer.do_not_call == True)
+            elif filter_do_not_call == "false":
+                query = query.filter(Volunteer.do_not_call == False)
+            
+            if filter_do_not_email == "true":
+                query = query.filter(Volunteer.do_not_email == True)
+            elif filter_do_not_email == "false":
+                query = query.filter(Volunteer.do_not_email == False)
+            
+            if filter_do_not_contact == "true":
+                query = query.filter(Volunteer.do_not_contact == True)
+            elif filter_do_not_contact == "false":
+                query = query.filter(Volunteer.do_not_contact == False)
 
             # Apply search filter if provided
             if search_term:
@@ -86,6 +107,9 @@ def register_volunteer_routes(app):
                 "created": Volunteer.created_at,
                 "last_name": Volunteer.last_name,
                 "first_name": Volunteer.first_name,
+                "do_not_call": Volunteer.do_not_call,
+                "do_not_email": Volunteer.do_not_email,
+                "do_not_contact": Volunteer.do_not_contact,
             }
 
             if sort_column in sort_mapping:
@@ -147,6 +171,9 @@ def register_volunteer_routes(app):
                 search_term=search_term,
                 sort_column=sort_column,
                 sort_order=sort_order,
+                filter_do_not_call=filter_do_not_call,
+                filter_do_not_email=filter_do_not_email,
+                filter_do_not_contact=filter_do_not_contact,
             )
 
         except Exception as e:
@@ -242,6 +269,7 @@ def register_volunteer_routes(app):
         """View volunteer details"""
         try:
             from sqlalchemy.orm import joinedload
+            from flask_app.models import ExternalIdMap
             volunteer = db.session.query(Volunteer).options(
                 joinedload(Volunteer.emails),
                 joinedload(Volunteer.phones),
@@ -255,7 +283,14 @@ def register_volunteer_routes(app):
                 from flask import abort
                 abort(404)
 
-            return render_template("volunteers/view.html", volunteer=volunteer)
+            # Get ExternalIdMap to show imported data metadata
+            external_id_map = db.session.query(ExternalIdMap).filter_by(
+                entity_type="salesforce_contact",
+                entity_id=volunteer_id,
+                external_system="salesforce"
+            ).first()
+
+            return render_template("volunteers/view.html", volunteer=volunteer, external_id_map=external_id_map)
 
         except Exception as e:
             current_app.logger.error(f"Error viewing volunteer {volunteer_id}: {str(e)}")
