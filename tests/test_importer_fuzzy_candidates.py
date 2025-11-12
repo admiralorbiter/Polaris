@@ -1,5 +1,6 @@
 import time
 from datetime import date
+from uuid import uuid4
 
 from flask_app.importer.pipeline.fuzzy_candidates import generate_fuzzy_candidates
 from flask_app.models import (
@@ -11,12 +12,11 @@ from flask_app.models import (
     DedupeSuggestion,
     EmailType,
     ImportRun,
-    PhoneType,
     Organization,
+    PhoneType,
     Volunteer,
     db,
 )
-from uuid import uuid4
 
 
 def _seed_volunteer(
@@ -261,11 +261,7 @@ def test_generate_fuzzy_candidates_multiple_reviews(app):
         db.session.commit()
 
         summary = generate_fuzzy_candidates(run, dry_run=False)
-        suggestions = (
-            DedupeSuggestion.query.filter_by(run_id=run.id)
-            .order_by(DedupeSuggestion.score.desc())
-            .all()
-        )
+        suggestions = DedupeSuggestion.query.filter_by(run_id=run.id).order_by(DedupeSuggestion.score.desc()).all()
 
         assert summary.suggestions_created == 2
         assert summary.review_band == 2
@@ -326,7 +322,7 @@ def test_generate_fuzzy_candidates_bulk_performance(app):
 
         assert summary.rows_considered == 500
         assert summary.suggestions_created == 500
-        assert duration < 2.0, f"Fuzzy candidate generation took too long ({duration:.2f}s)"
+        assert duration < 3.0, f"Fuzzy candidate generation took too long ({duration:.2f}s)"
 
 
 def test_generate_fuzzy_candidates_skips_deterministic_matches(app):

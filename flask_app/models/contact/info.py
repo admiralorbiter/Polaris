@@ -40,15 +40,23 @@ class ContactEmail(BaseModel):
     def validate_email(self, key, value):
         """Validate email format"""
         if value:
-            from email_validator import validate_email, EmailNotValidError
+            from email_validator import EmailNotValidError, EmailUndeliverableError, validate_email
             from flask import current_app
 
             try:
                 # Skip deliverability checks in testing or if configured
-                check_deliverability = current_app.config.get(
-                    "EMAIL_VALIDATION_CHECK_DELIVERABILITY", True
-                )
+                # Deliverability checks can fail for typos or temporary DNS issues
+                # These should be caught by data quality validation, not model validation
+                check_deliverability = current_app.config.get("EMAIL_VALIDATION_CHECK_DELIVERABILITY", False)
                 validate_email(value, check_deliverability=check_deliverability)
+            except EmailUndeliverableError:
+                # Domain doesn't exist or can't receive email - this is a data quality issue
+                # Allow it through and let DQ validation catch it
+                # Only validate format, not deliverability
+                try:
+                    validate_email(value, check_deliverability=False)
+                except EmailNotValidError:
+                    raise ValueError(f"Invalid email format: {value}")
             except EmailNotValidError:
                 raise ValueError(f"Invalid email format: {value}")
         return value
@@ -66,9 +74,7 @@ class ContactEmail(BaseModel):
             db.session.commit()
         except SQLAlchemyError as e:
             db.session.rollback()
-            current_app.logger.error(
-                f"Error ensuring single primary email for contact {contact_id}: {str(e)}"
-            )
+            current_app.logger.error(f"Error ensuring single primary email for contact {contact_id}: {str(e)}")
 
 
 class ContactPhone(BaseModel):
@@ -107,9 +113,7 @@ class ContactPhone(BaseModel):
             db.session.commit()
         except SQLAlchemyError as e:
             db.session.rollback()
-            current_app.logger.error(
-                f"Error ensuring single primary phone for contact {contact_id}: {str(e)}"
-            )
+            current_app.logger.error(f"Error ensuring single primary phone for contact {contact_id}: {str(e)}")
 
 
 class ContactAddress(BaseModel):
@@ -156,7 +160,4 @@ class ContactAddress(BaseModel):
             db.session.commit()
         except SQLAlchemyError as e:
             db.session.rollback()
-            current_app.logger.error(
-                f"Error ensuring single primary address for contact {contact_id}: {str(e)}"
-            )
-
+            current_app.logger.error(f"Error ensuring single primary address for contact {contact_id}: {str(e)}")

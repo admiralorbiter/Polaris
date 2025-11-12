@@ -1,0 +1,3 @@
+external_system,external_id,first_name,last_name,preferred_name,email,alternate_emails,phone,alternate_phones,dob,street,city,state_code,postal_code,country_code,employer,notes,source_updated_at
+legacy_csv,fuzzy-test-001,Isabella,Martinez,Izzy,izzy.martinez@example.org,,+14155553001,,1992-05-11,125 Palm St,San Francisco,CA,94110,US,North Beach Tutoring,"Fuzzy match test - different email but same DOB/address",2025-10-08T10:00:00Z
+legacy_csv,fuzzy-test-002,Jon,Chen,,jonny.chen@example.org,,+14155553112,,1990-02-19,89 Elm Avenue,Oakland,CA,94607,US,Bay Robotics,"Fuzzy match test - nickname, nearby address",2025-10-08T10:05:00Z

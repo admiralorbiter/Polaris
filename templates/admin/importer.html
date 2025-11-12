@@ -9,10 +9,23 @@
 {% block content %}
 <div class="admin-container">
     <div class="admin-header">
-        <h1>Importer Runs</h1>
-        <p class="admin-subtitle">
-            Upload canonical CSV files to start a new import run and monitor progress without leaving the admin console.
-        </p>
+        <div class="d-flex justify-content-between align-items-start">
+            <div>
+                <h1>Importer Runs</h1>
+                <p class="admin-subtitle">
+                    Upload canonical CSV files to start a new import run and monitor progress without leaving the admin console.
+                </p>
+            </div>
+            <div class="d-flex gap-2">
+                <a href="{{ url_for('admin_importer.importer_dedupe_review_page') }}" class="btn btn-outline-primary">
+                    <i class="fas fa-compress-alt me-1"></i> Duplicate Review
+                    <span class="badge bg-danger ms-2" id="review-queue-badge" style="display: none;">0</span>
+                </a>
+                <a href="{{ url_for('admin_importer.importer_runs_dashboard_page') }}" class="btn btn-outline-secondary">
+                    <i class="fas fa-chart-line me-1"></i> Runs Dashboard
+                </a>
+            </div>
+        </div>
     </div>
 
     {% if adapter_cards %}
@@ -316,4 +329,27 @@
 
 {% block extra_js %}
 <script src="{{ url_for('static', filename='js/importer.js') }}"></script>
+<script>
+  // Load review queue badge count
+  (function() {
+    const badge = document.getElementById('review-queue-badge');
+    if (badge) {
+      fetch('{{ url_for("admin_importer.importer_dedupe_stats") }}', {
+        credentials: 'same-origin',
+        headers: { 'Accept': 'application/json' }
+      })
+      .then(response => response.json())
+      .then(data => {
+        const count = data.total_pending || 0;
+        if (count > 0) {
+          badge.textContent = count;
+          badge.style.display = 'inline-block';
+        }
+      })
+      .catch(() => {
+        // Silently fail if stats endpoint unavailable
+      });
+    }
+  })();
+</script>
 {% endblock %}

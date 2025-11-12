@@ -67,12 +67,16 @@ def _collect_mapping_stats(run: ImportRun) -> dict[str, Any]:
 
 
 def _determine_diff(core_summary, mapping_stats: dict[str, Any]) -> str:
-    if core_summary.rows_created or mapping_stats["new"]["total"]:
+    # Prioritize core_summary over mapping_stats - mapping entries are metadata, not data changes
+    if core_summary.rows_created:
         return "created"
     if core_summary.rows_updated:
         return "updated"
     if core_summary.rows_skipped_no_change:
         return "none"
+    # If no core changes but new mappings exist, still consider it "created" for tracking
+    if mapping_stats["new"]["total"]:
+        return "created"
     return "none"
 
 

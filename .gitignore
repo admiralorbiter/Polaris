@@ -137,3 +137,4 @@ logs/
 ci_artifacts/
 
 .tmp_unicode/
+.pytest_cache/

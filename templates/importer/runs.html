@@ -74,21 +74,24 @@
 
 {% block content %}
 <div class="container-fluid importer-runs-dashboard py-4" data-component="importer-runs-dashboard">
-  <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4">
-    <div>
-      <h1 class="h3 mb-1">Importer Runs Dashboard</h1>
-      <p class="text-muted mb-0">Monitor run throughput, drill into counts, and keep CSV pipelines healthy.</p>
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4">
+      <div>
+        <h1 class="h3 mb-1">Importer Runs Dashboard</h1>
+        <p class="text-muted mb-0">Monitor run throughput, drill into counts, and keep CSV pipelines healthy.</p>
+      </div>
+      <div class="d-flex gap-2 mt-3 mt-md-0">
+        <a href="{{ url_for('admin_importer.importer_dedupe_review_page') }}" class="btn btn-outline-info">
+          <i class="fas fa-compress-alt me-1"></i> Duplicate Review
+        </a>
+        <button class="btn btn-outline-primary" id="runs-refresh-btn" data-action="refresh">
+          <span class="spinner-border spinner-border-sm d-none" id="runs-refresh-spinner" role="status" aria-hidden="true"></span>
+          Refresh
+        </button>
+        <button class="btn btn-outline-secondary" id="runs-auto-refresh-toggle" data-action="auto-refresh">
+          Auto Refresh
+        </button>
+      </div>
     </div>
-    <div class="d-flex gap-2 mt-3 mt-md-0">
-      <button class="btn btn-outline-primary" id="runs-refresh-btn" data-action="refresh">
-        <span class="spinner-border spinner-border-sm d-none" id="runs-refresh-spinner" role="status" aria-hidden="true"></span>
-        Refresh
-      </button>
-      <button class="btn btn-outline-secondary" id="runs-auto-refresh-toggle" data-action="auto-refresh">
-        Auto Refresh
-      </button>
-    </div>
-  </div>
 
   <div class="card shadow-sm mb-4">
     <div class="card-header">
@@ -298,4 +301,3 @@
 </script>
 <script src="{{ url_for('static', filename='js/importer_runs.js') }}" defer></script>
 {% endblock %}
-

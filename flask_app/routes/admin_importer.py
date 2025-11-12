@@ -5,53 +5,46 @@ Admin-facing importer routes for initiating runs and monitoring status.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
-from collections import deque
-from http import HTTPStatus
 import os
-from pathlib import Path
 import re
+from collections import deque
+from datetime import datetime, timedelta, timezone
+from http import HTTPStatus
+from pathlib import Path
 
-from flask import (
-    Blueprint,
-    current_app,
-    jsonify,
-    render_template,
-    request,
-    send_file,
-    url_for,
-)
+from flask import Blueprint, current_app, jsonify, render_template, request, send_file, url_for
 from flask_login import current_user, login_required
 
+from config.monitoring import ImporterMonitoring
+from config.survivorship import load_profile
 from flask_app.importer import get_adapter_readiness
 from flask_app.importer.celery_app import DEFAULT_QUEUE_NAME, get_celery_app
 from flask_app.importer.mapping import MappingLoadError, get_active_salesforce_mapping
-from flask_app.importer.registry import get_adapter_registry
 from flask_app.importer.pipeline.dq_service import (
     DataQualityViolationService,
     RemediationConflict,
     RemediationNotFound,
     RemediationValidationError,
 )
+from flask_app.importer.pipeline.merge_service import MergeService
 from flask_app.importer.pipeline.run_service import ImportRunService
+from flask_app.importer.registry import get_adapter_registry
 from flask_app.importer.utils import allowed_file, cleanup_upload, persist_upload, resolve_upload_directory
 from flask_app.models import AdminLog, db
 from flask_app.models.importer.schema import (
     DataQualitySeverity,
     DataQualityStatus,
+    ImporterWatermark,
     ImportRun,
     ImportRunStatus,
-    ImporterWatermark,
 )
 from flask_app.utils.importer import is_importer_enabled
 from flask_app.utils.permissions import permission_required
-from config.monitoring import ImporterMonitoring
-from config.survivorship import load_profile
-
 
 admin_importer_blueprint = Blueprint("admin_importer", __name__, url_prefix="/admin/imports")
 _run_service = ImportRunService()
 _dq_service = DataQualityViolationService()
+_merge_service = MergeService()
 
 
 @admin_importer_blueprint.get("/mappings/salesforce.yaml")
@@ -70,6 +63,7 @@ def download_salesforce_mapping():
         as_attachment=True,
         download_name=spec.path.name,
     )
+
 
 _STATUS_LABELS = {
     "ready": "Ready",
@@ -187,11 +181,7 @@ def _build_adapter_cards() -> list[dict[str, object]]:
                 }
             except MappingLoadError as exc:
                 messages.append(f"Salesforce mapping failed to load: {exc}")
-            latest_run = (
-                ImportRun.query.filter_by(adapter="salesforce")
-                .order_by(ImportRun.created_at.desc())
-                .first()
-            )
+            latest_run = ImportRun.query.filter_by(adapter="salesforce").order_by(ImportRun.created_at.desc()).first()
             if latest_run:
                 status_value = (
                     latest_run.status.value if hasattr(latest_run.status, "value") else str(latest_run.status)
@@ -213,10 +203,7 @@ def _build_adapter_cards() -> list[dict[str, object]]:
                     if errors:
                         messages.append("Recent mapping errors: " + "; ".join(errors[:3]))
                     core_counts = (
-                        (latest_run.counts_json or {})
-                        .get("core", {})
-                        .get("volunteers", {})
-                        .get("salesforce", {})
+                        (latest_run.counts_json or {}).get("core", {}).get("volunteers", {}).get("salesforce", {})
                     )
                     if core_counts:
                         messages.append(
@@ -251,12 +238,7 @@ def _get_adapter_readiness_snapshot(force_refresh: bool = False) -> dict[str, ob
     cached_expiry = _ADAPTER_READINESS_CACHE.get("expires")
     now = datetime.now(timezone.utc)
 
-    if (
-        not force_refresh
-        and cached_value is not None
-        and isinstance(cached_expiry, datetime)
-        and cached_expiry > now
-    ):
+    if not force_refresh and cached_value is not None and isinstance(cached_expiry, datetime) and cached_expiry > now:
         return cached_value  # type: ignore[return-value]
 
     snapshot = get_adapter_readiness(current_app)
@@ -271,11 +253,7 @@ def _reset_salesforce_watermark(*, notes: str | None = None) -> None:
     """
 
     object_name = (current_app.config.get("IMPORTER_SALESFORCE_OBJECTS") or ("contacts",))[0]
-    watermark = (
-        db.session.query(ImporterWatermark)
-        .filter_by(adapter="salesforce", object_name=object_name)
-        .first()
-    )
+    watermark = db.session.query(ImporterWatermark).filter_by(adapter="salesforce", object_name=object_name).first()
     if watermark is not None:
         db.session.delete(watermark)
         db.session.commit()
@@ -332,11 +310,7 @@ def importer_salesforce_trigger():
 
     if _is_salesforce_rate_limited(current_user.id):
         return (
-            jsonify(
-                {
-                    "error": "Too many Salesforce imports triggered. Please wait before retrying."
-                }
-            ),
+            jsonify({"error": "Too many Salesforce imports triggered. Please wait before retrying."}),
             HTTPStatus.TOO_MANY_REQUESTS,
         )
 
@@ -359,11 +333,7 @@ def importer_salesforce_trigger():
             return jsonify({"error": "record_limit must be greater than zero."}), HTTPStatus.BAD_REQUEST
         if record_limit > _SALESFORCE_RECORD_LIMIT_MAX:
             return (
-                jsonify(
-                    {
-                        "error": f"record_limit must be less than or equal to {_SALESFORCE_RECORD_LIMIT_MAX:,}."
-                    }
-                ),
+                jsonify({"error": f"record_limit must be less than or equal to {_SALESFORCE_RECORD_LIMIT_MAX:,}."}),
                 HTTPStatus.BAD_REQUEST,
             )
 
@@ -540,6 +510,7 @@ def importer_dashboard():
             file_path = run.ingest_params_json.get("file_path")
             if file_path:
                 from pathlib import Path
+
                 can_retry = Path(file_path).exists()
         recent_runs.append(
             {
@@ -595,7 +566,9 @@ def importer_runs_dashboard_page():
     auto_refresh_seconds = current_app.config.get("IMPORTER_RUNS_AUTO_REFRESH_SECONDS", 30)
     sources = _run_service.list_sources()
     if not sources:
-        sources = sorted({adapter.name for adapter in current_app.extensions.get("importer", {}).get("active_adapters", ())})
+        sources = sorted(
+            {adapter.name for adapter in current_app.extensions.get("importer", {}).get("active_adapters", ())}
+        )
 
     profile = load_profile(dict(os.environ))
     survivorship_profile = {
@@ -843,7 +816,7 @@ def importer_upload():
                 "importer_task_id": async_result.id,
                 "importer_source": source,
                 "triggered_by_user_id": current_user.id,
-            "importer_dry_run": dry_run,
+                "importer_dry_run": dry_run,
             },
         )
 
@@ -1078,6 +1051,294 @@ def importer_run_download(run_id: int):
     return send_file(resolved_path, as_attachment=True, download_name=download_name)
 
 
+@admin_importer_blueprint.get("/dedupe/review")
+@login_required
+@permission_required("manage_imports", org_context=False)
+def importer_dedupe_review_page():
+    """Render the dedupe review queue page."""
+    if not _ensure_importer_enabled():
+        return render_template("errors/404.html"), HTTPStatus.NOT_FOUND
+
+    return render_template("importer/review.html")
+
+
+@admin_importer_blueprint.get("/dedupe/review/api")
+@login_required
+@permission_required("manage_imports", org_context=False)
+def importer_dedupe_review_queue():
+    """Get list of dedupe candidates for review (API endpoint)."""
+    if not _ensure_importer_enabled():
+        return jsonify({"error": "Importer is disabled."}), HTTPStatus.NOT_FOUND
+
+    status = request.args.get("status")
+    match_type = request.args.get("match_type")
+    run_id_raw = request.args.get("run_id")
+    limit_raw = request.args.get("limit", "100")
+    offset_raw = request.args.get("offset", "0")
+
+    run_id: int | None = None
+    if run_id_raw:
+        try:
+            run_id = int(run_id_raw)
+        except (TypeError, ValueError):
+            return jsonify({"error": "run_id must be an integer."}), HTTPStatus.BAD_REQUEST
+
+    try:
+        limit = int(limit_raw)
+        offset = int(offset_raw)
+    except (TypeError, ValueError):
+        return jsonify({"error": "limit and offset must be integers."}), HTTPStatus.BAD_REQUEST
+
+    if limit < 1 or limit > 500:
+        return jsonify({"error": "limit must be between 1 and 500."}), HTTPStatus.BAD_REQUEST
+    if offset < 0:
+        return jsonify({"error": "offset must be non-negative."}), HTTPStatus.BAD_REQUEST
+
+    try:
+        candidates, total = _merge_service.get_review_queue(
+            status=status,
+            match_type=match_type,
+            run_id=run_id,
+            limit=limit,
+            offset=offset,
+        )
+
+        candidates_list = []
+        for c in candidates:
+            try:
+                primary_name = None
+                if c.primary_contact:
+                    primary_name = (
+                        f"{c.primary_contact.first_name or ''} {c.primary_contact.last_name or ''}".strip() or None
+                    )
+
+                candidate_name = None
+                if c.candidate_contact:
+                    candidate_name = (
+                        f"{c.candidate_contact.first_name or ''} {c.candidate_contact.last_name or ''}".strip() or None
+                    )
+                elif c.staging_row and c.staging_row.normalized_json:
+                    staging_json = c.staging_row.normalized_json
+                    first_name = staging_json.get("first_name", "") or ""
+                    last_name = staging_json.get("last_name", "") or ""
+                    candidate_name = f"{first_name} {last_name}".strip() or None
+
+                created_at = None
+                if c.import_run and c.import_run.created_at:
+                    created_at = c.import_run.created_at.isoformat()
+
+                candidates_list.append(
+                    {
+                        "id": c.id,
+                        "run_id": c.run_id,
+                        "score": float(c.score) if c.score else None,
+                        "match_type": c.match_type,
+                        "features_json": c.features_json or {},
+                        "primary_contact_id": c.primary_contact_id,
+                        "candidate_contact_id": c.candidate_contact_id,
+                        "staging_volunteer_id": c.staging_volunteer_id,
+                        "decision": c.decision.value if hasattr(c.decision, "value") else str(c.decision),
+                        "primary_name": primary_name,
+                        "candidate_name": candidate_name,
+                        "created_at": created_at,
+                    }
+                )
+            except Exception as e:
+                current_app.logger.warning(f"Error serializing candidate {c.id}: {e}", exc_info=True)
+                # Skip this candidate but continue processing others
+                continue
+
+        result = {
+            "candidates": candidates_list,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+        return jsonify(result), HTTPStatus.OK
+    except Exception as exc:
+        current_app.logger.exception("Failed to fetch dedupe review queue", exc_info=exc)
+        return jsonify({"error": "Failed to fetch review queue."}), HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+@admin_importer_blueprint.get("/dedupe/candidates/<int:candidate_id>")
+@login_required
+@permission_required("manage_imports", org_context=False)
+def importer_dedupe_candidate_details(candidate_id: int):
+    """Get detailed information about a dedupe candidate."""
+    if not _ensure_importer_enabled():
+        return jsonify({"error": "Importer is disabled."}), HTTPStatus.NOT_FOUND
+
+    try:
+        details = _merge_service.get_candidate_details(candidate_id)
+        result = {
+            "suggestion_id": details.suggestion_id,
+            "score": details.score,
+            "match_type": details.match_type,
+            "features_json": details.features_json or {},
+            "primary_contact": details.primary_contact,
+            "candidate_contact": details.candidate_contact,
+            "staging_data": details.staging_data,
+            "survivorship_preview": details.survivorship_preview,
+            "run_id": details.run_id,
+            "created_at": details.created_at.isoformat(),
+        }
+        return jsonify(result), HTTPStatus.OK
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), HTTPStatus.NOT_FOUND
+    except Exception as exc:
+        current_app.logger.exception("Failed to fetch candidate details", exc_info=exc)
+        return jsonify({"error": "Failed to fetch candidate details."}), HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+@admin_importer_blueprint.post("/dedupe/candidates/<int:candidate_id>/merge")
+@login_required
+@permission_required("manage_imports", org_context=False)
+def importer_dedupe_merge_candidate(candidate_id: int):
+    """Execute a merge operation for a dedupe candidate."""
+    if not _ensure_importer_enabled():
+        return jsonify({"error": "Importer is disabled."}), HTTPStatus.NOT_FOUND
+
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a JSON object."}), HTTPStatus.BAD_REQUEST
+
+    field_overrides = payload.get("field_overrides")
+    if field_overrides is not None and not isinstance(field_overrides, dict):
+        return jsonify({"error": "field_overrides must be a dictionary."}), HTTPStatus.BAD_REQUEST
+
+    notes = payload.get("notes")
+    if notes is not None and not isinstance(notes, str):
+        return jsonify({"error": "notes must be a string."}), HTTPStatus.BAD_REQUEST
+
+    try:
+        merge_log = _merge_service.execute_merge(
+            candidate_id,
+            user_id=current_user.id,
+            field_overrides=field_overrides,
+            notes=notes,
+        )
+        db.session.commit()
+
+        result = {
+            "merge_log_id": merge_log.id,
+            "primary_contact_id": merge_log.primary_contact_id,
+            "merged_contact_id": merge_log.merged_contact_id,
+            "decision_type": merge_log.decision_type,
+        }
+        return jsonify(result), HTTPStatus.OK
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({"error": str(exc)}), HTTPStatus.BAD_REQUEST
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception("Failed to execute merge", exc_info=exc)
+        return jsonify({"error": "Failed to execute merge."}), HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+@admin_importer_blueprint.post("/dedupe/candidates/<int:candidate_id>/reject")
+@login_required
+@permission_required("manage_imports", org_context=False)
+def importer_dedupe_reject_candidate(candidate_id: int):
+    """Mark a candidate as rejected (not a duplicate)."""
+    if not _ensure_importer_enabled():
+        return jsonify({"error": "Importer is disabled."}), HTTPStatus.NOT_FOUND
+
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a JSON object."}), HTTPStatus.BAD_REQUEST
+
+    notes = payload.get("notes")
+    if notes is not None and not isinstance(notes, str):
+        return jsonify({"error": "notes must be a string."}), HTTPStatus.BAD_REQUEST
+
+    try:
+        suggestion = _merge_service.reject_candidate(
+            candidate_id,
+            user_id=current_user.id,
+            notes=notes,
+        )
+        db.session.commit()
+
+        result = {
+            "suggestion_id": suggestion.id,
+            "decision": suggestion.decision.value
+            if hasattr(suggestion.decision, "value")
+            else str(suggestion.decision),
+            "decided_at": suggestion.decided_at.isoformat() if suggestion.decided_at else None,
+        }
+        return jsonify(result), HTTPStatus.OK
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({"error": str(exc)}), HTTPStatus.BAD_REQUEST
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception("Failed to reject candidate", exc_info=exc)
+        return jsonify({"error": "Failed to reject candidate."}), HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+@admin_importer_blueprint.post("/dedupe/candidates/<int:candidate_id>/defer")
+@login_required
+@permission_required("manage_imports", org_context=False)
+def importer_dedupe_defer_candidate(candidate_id: int):
+    """Defer a candidate decision for later review."""
+    if not _ensure_importer_enabled():
+        return jsonify({"error": "Importer is disabled."}), HTTPStatus.NOT_FOUND
+
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Request body must be a JSON object."}), HTTPStatus.BAD_REQUEST
+
+    notes = payload.get("notes")
+    if notes is not None and not isinstance(notes, str):
+        return jsonify({"error": "notes must be a string."}), HTTPStatus.BAD_REQUEST
+
+    try:
+        suggestion = _merge_service.defer_candidate(
+            candidate_id,
+            user_id=current_user.id,
+            notes=notes,
+        )
+        db.session.commit()
+
+        result = {
+            "suggestion_id": suggestion.id,
+            "decision": suggestion.decision.value
+            if hasattr(suggestion.decision, "value")
+            else str(suggestion.decision),
+            "decided_at": suggestion.decided_at.isoformat() if suggestion.decided_at else None,
+        }
+        return jsonify(result), HTTPStatus.OK
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({"error": str(exc)}), HTTPStatus.BAD_REQUEST
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception("Failed to defer candidate", exc_info=exc)
+        return jsonify({"error": "Failed to defer candidate."}), HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+@admin_importer_blueprint.get("/dedupe/stats")
+@login_required
+@permission_required("manage_imports", org_context=False)
+def importer_dedupe_stats():
+    """Get statistics about the review queue."""
+    if not _ensure_importer_enabled():
+        return jsonify({"error": "Importer is disabled."}), HTTPStatus.NOT_FOUND
+
+    try:
+        stats = _merge_service.get_queue_stats()
+        result = {
+            "total_pending": stats.total_pending,
+            "total_review_band": stats.total_review_band,
+            "total_high_confidence": stats.total_high_confidence,
+            "aging_buckets": stats.aging_buckets,
+        }
+        return jsonify(result), HTTPStatus.OK
+    except Exception as exc:
+        current_app.logger.exception("Failed to fetch dedupe stats", exc_info=exc)
+        return jsonify({"error": "Failed to fetch queue statistics."}), HTTPStatus.INTERNAL_SERVER_ERROR
+
+
 def register_importer_admin_routes(app):
     """
     Register importer admin routes when the importer feature flag is enabled.
@@ -1090,4 +1351,3 @@ def register_importer_admin_routes(app):
         return
 
     app.register_blueprint(admin_importer_blueprint)
-

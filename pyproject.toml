@@ -5,6 +5,12 @@
 requires = ["setuptools>=67", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools]
+packages = ["flask_app", "config", "scripts"]
+
+[tool.setuptools.package-data]
+"*" = ["*.yaml", "*.yml"]
+
 [project]
 name = "polaris"
 version = "0.0.0"

@@ -1,0 +1,313 @@
+{% extends "base.html" %}
+
+{% block title %}Duplicate Review{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
+<style>
+  .dedupe-review {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .dedupe-review .card {
+    width: 100%;
+  }
+
+  .candidate-card {
+    border-left: 4px solid #dee2e6;
+    transition: border-color 0.2s;
+  }
+
+  .candidate-card:hover {
+    border-left-color: #0d6efd;
+  }
+
+  .candidate-card.high-confidence {
+    border-left-color: #198754;
+  }
+
+  .candidate-card.review-band {
+    border-left-color: #ffc107;
+  }
+
+  .score-badge {
+    font-size: 1.1rem;
+    font-weight: 600;
+    padding: 0.5rem 1rem;
+  }
+
+  .side-by-side-comparison {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+  }
+
+  @media (max-width: 768px) {
+    .side-by-side-comparison {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .field-diff {
+    padding: 0.5rem;
+    border-radius: 0.25rem;
+  }
+
+  .field-diff.changed {
+    background-color: #fff3cd;
+  }
+
+  .field-diff.unchanged {
+    background-color: #f8f9fa;
+  }
+
+  .survivorship-preview table {
+    font-size: 0.9rem;
+  }
+
+  .survivorship-preview .winner-badge {
+    font-size: 0.75rem;
+  }
+
+  @media (min-width: 992px) {
+    .dedupe-review {
+      padding-left: 1.5rem;
+      padding-right: 1.5rem;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid dedupe-review py-4" data-component="dedupe-review">
+  <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4">
+    <div>
+      <h1 class="h3 mb-1">Duplicate Review</h1>
+      <p class="text-muted mb-0">Review fuzzy dedupe candidates and merge duplicates safely.</p>
+    </div>
+    <div class="d-flex gap-2 mt-3 mt-md-0">
+      <button class="btn btn-outline-primary" id="review-refresh-btn" data-action="refresh">
+        <span class="spinner-border spinner-border-sm d-none" id="review-refresh-spinner" role="status" aria-hidden="true"></span>
+        Refresh
+      </button>
+      <button class="btn btn-outline-secondary" id="review-auto-refresh-toggle" data-action="auto-refresh">
+        Auto Refresh
+      </button>
+    </div>
+  </div>
+
+  <!-- Queue Statistics -->
+  <div class="row mb-4" id="review-stats-cards">
+    <div class="col-md-3">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <h6 class="text-muted mb-1">Total Pending</h6>
+          <h3 class="mb-0" id="stat-total-pending">-</h3>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <h6 class="text-muted mb-1">Review Band (0.80-0.95)</h6>
+          <h3 class="mb-0" id="stat-review-band">-</h3>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <h6 class="text-muted mb-1">High Confidence (≥0.95)</h6>
+          <h3 class="mb-0" id="stat-high-confidence">-</h3>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <h6 class="text-muted mb-1">Aging (>48h)</h6>
+          <h3 class="mb-0 text-warning" id="stat-aging-older">-</h3>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="card shadow-sm mb-4">
+    <div class="card-header">
+      <h2 class="h5 mb-0">Filters</h2>
+    </div>
+    <div class="card-body">
+      <form id="review-filter-form" class="row g-3 align-items-end" autocomplete="off">
+        <div class="col-sm-6 col-lg-3">
+          <label for="filter-status" class="form-label">Status</label>
+          <select id="filter-status" class="form-select" name="status">
+            <option value="">All</option>
+            <option value="pending" selected>Pending</option>
+            <option value="review">Review Band</option>
+            <option value="deferred">Deferred</option>
+          </select>
+        </div>
+        <div class="col-sm-6 col-lg-3">
+          <label for="filter-match-type" class="form-label">Match Type</label>
+          <select id="filter-match-type" class="form-select" name="match_type">
+            <option value="">All</option>
+            <option value="fuzzy_high">High Confidence (≥0.95)</option>
+            <option value="fuzzy_review">Review Band (0.80-0.95)</option>
+            <option value="fuzzy_low">Low Score (<0.80)</option>
+          </select>
+        </div>
+        <div class="col-sm-6 col-lg-3">
+          <label for="filter-run-id" class="form-label">Run ID</label>
+          <input type="number" class="form-control" id="filter-run-id" name="run_id" min="1" placeholder="e.g. 42">
+        </div>
+        <div class="col-sm-6 col-lg-3">
+          <button type="submit" class="btn btn-primary w-100">Apply Filters</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Candidate List -->
+  <div class="card shadow-sm">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <h2 class="h5 mb-0">Candidates</h2>
+      <span class="text-muted small" id="review-pagination-summary">Loading...</span>
+    </div>
+    <div class="card-body">
+      <div id="review-loading-overlay" class="text-center py-5 d-none">
+        <div class="spinner-border text-primary" role="status">
+          <span class="visually-hidden">Loading...</span>
+        </div>
+        <p class="mt-2 text-muted">Loading candidates...</p>
+      </div>
+      <div id="review-candidates-list">
+        <!-- Candidates will be loaded here -->
+      </div>
+      <nav id="review-pagination" aria-label="Candidate pagination" class="mt-4">
+        <!-- Pagination will be generated here -->
+      </nav>
+    </div>
+  </div>
+</div>
+
+<!-- Candidate Detail Modal -->
+<div class="modal fade" id="candidate-detail-modal" tabindex="-1" aria-labelledby="candidate-detail-title" aria-hidden="true">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="candidate-detail-title">Review Candidate</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div id="candidate-detail-loader" class="text-center py-5">
+          <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+        </div>
+        <div id="candidate-detail-content" class="d-none">
+          <!-- Score and Features -->
+          <div class="card mb-3">
+            <div class="card-body">
+              <div class="row">
+                <div class="col-md-6">
+                  <h6 class="text-muted mb-1">Match Score</h6>
+                  <div id="detail-score-badge" class="score-badge badge d-inline-block mb-2"></div>
+                  <div>
+                    <small class="text-muted">Match Type: </small>
+                    <span id="detail-match-type" class="badge bg-secondary"></span>
+                  </div>
+                </div>
+                <div class="col-md-6">
+                  <h6 class="text-muted mb-2">Top Features</h6>
+                  <div id="detail-top-features"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Side-by-Side Comparison -->
+          <div class="card mb-3">
+            <div class="card-header">
+              <h6 class="mb-0">Record Comparison</h6>
+            </div>
+            <div class="card-body">
+              <div class="side-by-side-comparison">
+                <div>
+                  <h6 class="text-primary mb-3">Primary Contact</h6>
+                  <div id="detail-primary-contact"></div>
+                </div>
+                <div>
+                  <h6 class="text-info mb-3">Candidate</h6>
+                  <div id="detail-candidate-contact"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Survivorship Preview -->
+          <div class="card mb-3">
+            <div class="card-header">
+              <h6 class="mb-0">Survivorship Preview</h6>
+            </div>
+            <div class="card-body survivorship-preview">
+              <div id="detail-survivorship-preview"></div>
+            </div>
+          </div>
+
+          <!-- Action Form -->
+          <div class="card">
+            <div class="card-header">
+              <h6 class="mb-0">Actions</h6>
+            </div>
+            <div class="card-body">
+              <form id="candidate-action-form">
+                <input type="hidden" id="action-candidate-id" name="candidate_id">
+                <div class="mb-3">
+                  <label for="action-notes" class="form-label">Notes (optional)</label>
+                  <textarea class="form-control" id="action-notes" name="notes" rows="3" placeholder="Add notes about this decision..."></textarea>
+                </div>
+                <div id="action-errors" class="alert alert-danger d-none" role="alert"></div>
+                <div class="d-flex gap-2">
+                  {% if current_user.is_super_admin or (current_user.has_permission and current_user.has_permission('manage_imports')) %}
+                  <button type="button" class="btn btn-success" id="action-merge-btn" data-action="merge">
+                    <i class="fas fa-compress-alt me-1"></i> Merge
+                  </button>
+                  <button type="button" class="btn btn-danger" id="action-reject-btn" data-action="reject">
+                    <i class="fas fa-times me-1"></i> Not a Duplicate
+                  </button>
+                  <button type="button" class="btn btn-warning" id="action-defer-btn" data-action="defer">
+                    <i class="fas fa-clock me-1"></i> Defer
+                  </button>
+                  {% else %}
+                  <div class="alert alert-info mb-0">
+                    <i class="fas fa-info-circle me-1"></i> You have read-only access. Contact an administrator to perform merge actions.
+                  </div>
+                  {% endif %}
+                  <button type="button" class="btn btn-secondary ms-auto" data-bs-dismiss="modal">Close</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  // Configuration passed from Flask
+  window.DEDUPE_REVIEW_CONFIG = {
+    apiBase: "{{ url_for('admin_importer.importer_dedupe_review_queue') }}",
+    candidateDetailsUrl: "{{ url_for('admin_importer.importer_dedupe_candidate_details', candidate_id=0) }}",
+    mergeUrl: "{{ url_for('admin_importer.importer_dedupe_merge_candidate', candidate_id=0) }}",
+    rejectUrl: "{{ url_for('admin_importer.importer_dedupe_reject_candidate', candidate_id=0) }}",
+    deferUrl: "{{ url_for('admin_importer.importer_dedupe_defer_candidate', candidate_id=0) }}",
+    statsUrl: "{{ url_for('admin_importer.importer_dedupe_stats') }}",
+  };
+</script>
+<script src="{{ url_for('static', filename='js/importer_review.js') }}"></script>
+{% endblock %}

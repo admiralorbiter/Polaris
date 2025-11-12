@@ -154,13 +154,11 @@ class Config:
         os.path.join(os.path.dirname(__file__), "mappings", "salesforce_contact_v1.yaml"),
     )
     _raw_sf_objects = os.environ.get("IMPORTER_SALESFORCE_OBJECTS", "contacts")
-    IMPORTER_SALESFORCE_OBJECTS = tuple(
-        obj.strip().lower() for obj in _raw_sf_objects.split(",") if obj.strip()
-    ) or ("contacts",)
+    IMPORTER_SALESFORCE_OBJECTS = tuple(obj.strip().lower() for obj in _raw_sf_objects.split(",") if obj.strip()) or (
+        "contacts",
+    )
     try:
-        IMPORTER_SALESFORCE_BATCH_SIZE = max(
-            1000, int(os.environ.get("IMPORTER_SALESFORCE_BATCH_SIZE", "5000"))
-        )
+        IMPORTER_SALESFORCE_BATCH_SIZE = max(1000, int(os.environ.get("IMPORTER_SALESFORCE_BATCH_SIZE", "5000")))
     except ValueError:
         IMPORTER_SALESFORCE_BATCH_SIZE = 5000
     if IMPORTER_RUNS_PAGE_SIZE_DEFAULT not in _parsed_page_sizes:
@@ -179,6 +177,11 @@ class Config:
 
     # CSRF protection
     WTF_CSRF_ENABLED = True
+
+    # Email validation - disable deliverability checks for imports
+    # Deliverability checks perform DNS lookups which can fail for typos or temporary DNS issues
+    # Data quality validation should catch these issues instead
+    EMAIL_VALIDATION_CHECK_DELIVERABILITY = False
 
 
 class DevelopmentConfig(Config):

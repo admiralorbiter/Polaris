@@ -14,8 +14,8 @@ from flask import Flask
 from flask_app.utils.importer import get_importer_adapters, is_importer_enabled
 
 from .celery_app import ensure_celery_app, get_celery_app
-from .metrics import record_salesforce_adapter_status, record_salesforce_auth_attempt
 from .cli import get_disabled_importer_group, importer_cli
+from .metrics import record_salesforce_adapter_status, record_salesforce_auth_attempt
 from .pipeline.dq_service import DataQualityViolationService, ViolationFilters
 from .pipeline.run_service import ImportRunService, RunFilters
 from .registry import AdapterDescriptor, get_adapter_registry, resolve_adapters
@@ -91,9 +91,7 @@ def _compute_adapter_readiness(
             )
             payload.update(readiness_result.as_dict())
             if require_auth_ping and readiness_result.auth_status in ("ok", "failed"):
-                record_salesforce_auth_attempt(
-                    "success" if readiness_result.auth_status == "ok" else "failure"
-                )
+                record_salesforce_auth_attempt("success" if readiness_result.auth_status == "ok" else "failure")
             salesforce_status = readiness_result.status == "ready"
         else:
             payload.update(
@@ -163,6 +161,10 @@ def init_importer(app: Flask) -> None:
         {
             "label": "Importer Runs",
             "endpoint": "admin_importer.importer_runs_dashboard_page",
+        },
+        {
+            "label": "Duplicate Review",
+            "endpoint": "admin_importer.importer_dedupe_review_page",
         },
         {
             "label": "DQ Inbox",
