@@ -12,6 +12,7 @@ from typing import Any, Iterable, Mapping, MutableMapping, Sequence
 
 from flask import current_app, has_app_context
 from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from config.monitoring import ImporterMonitoring
 from config.survivorship import SurvivorshipProfile, load_profile
@@ -30,6 +31,7 @@ from flask_app.models.importer.schema import (
 
 from .clean import CleanVolunteerPayload
 from .deterministic import match_volunteer_by_contact
+from .fuzzy_features import compute_name_similarity
 from .idempotency import MissingExternalIdentifier, resolve_import_target
 from .survivorship import SurvivorshipResult, apply_survivorship, summarize_decisions
 
@@ -44,6 +46,7 @@ class CoreLoadSummary:
     rows_reactivated: int
     rows_deduped_auto: int
     rows_skipped_duplicates: int
+    rows_skipped_duplicate_name: int
     rows_skipped_no_change: int
     rows_missing_external_id: int
     rows_soft_deleted: int
@@ -101,9 +104,18 @@ def load_core_volunteers(
             config.setdefault("EMAIL_VALIDATION_CHECK_DELIVERABILITY", False)
             config["IMPORTER_EMAIL_VALIDATION_INITIALIZED"] = True
 
+    # Check if name-based dedupe is enabled (default: True)
+    name_dedupe_enabled = True
+    name_dedupe_or_logic = True
+    if has_app_context():
+        config = current_app.config
+        name_dedupe_enabled = config.get("IMPORTER_NAME_DEDUPE_ENABLED", True)
+        name_dedupe_or_logic = config.get("IMPORTER_NAME_DEDUPE_OR_LOGIC", True)
+
     if dry_run:
         candidates = list(clean_candidates or _build_candidates_from_clean_rows(import_run))
         rows_skipped_duplicates = 0
+        rows_skipped_duplicate_name = 0
         rows_created = 0
         rows_missing_external_id = 0
 
@@ -112,11 +124,17 @@ def load_core_volunteers(
                 rows_missing_external_id += 1
                 continue
 
-            exists = _email_exists(candidate.email)
-            if exists:
+            email_exists = _email_exists(candidate.email)
+            name_match = None
+            if name_dedupe_enabled and candidate.first_name and candidate.last_name:
+                name_match = _name_exists_exact(candidate.first_name, candidate.last_name)
+            
+            if email_exists:
                 rows_skipped_duplicates += 1
                 if candidate.email:
                     duplicate_emails.append(candidate.email)
+            elif name_match and (name_dedupe_or_logic or not email_exists):
+                rows_skipped_duplicate_name += 1
             else:
                 rows_created += 1
 
@@ -127,6 +145,7 @@ def load_core_volunteers(
             rows_reactivated=0,
             rows_deduped_auto=0,
             rows_skipped_duplicates=rows_skipped_duplicates,
+            rows_skipped_duplicate_name=rows_skipped_duplicate_name,
             rows_skipped_no_change=0,
             rows_missing_external_id=rows_missing_external_id,
             rows_soft_deleted=0,
@@ -136,6 +155,9 @@ def load_core_volunteers(
         _update_core_counts(import_run, summary, potential_inserts=rows_created)
         return summary
 
+    # Reset name lookup cache at start of import run
+    _reset_name_cache()
+    
     clean_rows: Iterable[CleanVolunteer] = (
         session.query(CleanVolunteer).filter(CleanVolunteer.run_id == import_run.id).order_by(CleanVolunteer.id)
     )
@@ -146,6 +168,7 @@ def load_core_volunteers(
     rows_reactivated = 0
     rows_deduped_auto = 0
     rows_skipped_duplicates = 0
+    rows_skipped_duplicate_name = 0
     rows_skipped_no_change = 0
     rows_missing_external_id = 0
     rows_soft_deleted = 0
@@ -196,16 +219,106 @@ def load_core_volunteers(
             current_action = "create"
 
         if current_action == "create":
-            if candidate.email and _email_exists(candidate.email):
-                rows_skipped_duplicates += 1
-                if candidate.email:
-                    duplicate_emails.append(candidate.email)
-                clean_row.load_action = "skipped_duplicate"
-                clean_row.core_contact_id = None
-                clean_row.core_volunteer_id = None
-                if staging_row is not None:
-                    _mark_staging_loaded(staging_row, duplicate=True)
-                _log_duplicate(candidate.email, import_run.id)
+            # Check for email duplicate first
+            email_exists = candidate.email and _email_exists(candidate.email)
+            
+            # Check for name duplicate if enabled
+            name_match_volunteer = None
+            fuzzy_match_volunteers = []
+            if name_dedupe_enabled and candidate.first_name and candidate.last_name:
+                name_match_volunteer = _name_exists_exact(candidate.first_name, candidate.last_name)
+                if not name_match_volunteer:
+                    # Check for fuzzy matches (threshold 0.95)
+                    fuzzy_match_volunteers = _name_exists_fuzzy(candidate.first_name, candidate.last_name, threshold=0.95)
+            
+            # Apply OR logic: skip if email OR name matches
+            should_skip = False
+            skip_reason = None
+            duplicate_type = "email"
+            
+            if email_exists:
+                should_skip = True
+                skip_reason = "email"
+                duplicate_type = "email"
+            elif name_match_volunteer and (name_dedupe_or_logic or not email_exists):
+                should_skip = True
+                skip_reason = "name"
+                duplicate_type = "name"
+            elif fuzzy_match_volunteers and name_dedupe_enabled:
+                # Create DedupeSuggestion for review queue
+                for fuzzy_volunteer in fuzzy_match_volunteers[:1]:  # Only first match for now
+                    if not _suggestion_exists_for_staging(session, import_run.id, staging_row.id if staging_row else None, fuzzy_volunteer.id):
+                        suggestion = DedupeSuggestion(
+                            run_id=import_run.id,
+                            staging_volunteer_id=staging_row.id if staging_row else None,
+                            primary_contact_id=fuzzy_volunteer.id,
+                            candidate_contact_id=None,
+                            score=0.95,  # Approximate score for fuzzy match
+                            confidence_score=0.95,
+                            match_type="fuzzy_name",
+                            decision=DedupeDecision.PENDING,
+                            features_json={
+                                "match_type": "fuzzy_name",
+                                "name_similarity": 0.95,
+                                "first_name": candidate.first_name,
+                                "last_name": candidate.last_name,
+                            },
+                            decision_notes="Fuzzy name match detected during load; requires manual review.",
+                        )
+                        session.add(suggestion)
+                should_skip = True
+                skip_reason = "fuzzy"
+                duplicate_type = "fuzzy"
+            
+            if should_skip:
+                if skip_reason == "email":
+                    rows_skipped_duplicates += 1
+                    if candidate.email:
+                        duplicate_emails.append(candidate.email)
+                    clean_row.load_action = "skipped_duplicate"
+                    if staging_row is not None:
+                        _mark_staging_loaded(staging_row, duplicate=True, duplicate_type="email")
+                    _log_duplicate(candidate.email, import_run.id, match_type="email")
+                elif skip_reason == "name":
+                    rows_skipped_duplicate_name += 1
+                    clean_row.load_action = "skipped_duplicate"
+                    # Merge email if provided and different
+                    if candidate.email and name_match_volunteer:
+                        _merge_email_to_volunteer(name_match_volunteer.id, candidate.email, import_run.id)
+                    # Update ExternalIdMap if external_id exists
+                    if candidate.external_id and name_match_volunteer:
+                        existing_map = (
+                            session.query(ExternalIdMap)
+                            .filter(
+                                ExternalIdMap.entity_type == "volunteer",
+                                ExternalIdMap.external_system == candidate.external_system,
+                                ExternalIdMap.external_id == candidate.external_id,
+                            )
+                            .first()
+                        )
+                        if not existing_map:
+                            id_map = ExternalIdMap(
+                                run_id=import_run.id,
+                                entity_type="volunteer",
+                                entity_id=name_match_volunteer.id,
+                                external_system=candidate.external_system,
+                                external_id=candidate.external_id,
+                            )
+                            id_map.mark_seen(run_id=import_run.id)
+                            session.add(id_map)
+                    clean_row.core_contact_id = name_match_volunteer.id
+                    clean_row.core_volunteer_id = name_match_volunteer.id
+                    if staging_row is not None:
+                        _mark_staging_loaded(staging_row, duplicate=True, duplicate_type="name")
+                    _log_duplicate(None, import_run.id, match_type="name")
+                elif skip_reason == "fuzzy":
+                    rows_skipped_duplicate_name += 1
+                    clean_row.load_action = "skipped_duplicate_fuzzy"
+                    clean_row.core_contact_id = None
+                    clean_row.core_volunteer_id = None
+                    if staging_row is not None:
+                        _mark_staging_loaded(staging_row, duplicate=True, duplicate_type="fuzzy")
+                    _log_duplicate(None, import_run.id, match_type="fuzzy")
                 continue
 
             volunteer = _create_volunteer_from_candidate(candidate)
@@ -333,6 +446,7 @@ def load_core_volunteers(
         rows_reactivated=rows_reactivated,
         rows_deduped_auto=rows_deduped_auto,
         rows_skipped_duplicates=rows_skipped_duplicates,
+        rows_skipped_duplicate_name=rows_skipped_duplicate_name,
         rows_skipped_no_change=rows_skipped_no_change,
         rows_missing_external_id=rows_missing_external_id,
         rows_soft_deleted=rows_soft_deleted,
@@ -362,7 +476,7 @@ def load_core_volunteers(
         current_app.logger.info(
             (
                 "Importer run %s loaded %s volunteers "
-                "(created=%s updated=%s reactivated=%s duplicates=%s "
+                "(created=%s updated=%s reactivated=%s duplicates=%s name_duplicates=%s "
                 "no_change=%s missing_external_id=%s dedupe_auto=%s)"
             ),
             import_run.id,
@@ -371,6 +485,7 @@ def load_core_volunteers(
             summary.rows_updated,
             summary.rows_reactivated,
             summary.rows_skipped_duplicates,
+            summary.rows_skipped_duplicate_name,
             summary.rows_skipped_no_change,
             summary.rows_missing_external_id,
             summary.rows_deduped_auto,
@@ -413,10 +528,184 @@ def _email_exists(email: str | None) -> bool:
     )
 
 
-def _mark_staging_loaded(staging_row: StagingVolunteer, *, duplicate: bool) -> None:
+def _normalize_name(first_name: str | None, last_name: str | None) -> tuple[str | None, str | None]:
+    """Normalize names for comparison (lowercase, strip, handle None)."""
+    first = _coerce_string(first_name)
+    last = _coerce_string(last_name)
+    if first:
+        first = first.lower().strip()
+    if last:
+        last = last.lower().strip()
+    return (first if first else None, last if last else None)
+
+
+# Cache for name lookups during a single import run (per-session cache)
+_name_cache: dict[tuple[str, str], Volunteer | None] = {}
+_name_cache_session_id: int | None = None
+
+def _reset_name_cache():
+    """Reset the name lookup cache. Call at start of each import run."""
+    global _name_cache, _name_cache_session_id
+    _name_cache.clear()
+    _name_cache_session_id = id(db.session)
+
+def _name_exists_exact(first_name: str | None, last_name: str | None, use_cache: bool = True) -> Volunteer | None:
+    """Check for exact name matches in Volunteer table. Returns first matching volunteer or None.
+    
+    Uses a per-session cache to avoid repeated database queries for the same name during an import run.
+    """
+    if not first_name or not last_name:
+        return None
+    
+    first_norm, last_norm = _normalize_name(first_name, last_name)
+    if not first_norm or not last_norm:
+        return None
+    
+    # Check cache first
+    cache_key = (first_norm, last_norm)
+    if use_cache:
+        # Reset cache if session changed
+        current_session_id = id(db.session)
+        if _name_cache_session_id != current_session_id:
+            _name_cache.clear()
+            _name_cache_session_id = current_session_id
+        
+        if cache_key in _name_cache:
+            return _name_cache[cache_key]
+    
+    # Query database
+    volunteer = (
+        db.session.query(Volunteer)
+        .filter(
+            func.lower(Volunteer.first_name) == first_norm,
+            func.lower(Volunteer.last_name) == last_norm,
+        )
+        .first()
+    )
+    
+    # Cache result
+    if use_cache:
+        _name_cache[cache_key] = volunteer
+    
+    return volunteer
+
+
+def _name_exists_fuzzy(first_name: str | None, last_name: str | None, threshold: float = 0.95) -> list[Volunteer]:
+    """Check for fuzzy name matches using Jaro-Winkler similarity. Returns list of matching volunteers."""
+    if not first_name or not last_name:
+        return []
+    
+    first_norm, last_norm = _normalize_name(first_name, last_name)
+    if not first_norm or not last_norm:
+        return []
+    
+    # Use a more efficient approach: get volunteers with same last name and first initial
+    # This narrows down candidates before computing expensive similarity scores
+    first_initial = first_norm[0] if first_norm else None
+    if not first_initial:
+        return []
+    
+    # Query volunteers with matching last name and first initial
+    candidates = (
+        db.session.query(Volunteer)
+        .filter(
+            func.lower(Volunteer.last_name) == last_norm,
+            func.lower(func.substr(Volunteer.first_name, 1, 1)) == first_initial,
+        )
+        .limit(50)  # Limit to avoid checking too many
+        .all()
+    )
+    
+    matches = []
+    for volunteer in candidates:
+        if not volunteer.first_name or not volunteer.last_name:
+            continue
+        similarity = compute_name_similarity(
+            first_norm, last_norm,
+            volunteer.first_name, volunteer.last_name
+        )
+        if similarity >= threshold:
+            matches.append(volunteer)
+    
+    return matches
+
+
+def _find_volunteer_by_name(first_name: str | None, last_name: str | None, exact: bool = True) -> Volunteer | None:
+    """Find volunteer by name. If exact=True, returns first exact match. If exact=False, returns first fuzzy match."""
+    if exact:
+        return _name_exists_exact(first_name, last_name)
+    else:
+        fuzzy_matches = _name_exists_fuzzy(first_name, last_name, threshold=0.95)
+        return fuzzy_matches[0] if fuzzy_matches else None
+
+
+def _merge_email_to_volunteer(volunteer_id: int, email: str | None, import_run_id: int | None = None) -> bool:
+    """Merge email into existing volunteer. Returns True if email was added, False if it already existed or was invalid."""
+    if not email:
+        return False
+    
+    # Normalize email
+    email = email.strip().lower() if email else None
+    if not email:
+        return False
+    
+    # Validate email format
+    try:
+        from email_validator import validate_email, EmailNotValidError
+        validate_email(email, check_deliverability=False)
+    except EmailNotValidError:
+        if has_app_context():
+            current_app.logger.warning(f"Skipping invalid email for volunteer {volunteer_id}: {email}")
+        return False
+    
+    volunteer = db.session.get(Volunteer, volunteer_id)
+    if not volunteer:
+        return False
+    
+    # Check if email already exists for this volunteer
+    existing_email = next(
+        (e for e in volunteer.emails if e.email.lower() == email.lower()),
+        None
+    )
+    if existing_email:
+        return False  # Email already exists
+    
+    # Check if there's already a primary email
+    has_primary = any(e.is_primary for e in volunteer.emails)
+    
+    # Create new email record
+    new_email = ContactEmail(
+        contact_id=volunteer_id,
+        email=email,
+        email_type=EmailType.PERSONAL,
+        is_primary=not has_primary,  # Make primary only if no primary exists
+        is_verified=False,
+    )
+    volunteer.emails.append(new_email)
+    db.session.add(new_email)
+    
+    # Log the merge action
+    if has_app_context() and import_run_id:
+        current_app.logger.info(
+            "Importer run %s merged email %s into volunteer %s (name-based duplicate)",
+            import_run_id, email, volunteer_id
+        )
+    
+    return True
+
+
+def _mark_staging_loaded(staging_row: StagingVolunteer, *, duplicate: bool, duplicate_type: str = "email") -> None:
     staging_row.status = StagingRecordStatus.LOADED
     staging_row.processed_at = datetime.now(timezone.utc)
-    staging_row.last_error = "Skipped duplicate by email" if duplicate else None
+    if duplicate:
+        if duplicate_type == "name":
+            staging_row.last_error = "Skipped duplicate by name"
+        elif duplicate_type == "fuzzy":
+            staging_row.last_error = "Fuzzy name match - review required"
+        else:
+            staging_row.last_error = "Skipped duplicate by email"
+    else:
+        staging_row.last_error = None
 
 
 def _mark_staging_error(staging_row: StagingVolunteer, *, message: str) -> None:
@@ -425,11 +714,15 @@ def _mark_staging_error(staging_row: StagingVolunteer, *, message: str) -> None:
     staging_row.last_error = message
 
 
-def _log_duplicate(email: str | None, run_id: int) -> None:
-    if not email:
-        return
+def _log_duplicate(email: str | None, run_id: int, match_type: str = "email") -> None:
+    """Log duplicate detection. match_type can be 'email', 'name', or 'fuzzy'."""
     if has_app_context():
-        current_app.logger.info("Importer run %s skipped duplicate email %s", run_id, email)
+        if match_type == "email" and email:
+            current_app.logger.info("Importer run %s skipped duplicate email %s", run_id, email)
+        elif match_type == "name":
+            current_app.logger.info("Importer run %s skipped duplicate by name", run_id)
+        elif match_type == "fuzzy":
+            current_app.logger.info("Importer run %s flagged fuzzy name match for review", run_id)
 
 
 def _update_core_counts(
@@ -454,6 +747,7 @@ def _update_core_counts(
             "rows_deduped_auto": deduped_count,
             "rows_changed": changed_count,
             "rows_skipped_duplicates": summary.rows_skipped_duplicates,
+            "rows_skipped_duplicate_name": summary.rows_skipped_duplicate_name,
             "rows_skipped_no_change": summary.rows_skipped_no_change,
             "rows_missing_external_id": summary.rows_missing_external_id,
             "rows_soft_deleted": summary.rows_soft_deleted,
@@ -474,6 +768,7 @@ def _update_core_counts(
             "rows_deduped_auto": summary.rows_deduped_auto,
             "rows_changed": summary.rows_changed,
             "rows_skipped_duplicates": summary.rows_skipped_duplicates,
+            "rows_skipped_duplicate_name": summary.rows_skipped_duplicate_name,
             "rows_skipped_no_change": summary.rows_skipped_no_change,
             "rows_missing_external_id": summary.rows_missing_external_id,
             "rows_soft_deleted": summary.rows_soft_deleted,
@@ -1002,3 +1297,14 @@ def _record_ambiguous_dedupe(
         decision_notes="Multiple deterministic candidates detected; requires manual review.",
     )
     db.session.add(suggestion)
+
+
+def _suggestion_exists_for_staging(session, run_id: int, staging_id: int | None, primary_contact_id: int) -> bool:
+    """Check if a DedupeSuggestion already exists for this staging row and volunteer."""
+    query = session.query(DedupeSuggestion.id).filter(
+        DedupeSuggestion.run_id == run_id,
+        DedupeSuggestion.primary_contact_id == primary_contact_id,
+    )
+    if staging_id is not None:
+        query = query.filter(DedupeSuggestion.staging_volunteer_id == staging_id)
+    return session.query(query.exists()).scalar()

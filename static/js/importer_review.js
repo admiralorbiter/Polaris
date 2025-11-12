@@ -15,6 +15,8 @@
       filterForm: document.getElementById("review-filter-form"),
       refreshButton: document.getElementById("review-refresh-btn"),
       refreshSpinner: document.getElementById("review-refresh-spinner"),
+      scanButton: document.getElementById("review-scan-btn"),
+      scanSpinner: document.getElementById("review-scan-spinner"),
       autoRefreshToggle: document.getElementById("review-auto-refresh-toggle"),
       candidatesList: document.getElementById("review-candidates-list"),
       loadingOverlay: document.getElementById("review-loading-overlay"),
@@ -622,6 +624,80 @@
         state.offset = 0;
         loadCandidates();
       });
+    }
+
+    function scanExistingVolunteers() {
+      if (!config.scanExistingUrl) {
+        console.error("Scan existing URL not configured");
+        return;
+      }
+
+      if (state.isLoading) return;
+
+      // Confirm with user since this can take a while
+      const confirmed = window.confirm(
+        "This will scan all existing volunteers in the database for duplicates. " +
+        "This may take several minutes depending on the number of volunteers. " +
+        "Continue?"
+      );
+
+      if (!confirmed) return;
+
+      state.isLoading = true;
+      if (elements.scanSpinner) elements.scanSpinner.classList.remove("d-none");
+      if (elements.scanButton) elements.scanButton.disabled = true;
+
+      fetch(config.scanExistingUrl, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          dry_run: false,
+          threshold: 0.80,
+        }),
+      })
+        .then(async (response) => {
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: "Unknown error" }));
+            throw new Error(errorData.error || `HTTP ${response.status}`);
+          }
+          return response.json();
+        })
+        .then((data) => {
+          state.isLoading = false;
+          if (elements.scanSpinner) elements.scanSpinner.classList.add("d-none");
+          if (elements.scanButton) elements.scanButton.disabled = false;
+
+          // Show success message
+          const message = `Scan complete!\n\n` +
+            `Volunteers considered: ${data.rows_considered || 0}\n` +
+            `Suggestions created: ${data.suggestions_created || 0}\n` +
+            `High confidence (≥0.95): ${data.high_confidence || 0}\n` +
+            `Review band (0.80-0.95): ${data.review_band || 0}\n` +
+            `Low score (<0.80): ${data.low_score || 0}\n\n` +
+            `Refresh the page to see the new candidates.`;
+
+          alert(message);
+
+          // Refresh stats and candidates
+          loadStats();
+          loadCandidates();
+        })
+        .catch((error) => {
+          state.isLoading = false;
+          if (elements.scanSpinner) elements.scanSpinner.classList.add("d-none");
+          if (elements.scanButton) elements.scanButton.disabled = false;
+
+          alert(`Failed to scan for duplicates: ${error.message}`);
+          console.error("Scan error:", error);
+        });
+    }
+
+    if (elements.scanButton) {
+      elements.scanButton.addEventListener("click", scanExistingVolunteers);
     }
 
     if (elements.refreshButton) {

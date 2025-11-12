@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Dict, Iterable, List, Optional, Sequence
 
+from flask import current_app, has_app_context
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
 
@@ -16,6 +18,7 @@ from flask_app.importer.pipeline.fuzzy_features import (
     EMPLOYER_WEIGHT,
     NAME_WEIGHT,
     SCHOOL_WEIGHT,
+    _clean_text,
     compute_address_similarity,
     compute_alternate_contact_match,
     compute_dob_proximity,
@@ -517,4 +520,299 @@ def _suggestion_exists(session, run_id: int, staging_id: Optional[int], primary_
     return session.query(query.exists()).scalar()
 
 
-__all__ = ["generate_fuzzy_candidates", "FuzzyCandidateSummary"]
+def scan_existing_volunteers_for_duplicates(
+    *,
+    dry_run: bool = False,
+    batch_size: int = 100,
+    similarity_threshold: float = 0.80,
+) -> FuzzyCandidateSummary:
+    """
+    Scan all existing volunteers in the database to find potential duplicates.
+    This is useful for finding duplicates in data that was already imported.
+    
+    Args:
+        dry_run: When True, compute scores but do not persist suggestions.
+        batch_size: Number of volunteers to process in each batch.
+        similarity_threshold: Minimum similarity score to consider (default 0.80 for review band).
+    
+    Returns:
+        FuzzyCandidateSummary capturing work performed.
+    """
+    from flask_app.models.importer.schema import DedupeSuggestion, DedupeDecision
+    from flask_app.importer.pipeline.deterministic import match_volunteer_by_contact, normalize_email, normalize_phone
+    from sqlalchemy import func
+    
+    session = db.session
+    summary = FuzzyCandidateSummary(dry_run=dry_run)
+    
+    # Optimized approach: Use database queries with blocking instead of O(n²) in-memory comparison
+    # Get count first for progress tracking
+    total_volunteers = session.query(func.count(Volunteer.id)).scalar()
+    if total_volunteers == 0:
+        return summary
+    
+    # Get all volunteer IDs with names (for blocking strategy)
+    volunteer_ids_with_names = (
+        session.query(Volunteer.id, Volunteer.first_name, Volunteer.last_name)
+        .filter(
+            Volunteer.first_name.isnot(None),
+            Volunteer.last_name.isnot(None),
+        )
+        .order_by(Volunteer.id)
+        .all()
+    )
+    
+    if not volunteer_ids_with_names:
+        return summary
+    
+    pending_suggestions: List[DedupeSuggestion] = []
+    
+    # Process volunteers using blocking strategy (much more efficient than O(n²))
+    for i, (volunteer1_id, first1, last1) in enumerate(volunteer_ids_with_names):
+        if i % 100 == 0 and has_app_context():
+            current_app.logger.info(f"Scanning volunteer {i+1}/{len(volunteer_ids_with_names)} for duplicates...")
+        
+        summary.rows_considered += 1
+        
+        # Normalize volunteer1 name for comparison
+        first1_norm = _clean_text(first1).lower().strip() if first1 else ""
+        last1_norm = _clean_text(last1).lower().strip() if last1 else ""
+        
+        if not first1_norm or not last1_norm:
+            continue
+        
+        # Use database query to find potential matches (blocking strategy)
+        # Find volunteers with same last name and first initial (efficient blocking)
+        first_initial = first1_norm[0] if first1_norm else None
+        if not first_initial:
+            continue
+        
+        # Query for potential matches using blocking (same last name + first initial)
+        potential_matches = (
+            session.query(Volunteer)
+            .options(
+                joinedload(Volunteer.emails),
+                joinedload(Volunteer.phones),
+                joinedload(Volunteer.addresses),
+            )
+            .filter(
+                Volunteer.id > volunteer1_id,  # Only compare with volunteers we haven't checked yet
+                func.lower(Volunteer.last_name) == last1_norm,
+                func.lower(func.substr(Volunteer.first_name, 1, 1)) == first_initial,
+                Volunteer.first_name.isnot(None),
+                Volunteer.last_name.isnot(None),
+            )
+            .all()
+        )
+        
+        # Load volunteer1 with relationships for comparison
+        volunteer1 = (
+            session.query(Volunteer)
+            .options(
+                joinedload(Volunteer.emails),
+                joinedload(Volunteer.phones),
+                joinedload(Volunteer.addresses),
+            )
+            .filter(Volunteer.id == volunteer1_id)
+            .first()
+        )
+        
+        if not volunteer1:
+            continue
+        
+        # Compare against potential matches
+        for volunteer2 in potential_matches:
+            if not volunteer2.first_name or not volunteer2.last_name:
+                continue
+            
+            # Skip if same volunteer
+            if volunteer1.id == volunteer2.id:
+                continue
+            
+            # Check for exact name match first (case-insensitive, normalized)
+            # We already normalized volunteer1 above, now normalize volunteer2
+            first2_norm = _clean_text(volunteer2.first_name).lower().strip() if volunteer2.first_name else ""
+            last2_norm = _clean_text(volunteer2.last_name).lower().strip() if volunteer2.last_name else ""
+            
+            # Exact match check (both first and last must match exactly)
+            exact_match = (first1_norm == first2_norm and last1_norm == last2_norm)
+            
+            # Debug logging for exact matches (can be removed later)
+            if exact_match and has_app_context():
+                current_app.logger.debug(
+                    f"Exact name match found: Volunteer {volunteer1.id} ('{volunteer1.first_name} {volunteer1.last_name}') "
+                    f"matches Volunteer {volunteer2.id} ('{volunteer2.first_name} {volunteer2.last_name}')"
+                )
+            
+            # If not exact match, check fuzzy similarity
+            if not exact_match:
+                name_sim = compute_name_similarity(
+                    volunteer1.first_name, volunteer1.last_name,
+                    volunteer2.first_name, volunteer2.last_name
+                )
+                
+                if name_sim < similarity_threshold:
+                    continue
+            else:
+                # For exact matches, set similarity to 1.0
+                name_sim = 1.0
+            
+            # Build full feature map for scoring
+            volunteer1_dob = volunteer1.birthdate.isoformat() if volunteer1.birthdate else None
+            volunteer2_dob = volunteer2.birthdate.isoformat() if volunteer2.birthdate else None
+            
+            primary_address1 = _get_primary_address_for_volunteer(volunteer1)
+            primary_address2 = _get_primary_address_for_volunteer(volunteer2)
+            
+            volunteer1_emails = [e.email for e in volunteer1.emails]
+            volunteer1_phones = [p.phone_number for p in volunteer1.phones]
+            volunteer2_emails = [e.email for e in volunteer2.emails]
+            volunteer2_phones = [p.phone_number for p in volunteer2.phones]
+            
+            # Build features dictionary (needed for both exact and fuzzy matches)
+            dob_match = compute_dob_proximity(volunteer1_dob, volunteer2_dob)
+            address_match = compute_address_similarity(
+                primary_address1.street_address_1 if primary_address1 else None,
+                primary_address1.city if primary_address1 else None,
+                primary_address1.postal_code if primary_address1 else None,
+                primary_address2.street_address_1 if primary_address2 else None,
+                primary_address2.city if primary_address2 else None,
+                primary_address2.postal_code if primary_address2 else None,
+            )
+            alt_contact_match = compute_alternate_contact_match(
+                volunteer1_emails, volunteer1_phones,
+                volunteer2_emails, volunteer2_phones,
+            )
+            
+            # For exact name matches, use a high score even if other features are missing
+            if exact_match:
+                # Exact name match should score high (at least 0.90) even without other signals
+                base_score = 0.90
+                # Boost score with additional matches
+                score = min(1.0, base_score + (dob_match * 0.05) + (address_match * 0.03) + (alt_contact_match * 0.02))
+                # Build features dict for exact matches (for logging/debugging)
+                features = {
+                    "name": 1.0,  # Exact match
+                    "dob": dob_match,
+                    "address": address_match,
+                    "employer": 0.0,  # Not available in Volunteer model
+                    "school": 0.0,  # Not available in Volunteer model
+                    "alternate_contact": alt_contact_match,
+                }
+            else:
+                # Use normal weighted scoring for fuzzy matches
+                features = {
+                    "name": name_sim,
+                    "dob": dob_match,
+                    "address": address_match,
+                    "employer": 0.0,  # Not available in Volunteer model
+                    "school": 0.0,  # Not available in Volunteer model
+                    "alternate_contact": alt_contact_match,
+                }
+                score = weighted_score(features)
+            
+            match_type = _categorize_score(score)
+            
+            if match_type == "fuzzy_low":
+                summary.low_score += 1
+                continue
+            
+            summary.suggestions_created += 1
+            if match_type == "fuzzy_high":
+                summary.high_confidence += 1
+            elif match_type == "fuzzy_review":
+                summary.review_band += 1
+            
+            if dry_run:
+                continue
+            
+            # Use the volunteer with the lower ID as primary to avoid duplicate suggestions
+            if volunteer1.id < volunteer2.id:
+                primary_id = volunteer1.id
+                candidate_id = volunteer2.id
+            else:
+                primary_id = volunteer2.id
+                candidate_id = volunteer1.id
+            
+            # Check if suggestion already exists (always check with lower ID as primary)
+            existing = (
+                session.query(DedupeSuggestion.id)
+                .filter(
+                    DedupeSuggestion.primary_contact_id == primary_id,
+                    DedupeSuggestion.candidate_contact_id == candidate_id,
+                    DedupeSuggestion.decision == DedupeDecision.PENDING,
+                )
+                .first()
+            )
+            if existing:
+                continue
+            
+            # Create a special "scan" import run if needed, or use a placeholder
+            # For now, we'll need to create a dummy run or make run_id nullable
+            # Check if we can use None - if not, we'll need to create a special run
+            # Let's try using a special run_id of 0 or create a scan run
+            from flask_app.models.importer.schema import ImportRun, ImportRunStatus
+            scan_run = (
+                session.query(ImportRun)
+                .filter(ImportRun.source == "duplicate_scan", ImportRun.status == ImportRunStatus.SUCCEEDED)
+                .order_by(ImportRun.id.desc())
+                .first()
+            )
+            if not scan_run:
+                # Create a special run for tracking scans
+                scan_run = ImportRun(
+                    source="duplicate_scan",
+                    adapter="manual_scan",
+                    status=ImportRunStatus.SUCCEEDED,
+                    started_at=datetime.now(timezone.utc),
+                    finished_at=datetime.now(timezone.utc),
+                    dry_run=False,
+                )
+                session.add(scan_run)
+                session.flush()
+            
+            suggestion = DedupeSuggestion(
+                run_id=scan_run.id,
+                staging_volunteer_id=None,
+                primary_contact_id=primary_id,
+                candidate_contact_id=candidate_id,
+                score=_to_decimal(score),
+                confidence_score=_to_decimal(score),
+                match_type=match_type,
+                decision=DedupeDecision.PENDING,
+                features_json=_build_features_payload(features, score),
+                decision_notes="Found during manual duplicate scan of existing volunteers.",
+            )
+            pending_suggestions.append(suggestion)
+            
+            if len(pending_suggestions) >= batch_size:
+                session.add_all(pending_suggestions)
+                session.flush()
+                pending_suggestions.clear()
+    
+    if not dry_run and pending_suggestions:
+        session.add_all(pending_suggestions)
+        session.flush()
+    
+    return summary
+
+
+def _get_primary_address_for_volunteer(volunteer: Volunteer) -> ContactAddress | None:
+    """Get primary address for a volunteer."""
+    from flask_app.models import ContactAddress
+    addresses = getattr(volunteer, "addresses", [])
+    for address in addresses:
+        if address.is_primary:
+            return address
+    return addresses[0] if addresses else None
+
+
+def _get_primary_address(volunteer: Volunteer) -> Optional[ContactAddress]:
+    addresses = getattr(volunteer, "addresses", [])
+    for address in addresses:
+        if address.is_primary:
+            return address
+    return addresses[0] if addresses else None
+
+
+__all__ = ["generate_fuzzy_candidates", "FuzzyCandidateSummary", "scan_existing_volunteers_for_duplicates"]

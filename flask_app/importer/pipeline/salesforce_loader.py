@@ -19,6 +19,11 @@ from flask import current_app
 from types import SimpleNamespace
 
 from flask_app.importer.metrics import record_salesforce_rows, record_salesforce_watermark
+from flask_app.importer.pipeline.load_core import (
+    _merge_email_to_volunteer,
+    _name_exists_exact,
+    _name_exists_fuzzy,
+)
 from flask_app.models import ExternalIdMap, db
 from flask_app.models.importer.schema import CleanVolunteer, ImportRun, ImportRunStatus, ImporterWatermark, StagingVolunteer
 from flask_app.models import Volunteer, ContactEmail, ContactPhone, EmailType, PhoneType
@@ -166,13 +171,75 @@ class SalesforceContactLoader:
         # Extract email from clean_row (handle dict structures)
         email_value = _extract_email(clean_row.email)
         
+        # Check if name-based dedupe is enabled (default: True)
+        name_dedupe_enabled = True
+        name_dedupe_or_logic = True
+        from flask import current_app, has_app_context
+        if has_app_context():
+            config = current_app.config
+            name_dedupe_enabled = config.get("IMPORTER_NAME_DEDUPE_ENABLED", True)
+            name_dedupe_or_logic = config.get("IMPORTER_NAME_DEDUPE_OR_LOGIC", True)
+        
         # Check for duplicate email
-        if email_value and _email_exists(email_value):
-            # Skip duplicate - don't create volunteer or external_id_map
-            clean_row.load_action = "skipped_duplicate"
-            clean_row.core_contact_id = None
-            clean_row.core_volunteer_id = None
-            return "unchanged"
+        email_exists = email_value and _email_exists(email_value)
+        
+        # Check for name duplicate if enabled
+        name_match_volunteer = None
+        if name_dedupe_enabled and clean_row.first_name and clean_row.last_name:
+            name_match_volunteer = _name_exists_exact(clean_row.first_name, clean_row.last_name)
+        
+        # Apply OR logic: skip if email OR name matches
+        should_skip = False
+        skip_reason = None
+        
+        if email_exists:
+            should_skip = True
+            skip_reason = "email"
+        elif name_match_volunteer and (name_dedupe_or_logic or not email_exists):
+            should_skip = True
+            skip_reason = "name"
+        
+        if should_skip:
+            if skip_reason == "email":
+                # Skip duplicate - don't create volunteer or external_id_map
+                clean_row.load_action = "skipped_duplicate"
+                clean_row.core_contact_id = None
+                clean_row.core_volunteer_id = None
+                return "unchanged"
+            elif skip_reason == "name":
+                # Merge email if provided and different
+                if email_value and name_match_volunteer:
+                    _merge_email_to_volunteer(name_match_volunteer.id, email_value, self.run.id)
+                # Update ExternalIdMap if external_id exists
+                if external_id and name_match_volunteer:
+                    existing_map = (
+                        self.session.query(ExternalIdMap)
+                        .filter(
+                            ExternalIdMap.entity_type == "salesforce_contact",
+                            ExternalIdMap.external_system == "salesforce",
+                            ExternalIdMap.external_id == external_id,
+                        )
+                        .first()
+                    )
+                    if not existing_map:
+                        entry = ExternalIdMap(
+                            entity_type="salesforce_contact",
+                            entity_id=name_match_volunteer.id,
+                            external_system="salesforce",
+                            external_id=external_id,
+                            metadata_json={"payload_hash": payload_hash, "last_payload": payload},
+                        )
+                        entry.mark_seen(run_id=self.run.id)
+                        self.session.add(entry)
+                clean_row.load_action = "skipped_duplicate"
+                clean_row.core_contact_id = name_match_volunteer.id
+                clean_row.core_volunteer_id = name_match_volunteer.id
+                if has_app_context():
+                    current_app.logger.info(
+                        "Salesforce import run %s skipped duplicate by name: %s %s",
+                        self.run.id, clean_row.first_name, clean_row.last_name
+                    )
+                return "unchanged"
         
         # Create Volunteer record
         volunteer = Volunteer(

@@ -318,6 +318,7 @@ def ingest_salesforce_contacts(
             rows_reactivated=0,  # Salesforce loader doesn't track reactivations
             rows_deduped_auto=0,  # Salesforce loader doesn't track auto-dedupes
             rows_skipped_duplicates=0,  # Salesforce loader doesn't track duplicate skips
+            rows_skipped_duplicate_name=0,  # Salesforce loader doesn't track name duplicate skips separately
             rows_skipped_no_change=counters.unchanged,
             rows_missing_external_id=0,  # Salesforce loader doesn't track missing IDs
             rows_soft_deleted=counters.deleted,

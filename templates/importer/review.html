@@ -87,6 +87,10 @@
       <p class="text-muted mb-0">Review fuzzy dedupe candidates and merge duplicates safely.</p>
     </div>
     <div class="d-flex gap-2 mt-3 mt-md-0">
+      <button class="btn btn-outline-success" id="review-scan-btn" data-action="scan-existing">
+        <span class="spinner-border spinner-border-sm d-none" id="review-scan-spinner" role="status" aria-hidden="true"></span>
+        <i class="fas fa-search me-1"></i> Scan Existing Volunteers
+      </button>
       <button class="btn btn-outline-primary" id="review-refresh-btn" data-action="refresh">
         <span class="spinner-border spinner-border-sm d-none" id="review-refresh-spinner" role="status" aria-hidden="true"></span>
         Refresh
@@ -316,6 +320,7 @@
     rejectUrl: "{{ url_for('admin_importer.importer_dedupe_reject_candidate', candidate_id=0) }}",
     deferUrl: "{{ url_for('admin_importer.importer_dedupe_defer_candidate', candidate_id=0) }}",
     statsUrl: "{{ url_for('admin_importer.importer_dedupe_stats') }}",
+    scanExistingUrl: "{{ url_for('admin_importer.importer_scan_existing_duplicates') }}",
   };
 </script>
 <script src="{{ url_for('static', filename='js/importer_review.js') }}"></script>

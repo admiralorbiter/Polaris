@@ -26,6 +26,7 @@ from flask_app.importer.pipeline.dq_service import (
     RemediationNotFound,
     RemediationValidationError,
 )
+from flask_app.importer.pipeline.fuzzy_candidates import scan_existing_volunteers_for_duplicates
 from flask_app.importer.pipeline.merge_service import MergeService
 from flask_app.importer.pipeline.run_service import ImportRunService
 from flask_app.importer.registry import get_adapter_registry
@@ -1398,6 +1399,59 @@ def importer_dedupe_stats():
     except Exception as exc:
         current_app.logger.exception("Failed to fetch dedupe stats", exc_info=exc)
         return jsonify({"error": "Failed to fetch queue statistics."}), HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+@admin_importer_blueprint.post("/dedupe/scan-existing")
+@login_required
+@permission_required("manage_imports", org_context=False)
+def importer_scan_existing_duplicates():
+    """Trigger a scan of all existing volunteers to find duplicates."""
+    if not _ensure_importer_enabled():
+        return jsonify({"error": "Importer is disabled."}), HTTPStatus.NOT_FOUND
+
+    dry_run = request.json.get("dry_run", False) if request.is_json else False
+    threshold = request.json.get("threshold", 0.80) if request.is_json else 0.80
+
+    try:
+        current_app.logger.info(
+            f"User {current_user.id} triggered duplicate scan (dry_run={dry_run}, threshold={threshold})"
+        )
+        
+        summary = scan_existing_volunteers_for_duplicates(
+            dry_run=dry_run,
+            similarity_threshold=threshold,
+        )
+        
+        # Log admin action
+        import json
+        AdminLog.log_action(
+            admin_user_id=current_user.id,
+            action="IMPORTER_SCAN_DUPLICATES",
+            details=json.dumps({
+                "dry_run": dry_run,
+                "threshold": threshold,
+                "rows_considered": summary.rows_considered,
+                "suggestions_created": summary.suggestions_created,
+                "high_confidence": summary.high_confidence,
+                "review_band": summary.review_band,
+            }),
+        )
+        db.session.commit()
+
+        result = {
+            "success": True,
+            "rows_considered": summary.rows_considered,
+            "suggestions_created": summary.suggestions_created,
+            "high_confidence": summary.high_confidence,
+            "review_band": summary.review_band,
+            "low_score": summary.low_score,
+            "dry_run": dry_run,
+        }
+        return jsonify(result), HTTPStatus.OK
+    except Exception as exc:
+        current_app.logger.exception("Failed to scan for duplicates", exc_info=exc)
+        db.session.rollback()
+        return jsonify({"error": f"Failed to scan for duplicates: {str(exc)}"}), HTTPStatus.INTERNAL_SERVER_ERROR
 
 
 @admin_importer_blueprint.get("/dedupe/export")

@@ -29,7 +29,11 @@ from flask_app.importer.pipeline import (
     run_minimal_dq,
     stage_volunteers_from_csv,
 )
-from flask_app.importer.pipeline.fuzzy_candidates import FuzzyCandidateSummary, generate_fuzzy_candidates
+from flask_app.importer.pipeline.fuzzy_candidates import (
+    FuzzyCandidateSummary,
+    generate_fuzzy_candidates,
+    scan_existing_volunteers_for_duplicates,
+)
 from flask_app.importer.utils import cleanup_upload, resolve_upload_directory
 from flask_app.models.base import db
 from flask_app.models.importer.schema import ImportRun, ImportRunStatus
