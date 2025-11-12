@@ -174,3 +174,11 @@ class VolunteerOrganizationStatus(PyEnum):
 
     CURRENT = "current"  # Active relationship (end_date is None)
     PAST = "past"  # Past relationship (end_date is set)
+
+
+class LocalStatus(PyEnum):
+    """Local status enumeration for volunteer location"""
+
+    UNKNOWN = "unknown"
+    LOCAL = "local"
+    NON_LOCAL = "non_local"

@@ -17,6 +17,7 @@ from flask_app.models import (
     EducationLevel,
     EmailType,
     Gender,
+    LocalStatus,
     PhoneType,
     PreferredLanguage,
     RaceEthnicity,
@@ -322,12 +323,14 @@ def register_volunteer_routes(app):
                 volunteer.race = race_enum
                 volunteer.birthdate = form.birthdate.data if form.birthdate.data else None
                 volunteer.education_level = education_enum
-                # Boolean fields - check request form directly to get submitted values
-                # WTForms BooleanField might use default/pre-populated values instead of submitted
-                if 'is_local' in request.form:
-                    volunteer.is_local = request.form.get('is_local', '').lower() in ('true', '1', 'on', 'yes')
+                # Local status - convert string value to enum
+                if form.is_local.data:
+                    try:
+                        volunteer.is_local = LocalStatus(form.is_local.data)
+                    except ValueError:
+                        volunteer.is_local = LocalStatus.UNKNOWN
                 else:
-                    volunteer.is_local = form.is_local.data
+                    volunteer.is_local = LocalStatus.UNKNOWN
                 if 'do_not_call' in request.form:
                     volunteer.do_not_call = request.form.get('do_not_call', '').lower() in ('true', '1', 'on', 'yes')
                 else:

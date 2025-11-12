@@ -107,6 +107,23 @@ def ingest_salesforce_contacts(
                 continue
             sequence_number += 1
             normalized = transform_result.canonical or {}
+            # Check for missing contact info and add metadata flag
+            email_dict = normalized.get("email", {})
+            phone_dict = normalized.get("phone", {})
+            email_value = None
+            phone_value = None
+            if isinstance(email_dict, dict):
+                email_value = email_dict.get("primary") or email_dict.get("home") or email_dict.get("work") or email_dict.get("alternate")
+            elif email_dict:
+                email_value = email_dict
+            if isinstance(phone_dict, dict):
+                phone_value = phone_dict.get("primary") or phone_dict.get("mobile") or phone_dict.get("home") or phone_dict.get("work")
+            elif phone_dict:
+                phone_value = phone_dict
+            if not email_value and not phone_value:
+                # Set metadata flag for missing contact info
+                metadata = normalized.setdefault("metadata", {})
+                metadata["missing_contact_info"] = True
             staging_buffer.append(
                 StagingVolunteer(
                     run_id=import_run.id,

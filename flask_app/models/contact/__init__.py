@@ -14,6 +14,7 @@ from .enums import (
     EducationLevel,
     EmailType,
     Gender,
+    LocalStatus,
     OrganizationType,
     PhoneType,
     PreferredLanguage,
@@ -47,6 +48,7 @@ __all__ = [
     "Salutation",
     "ClearanceStatus",
     "PreferredLanguage",
+    "LocalStatus",
     "OrganizationType",
     "VolunteerOrganizationStatus",
     # Info models

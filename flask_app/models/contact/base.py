@@ -18,6 +18,7 @@ from .enums import (
     ContactType,
     EducationLevel,
     Gender,
+    LocalStatus,
     PreferredLanguage,
     RaceEthnicity,
     RoleType,
@@ -67,8 +68,8 @@ class Contact(BaseModel):
         Enum(EducationLevel, name="education_level_enum"), nullable=True
     )
     is_local = db.Column(
-        db.Boolean, default=True, nullable=False
-    )  # Whether contact is in local area and can volunteer/do work in person
+        Enum(LocalStatus, name="local_status_enum"), default=LocalStatus.UNKNOWN, nullable=True
+    )  # Whether contact is in local area and can volunteer/do work in person (UNKNOWN, LOCAL, NON_LOCAL)
     type = db.Column(
         db.String(100), nullable=True
     )  # General category separate from contact_type
@@ -311,7 +312,7 @@ class Contact(BaseModel):
 
     def can_volunteer_in_person(self):
         """Check if contact is local and can volunteer/do work in person"""
-        return self.is_local
+        return self.is_local == LocalStatus.LOCAL
 
     @staticmethod
     def find_by_email(email):

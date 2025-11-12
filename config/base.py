@@ -161,6 +161,13 @@ class Config:
         IMPORTER_SALESFORCE_BATCH_SIZE = max(1000, int(os.environ.get("IMPORTER_SALESFORCE_BATCH_SIZE", "5000")))
     except ValueError:
         IMPORTER_SALESFORCE_BATCH_SIZE = 5000
+    IMPORTER_WARN_ON_MISSING_CONTACT = _coerce_bool(
+        os.environ.get("IMPORTER_WARN_ON_MISSING_CONTACT"), default=False
+    )
+    # Salesforce volunteer filtering - set to false if Contact_Type__c field doesn't exist
+    IMPORTER_SALESFORCE_FILTER_VOLUNTEERS = _coerce_bool(
+        os.environ.get("IMPORTER_SALESFORCE_FILTER_VOLUNTEERS"), default=True
+    )
     if IMPORTER_RUNS_PAGE_SIZE_DEFAULT not in _parsed_page_sizes:
         _parsed_page_sizes.insert(0, IMPORTER_RUNS_PAGE_SIZE_DEFAULT)
     IMPORTER_RUNS_PAGE_SIZES = tuple(sorted(set(_parsed_page_sizes)))

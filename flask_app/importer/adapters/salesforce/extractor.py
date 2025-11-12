@@ -41,6 +41,7 @@ DEFAULT_CONTACT_FIELDS: Sequence[str] = (
     "Department",
     "Gender__c",
     "Birthdate",
+    "Contact_Type__c",
     "Last_Mailchimp_Email_Date__c",
     "Last_Volunteer_Date__c",
     "SystemModstamp",
@@ -63,12 +64,29 @@ def build_contacts_soql(
     fields: Sequence[str] | None = None,
     last_modstamp: datetime | None = None,
     limit: int | None = None,
+    filter_volunteers: bool | None = None,
 ) -> str:
     """Construct the SOQL used for incremental Contact exports."""
 
     field_list = tuple(dict.fromkeys(fields or DEFAULT_CONTACT_FIELDS))
     select_clause = ", ".join(field_list)
     where_clauses: List[str] = []
+    
+    # Filter for volunteers only if enabled (default: True)
+    # Can be disabled via IMPORTER_SALESFORCE_FILTER_VOLUNTEERS=false if field doesn't exist
+    if filter_volunteers is None:
+        try:
+            from flask import current_app
+            filter_volunteers = current_app.config.get("IMPORTER_SALESFORCE_FILTER_VOLUNTEERS", True)
+        except RuntimeError:
+            # No Flask app context - default to True
+            filter_volunteers = True
+    
+    if filter_volunteers:
+        # Filter: Contact_Type__c = 'Volunteer' OR Contact_Type__c = ''
+        # Using empty string check as per working query pattern
+        where_clauses.append("(Contact_Type__c = 'Volunteer' OR Contact_Type__c = '')")
+    
     if last_modstamp is not None:
         where_clauses.append(f"SystemModstamp > { _format_modstamp(last_modstamp) }")
 
@@ -160,6 +178,39 @@ class SalesforceExtractor:
             headers={**self._auth_headers, "Content-Type": "application/json"},
             json=payload,
         )
+        if not response.ok:
+            # Log the actual error response from Salesforce for debugging
+            try:
+                error_data = response.json()
+                error_msg = error_data.get("message") or error_data.get("error") or str(error_data)
+                # Log full error details
+                self.logger.error(
+                    f"Salesforce job creation failed: {error_msg}",
+                    extra={
+                        "status_code": response.status_code,
+                        "error": error_msg,
+                        "error_data": error_data,
+                        "soql_query": soql,
+                    },
+                )
+                # Also print to console for immediate visibility
+                print(f"\n=== SALESFORCE ERROR ===")
+                print(f"Status: {response.status_code}")
+                print(f"Error: {error_msg}")
+                print(f"Full response: {error_data}")
+                print(f"SOQL Query: {soql}")
+                print(f"======================\n")
+            except Exception as e:
+                error_msg = response.text
+                self.logger.error(
+                    f"Salesforce job creation failed: {error_msg}",
+                    extra={"status_code": response.status_code, "error": error_msg, "soql_query": soql, "parse_error": str(e)},
+                )
+                print(f"\n=== SALESFORCE ERROR (could not parse JSON) ===")
+                print(f"Status: {response.status_code}")
+                print(f"Response text: {error_msg}")
+                print(f"SOQL Query: {soql}")
+                print(f"======================\n")
         response.raise_for_status()
         data = response.json()
         self.logger.debug("Salesforce job created", extra={"job_id": data.get("id")})

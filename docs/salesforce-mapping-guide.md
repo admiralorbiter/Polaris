@@ -21,9 +21,9 @@ This guide explains how Polaris maps Salesforce data into the importer pipeline 
 
 ### Data Flow
 
-1. **Extract**: Salesforce extractor builds SOQL (Bulk API 2.0) with watermark filtering (`SystemModstamp`).
-2. **Transform**: Transformer applies YAML specification, creating canonical payloads (`normalized_json`) and collecting unmapped fields/errors.
-3. **DQ**: Minimal rules (`VOL_CONTACT_REQUIRED`, `VOL_EMAIL_FORMAT`, `VOL_PHONE_E164`) run against canonical payloads.
+1. **Extract**: Salesforce extractor builds SOQL (Bulk API 2.0) with watermark filtering (`SystemModstamp`) and volunteer filtering (`Contact_Type__c`).
+2. **Transform**: Transformer applies YAML specification, creating canonical payloads (`normalized_json`) and collecting unmapped fields/errors. Records without email/phone are flagged with `metadata.missing_contact_info = True`.
+3. **DQ**: Minimal rules (`VOL_EMAIL_FORMAT`, `VOL_PHONE_E164`) run against canonical payloads. Missing contact info creates metadata flags by default; optional DQ warnings can be enabled via `IMPORTER_WARN_ON_MISSING_CONTACT`.
 4. **Clean/Load**: Valid rows promote into `clean_volunteers`, then `SalesforceContactLoader` performs idempotent upsert with survivorship.
 
 ## 2. Mapping File Structure Reference
@@ -291,7 +291,30 @@ While Sprint 4 implemented Contacts, the architecture supports additional object
 - **Sprint 7**: Versioned mappings, config UI, backfills—this guide aligns with upcoming work.
 - **Sprint 8**: Events/Signups ingestion—horizontal scaling section prepares engineering teams.
 
-## 10. References
+## 10. Field-Specific Notes
+
+### 10.1 `is_local` Field
+
+The `is_local` field on volunteers uses a `LocalStatus` enum with the following values:
+
+- **UNKNOWN** (default): Status is not yet determined. This is the default for newly imported volunteers.
+- **LOCAL**: Volunteer is in the local area and can volunteer/do work in person.
+- **NON_LOCAL**: Volunteer is not in the local area.
+
+**Current behavior:**
+- Not currently imported from Salesforce (defaults to `UNKNOWN`)
+- Can be manually set via volunteer forms/UI
+- Future plans include determining this automatically based on:
+  - Address/postal code analysis
+  - Geographic proximity to organization locations
+  - Other location-based signals
+
+**Implementation:**
+- Defined in `flask_app/models/contact/enums.py` as `LocalStatus` enum
+- Stored in `contacts.is_local` column as enum type
+- Default value is `LocalStatus.UNKNOWN`
+
+## 11. References
 
 - `config/mappings/salesforce_contact_v1.yaml`
 - `flask_app/importer/mapping/__init__.py`

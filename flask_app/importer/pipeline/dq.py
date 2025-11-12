@@ -69,11 +69,11 @@ def _coerce_str(value: object | None) -> str:
 class EmailOrPhoneRule(DQRule):
     """Ensure at least one of email or phone is present."""
 
-    def __init__(self) -> None:
+    def __init__(self, severity: DataQualitySeverity = DataQualitySeverity.ERROR) -> None:
         super().__init__(
             code="VOL_CONTACT_REQUIRED",
-            description="Volunteer must include at least one contact method (email or phone).",
-            severity=DataQualitySeverity.ERROR,
+            description="Volunteer should include at least one contact method (email or phone).",
+            severity=severity,
         )
 
     def evaluate(self, payload: Mapping[str, object | None]) -> Iterable[DQResult]:
@@ -143,8 +143,31 @@ class PhoneFormatRule(DQRule):
         ]
 
 
+def get_minimal_volunteer_rules() -> Sequence[DQRule]:
+    """
+    Get minimal volunteer DQ rules.
+    
+    EmailOrPhoneRule is excluded by default (uses metadata flags instead).
+    Can be enabled via IMPORTER_WARN_ON_MISSING_CONTACT config.
+    """
+    from flask import current_app
+    
+    rules: list[DQRule] = [
+        EmailFormatRule(),
+        PhoneFormatRule(),
+    ]
+    
+    # Optionally add contact requirement as warning if config enabled
+    warn_on_missing_contact = current_app.config.get("IMPORTER_WARN_ON_MISSING_CONTACT", False)
+    if warn_on_missing_contact:
+        # Create rule with WARNING severity instead of ERROR
+        contact_rule = EmailOrPhoneRule(severity=DataQualitySeverity.WARNING)
+        rules.append(contact_rule)
+    
+    return tuple(rules)
+
+
 MINIMAL_VOLUNTEER_RULES: Sequence[DQRule] = (
-    EmailOrPhoneRule(),
     EmailFormatRule(),
     PhoneFormatRule(),
 )
@@ -164,7 +187,15 @@ def evaluate_rules(
         List of violations (empty when the payload satisfies all rules).
     """
 
-    applicable_rules = rules or MINIMAL_VOLUNTEER_RULES
+    if rules is None:
+        # Use configurable rules function instead of static tuple
+        try:
+            applicable_rules = get_minimal_volunteer_rules()
+        except Exception:
+            # Fallback to static rules if config access fails
+            applicable_rules = MINIMAL_VOLUNTEER_RULES
+    else:
+        applicable_rules = rules
     violations: list[DQResult] = []
     for rule in applicable_rules:
         violations.extend(rule.evaluate(payload))
@@ -239,31 +270,38 @@ def run_minimal_dq(
         rows_evaluated += 1
         payload = _compose_payload(row)
         violations = list(evaluate_rules(payload))
-        if not violations:
+        # Separate errors (blocking) from warnings (non-blocking)
+        error_violations = [v for v in violations if v.severity == DataQualitySeverity.ERROR]
+        warning_violations = [v for v in violations if v.severity != DataQualitySeverity.ERROR]
+        
+        # Only quarantine on ERROR severity violations
+        if not error_violations:
             rows_validated += 1
             row.status = StagingRecordStatus.VALIDATED
             row.processed_at = now
             row.last_error = None
         else:
             rows_quarantined += 1
-            all_violations.extend(violations)
+            all_violations.extend(error_violations)
             row.status = StagingRecordStatus.QUARANTINED
-            row.last_error = violations[0].message
+            row.last_error = error_violations[0].message
             row.processed_at = now
-            for violation in violations:
-                session.add(
-                    DataQualityViolation(
-                        run_id=import_run.id,
-                        staging_volunteer_id=row.id,
-                        entity_type="volunteer",
-                        record_key=_compose_record_key(row),
-                        rule_code=violation.rule_code,
-                        severity=violation.severity,
-                        status=DataQualityStatus.OPEN,
-                        message=violation.message,
-                        details_json=dict(violation.details),
-                    )
+        
+        # Log all violations (both errors and warnings) for tracking
+        for violation in violations:
+            session.add(
+                DataQualityViolation(
+                    run_id=import_run.id,
+                    staging_volunteer_id=row.id,
+                    entity_type="volunteer",
+                    record_key=_compose_record_key(row),
+                    rule_code=violation.rule_code,
+                    severity=violation.severity,
+                    status=DataQualityStatus.OPEN,
+                    message=violation.message,
+                    details_json=dict(violation.details),
                 )
+            )
 
     summary = DQProcessingSummary(
         rows_evaluated=rows_evaluated,

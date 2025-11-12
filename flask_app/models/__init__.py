@@ -22,6 +22,7 @@ from .contact import (
     EmailType,
     EmergencyContact,
     Gender,
+    LocalStatus,
     OrganizationType,
     PhoneType,
     PreferredLanguage,
@@ -121,6 +122,7 @@ __all__ = [
     "Salutation",
     "ClearanceStatus",
     "PreferredLanguage",
+    "LocalStatus",
     "OrganizationType",
     "VolunteerOrganizationStatus",
     # Volunteer models

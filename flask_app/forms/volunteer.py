@@ -115,7 +115,12 @@ class CreateVolunteerForm(FlaskForm):
         validators=[Optional()],
         choices=[],  # Will be populated in __init__
     )
-    is_local = BooleanField("Is Local (can volunteer in person)", default=True)
+    is_local = SelectField(
+        "Local Status",
+        validators=[Optional()],
+        choices=[],  # Will be populated in __init__
+        default="unknown",
+    )
 
     # Contact preferences
     do_not_call = BooleanField("Do Not Call", default=False)
@@ -148,6 +153,7 @@ class CreateVolunteerForm(FlaskForm):
             ClearanceStatus,
             EducationLevel,
             Gender,
+            LocalStatus,
             PreferredLanguage,
             RaceEthnicity,
             Salutation,
@@ -195,6 +201,20 @@ class CreateVolunteerForm(FlaskForm):
         self.preferred_language.choices = [("", "None")] + [
             (lang.value, format_enum_display(lang.value))
             for lang in PreferredLanguage
+        ]
+
+        # Set local status choices
+        self.is_local.choices = [
+            (LocalStatus.UNKNOWN.value, "Unknown"),
+            (LocalStatus.LOCAL.value, "Local"),
+            (LocalStatus.NON_LOCAL.value, "Non-Local"),
+        ]
+
+        # Set local status choices
+        self.is_local.choices = [
+            (LocalStatus.UNKNOWN.value, "Unknown"),
+            (LocalStatus.LOCAL.value, "Local"),
+            (LocalStatus.NON_LOCAL.value, "Non-Local"),
         ]
 
 
@@ -300,7 +320,12 @@ class UpdateVolunteerForm(FlaskForm):
         validators=[Optional()],
         choices=[],  # Will be populated in __init__
     )
-    is_local = BooleanField("Is Local (can volunteer in person)", default=True)
+    is_local = SelectField(
+        "Local Status",
+        validators=[Optional()],
+        choices=[],  # Will be populated in __init__
+        default="unknown",
+    )
 
     # Contact preferences
     do_not_call = BooleanField("Do Not Call", default=False)
@@ -333,6 +358,7 @@ class UpdateVolunteerForm(FlaskForm):
             ClearanceStatus,
             EducationLevel,
             Gender,
+            LocalStatus,
             PreferredLanguage,
             RaceEthnicity,
             Salutation,
@@ -380,5 +406,12 @@ class UpdateVolunteerForm(FlaskForm):
         self.preferred_language.choices = [("", "None")] + [
             (lang.value, format_enum_display(lang.value))
             for lang in PreferredLanguage
+        ]
+
+        # Set local status choices
+        self.is_local.choices = [
+            (LocalStatus.UNKNOWN.value, "Unknown"),
+            (LocalStatus.LOCAL.value, "Local"),
+            (LocalStatus.NON_LOCAL.value, "Non-Local"),
         ]
 
