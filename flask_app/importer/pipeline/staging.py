@@ -51,10 +51,27 @@ def stage_volunteers_from_csv(
     rows_to_flush: list[StagingVolunteer] = []
     dry_run_rows: list[VolunteerCSVRow] = []
     rows_staged = 0
+    
+    # Track field-level statistics for CSV
+    csv_field_stats: dict[str, dict[str, int]] = {}
+    total_rows_processed = 0
 
     for row in adapter.iter_rows():
+        total_rows_processed += 1
         payload_json = dict(row.raw)
         normalized_json = dict(row.normalized)
+        
+        # Track CSV column population
+        for column_name, value in payload_json.items():
+            if column_name not in csv_field_stats:
+                csv_field_stats[column_name] = {
+                    "records_with_value": 0,
+                    "total_records_processed": 0,
+                }
+            csv_field_stats[column_name]["total_records_processed"] += 1
+            if value is not None and value != "":
+                csv_field_stats[column_name]["records_with_value"] += 1
+        
         external_system = resolve_external_system(normalized_json.get("external_system"), source_system)
         external_id = normalized_json.get("external_id")
         checksum = compute_checksum(normalized_json)
@@ -93,7 +110,7 @@ def stage_volunteers_from_csv(
         dry_run=dry_run,
         dry_run_rows=tuple(dry_run_rows),
     )
-    update_staging_counts(import_run, summary)
+    update_staging_counts(import_run, summary, csv_field_stats=csv_field_stats if csv_field_stats else None)
     _commit_staging_batch()
     return summary
 
@@ -121,7 +138,7 @@ def resolve_source_record_id(external_id: object | None, sequence_number: int) -
     return str(external_id)
 
 
-def update_staging_counts(import_run: ImportRun, summary: StagingSummary) -> None:
+def update_staging_counts(import_run: ImportRun, summary: StagingSummary, *, csv_field_stats: dict[str, dict[str, int]] | None = None) -> None:
     counts = dict(import_run.counts_json or {})
     staging_counts = counts.setdefault("staging", {}).setdefault("volunteers", {})
     staging_counts.update(
@@ -145,4 +162,26 @@ def update_staging_counts(import_run: ImportRun, summary: StagingSummary) -> Non
             "dry_run": summary.dry_run,
         }
     )
+    
+    # Store CSV field-level statistics
+    if csv_field_stats:
+        field_stats_data = metrics.setdefault("field_stats", {}).setdefault("volunteers", {})
+        source_fields_data = field_stats_data.setdefault("source_fields", {})
+        
+        for column_name, stats in csv_field_stats.items():
+            total_processed = stats.get("total_records_processed", 0)
+            with_value = stats.get("records_with_value", 0)
+            population_rate = with_value / total_processed if total_processed > 0 else 0.0
+            
+            source_fields_data[column_name] = {
+                "target": None,  # CSV columns don't have explicit target mapping
+                "records_with_value": with_value,
+                "records_mapped": with_value,  # For CSV, mapped = with value
+                "records_transformed": 0,
+                "records_failed_transform": 0,
+                "records_used_default": 0,
+                "total_records_processed": total_processed,
+                "population_rate": population_rate,
+            }
+    
     import_run.metrics_json = metrics

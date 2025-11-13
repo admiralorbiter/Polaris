@@ -336,6 +336,12 @@ def importer_run_detail(run_id: int):
     )
 
     payload = _serialize_detail(run, summary=summary)
+    
+    # Include field statistics if available
+    metrics_json = run.metrics_json or {}
+    field_stats = metrics_json.get("field_stats", {}).get("volunteers", {})
+    if field_stats:
+        payload["field_stats"] = field_stats
 
     current_app.logger.info(
         "Importer run detail accessed",
@@ -343,6 +349,76 @@ def importer_run_detail(run_id: int):
             "importer_run_id": run_id,
             "importer_status": payload["status"],
             "importer_source": payload["source"],
+            "importer_response_time_ms": round(duration * 1000, 2),
+            "user_id": current_user.id,
+        },
+    )
+    return jsonify(payload), HTTPStatus.OK
+
+
+@importer_blueprint.get("/runs/<int:run_id>/field-stats")
+def importer_run_field_stats(run_id: int):
+    """Get field-level import statistics for a specific run."""
+    enabled_response = _ensure_importer_enabled_api()
+    if enabled_response:
+        return enabled_response
+
+    auth_response = _ensure_authenticated_api()
+    if auth_response:
+        return auth_response
+
+    permission_response = _ensure_manage_imports_permission()
+    if permission_response:
+        return permission_response
+
+    start_time = time.perf_counter()
+    try:
+        run = _run_service.get_run(run_id)
+    except NoResultFound:
+        ImporterMonitoring.record_runs_detail(duration_seconds=time.perf_counter() - start_time, status="not_found")
+        return _json_error(f"Import run {run_id} not found.", HTTPStatus.NOT_FOUND)
+    except Exception as exc:  # pragma: no cover
+        current_app.logger.exception("Importer run field stats failed.", exc_info=exc)
+        ImporterMonitoring.record_runs_detail(duration_seconds=time.perf_counter() - start_time, status="error")
+        return _json_error("Failed to load field statistics.", HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    duration = time.perf_counter() - start_time
+    ImporterMonitoring.record_runs_detail(duration_seconds=duration, status="success")
+
+    metrics_json = run.metrics_json or {}
+    field_stats = metrics_json.get("field_stats", {}).get("volunteers", {})
+    
+    # Calculate summary statistics
+    source_fields = field_stats.get("source_fields", {})
+    target_fields = field_stats.get("target_fields", {})
+    unmapped_fields = field_stats.get("unmapped_source_fields", {})
+    
+    total_mapped = len([f for f in source_fields.values() if f.get("target")])
+    total_unmapped = len(unmapped_fields)
+    population_rates = [f.get("population_rate", 0.0) for f in source_fields.values()]
+    avg_population_rate = sum(population_rates) / len(population_rates) if population_rates else 0.0
+
+    payload = {
+        "run_id": run_id,
+        "source": run.source,
+        "entity_type": "volunteers",
+        "field_stats": {
+            "source_fields": source_fields,
+            "target_fields": target_fields,
+            "unmapped_fields": unmapped_fields,
+        },
+        "summary": {
+            "total_fields_mapped": total_mapped,
+            "total_fields_unmapped": total_unmapped,
+            "avg_population_rate": round(avg_population_rate, 3),
+        },
+    }
+
+    current_app.logger.info(
+        "Importer run field stats accessed",
+        extra={
+            "importer_run_id": run_id,
+            "importer_source": run.source,
             "importer_response_time_ms": round(duration * 1000, 2),
             "user_id": current_user.id,
         },

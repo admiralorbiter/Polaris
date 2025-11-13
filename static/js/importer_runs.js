@@ -620,6 +620,11 @@
       }
 
       renderSurvivorshipSummary(detail.survivorship);
+      
+      // Render field statistics if available
+      if (detail.field_stats) {
+        renderFieldStatistics(detail.field_stats, detail.run_id);
+      }
 
       const triggered = detail.triggered_by;
       const triggeredField = elements.modalContent.querySelector('[data-field="triggered_by"]');
@@ -844,4 +849,214 @@
     setupAutoRefresh();
     loadRuns();
   });
+
+  function getStatusBadge(rate) {
+    if (rate >= 0.8) {
+      return '<span class="badge bg-success">Good</span>';
+    } else if (rate >= 0.5) {
+      return '<span class="badge bg-warning text-dark">Warning</span>';
+    } else {
+      return '<span class="badge bg-danger">Critical</span>';
+    }
+  }
+
+  function formatPercentage(rate) {
+    return (rate * 100).toFixed(1) + "%";
+  }
+
+  function renderFieldStatistics(fieldStats, runId) {
+    const section = document.getElementById("field-stats-section");
+    if (!section) return;
+
+    if (!fieldStats || (!fieldStats.source_fields && !fieldStats.target_fields && !fieldStats.unmapped_source_fields)) {
+      section.classList.add("d-none");
+      return;
+    }
+
+    section.classList.remove("d-none");
+
+    // Render source fields
+    renderSourceFields(fieldStats.source_fields || {});
+    
+    // Render target fields
+    renderTargetFields(fieldStats.target_fields || {});
+    
+    // Render unmapped fields
+    renderUnmappedFields(fieldStats.unmapped_source_fields || {});
+
+    // Setup search and export handlers
+    setupFieldStatsHandlers(runId);
+  }
+
+  function renderSourceFields(sourceFields) {
+    const tbody = document.querySelector("#source-fields-table tbody");
+    if (!tbody) return;
+    tbody.innerHTML = "";
+
+    const fields = Object.entries(sourceFields).sort((a, b) => a[0].localeCompare(b[0]));
+    
+    fields.forEach(([fieldName, stats]) => {
+      const row = document.createElement("tr");
+      const populationRate = stats.population_rate || 0;
+      const hasTransform = stats.records_transformed > 0;
+      
+      row.innerHTML = `
+        <td><code>${escapeHtml(fieldName)}</code></td>
+        <td>${stats.target ? `<code>${escapeHtml(stats.target)}</code>` : "—"}</td>
+        <td>${stats.records_with_value?.toLocaleString() || 0}</td>
+        <td>${stats.total_records_processed?.toLocaleString() || 0}</td>
+        <td>
+          <div class="progress" style="height: 20px;">
+            <div class="progress-bar ${populationRate >= 0.8 ? 'bg-success' : populationRate >= 0.5 ? 'bg-warning' : 'bg-danger'}" 
+                 role="progressbar" style="width: ${formatPercentage(populationRate)}">
+              ${formatPercentage(populationRate)}
+            </div>
+          </div>
+        </td>
+        <td>${hasTransform ? '<span class="badge bg-info">Yes</span>' : "—"}</td>
+        <td>${getStatusBadge(populationRate)}</td>
+      `;
+      tbody.appendChild(row);
+    });
+  }
+
+  function renderTargetFields(targetFields) {
+    const tbody = document.querySelector("#target-fields-table tbody");
+    if (!tbody) return;
+    tbody.innerHTML = "";
+
+    const fields = Object.entries(targetFields).sort((a, b) => a[0].localeCompare(b[0]));
+    
+    fields.forEach(([fieldName, stats]) => {
+      const row = document.createElement("tr");
+      const completenessRate = stats.completeness_rate || 0;
+      const sourceFieldsList = (stats.source_fields || []).map(f => `<code>${escapeHtml(f)}</code>`).join(", ");
+      
+      row.innerHTML = `
+        <td><code>${escapeHtml(fieldName)}</code></td>
+        <td>${sourceFieldsList || "—"}</td>
+        <td>${stats.total_records_populated?.toLocaleString() || 0}</td>
+        <td>${stats.total_records_processed?.toLocaleString() || 0}</td>
+        <td>
+          <div class="progress" style="height: 20px;">
+            <div class="progress-bar ${completenessRate >= 0.8 ? 'bg-success' : completenessRate >= 0.5 ? 'bg-warning' : 'bg-danger'}" 
+                 role="progressbar" style="width: ${formatPercentage(completenessRate)}">
+              ${formatPercentage(completenessRate)}
+            </div>
+          </div>
+        </td>
+        <td>${getStatusBadge(completenessRate)}</td>
+      `;
+      tbody.appendChild(row);
+    });
+  }
+
+  function renderUnmappedFields(unmappedFields) {
+    const tbody = document.querySelector("#unmapped-fields-table tbody");
+    if (!tbody) return;
+    tbody.innerHTML = "";
+
+    const fields = Object.entries(unmappedFields).sort((a, b) => a[0].localeCompare(b[0]));
+    
+    if (fields.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No unmapped fields</td></tr>';
+      return;
+    }
+    
+    fields.forEach(([fieldName, stats]) => {
+      const row = document.createElement("tr");
+      const totalProcessed = stats.total_records_processed || 0;
+      const withValue = stats.records_with_value || 0;
+      const populationRate = totalProcessed > 0 ? withValue / totalProcessed : 0;
+      
+      row.innerHTML = `
+        <td><code>${escapeHtml(fieldName)}</code></td>
+        <td>${withValue.toLocaleString()}</td>
+        <td>${totalProcessed.toLocaleString()}</td>
+        <td>
+          <div class="progress" style="height: 20px;">
+            <div class="progress-bar ${populationRate >= 0.8 ? 'bg-success' : populationRate >= 0.5 ? 'bg-warning' : 'bg-danger'}" 
+                 role="progressbar" style="width: ${formatPercentage(populationRate)}">
+              ${formatPercentage(populationRate)}
+            </div>
+          </div>
+        </td>
+        <td>${getStatusBadge(populationRate)}</td>
+      `;
+      tbody.appendChild(row);
+    });
+  }
+
+  function setupFieldStatsHandlers(runId) {
+    // Search functionality
+    const searchInputs = {
+      "source-fields-search": "#source-fields-table tbody tr",
+      "target-fields-search": "#target-fields-table tbody tr",
+      "unmapped-fields-search": "#unmapped-fields-table tbody tr",
+    };
+
+    Object.entries(searchInputs).forEach(([inputId, selector]) => {
+      const input = document.getElementById(inputId);
+      if (input) {
+        input.addEventListener("input", (e) => {
+          const searchTerm = e.target.value.toLowerCase();
+          const rows = document.querySelectorAll(selector);
+          rows.forEach((row) => {
+            const text = row.textContent.toLowerCase();
+            row.style.display = text.includes(searchTerm) ? "" : "none";
+          });
+        });
+      }
+    });
+
+    // Export functionality
+    const exportButtons = {
+      "export-source-fields-btn": "#source-fields-table",
+      "export-target-fields-btn": "#target-fields-table",
+      "export-unmapped-fields-btn": "#unmapped-fields-table",
+    };
+
+    Object.entries(exportButtons).forEach(([buttonId, tableSelector]) => {
+      const button = document.getElementById(buttonId);
+      if (button) {
+        button.addEventListener("click", () => {
+          exportTableToCSV(tableSelector, `run-${runId}-${buttonId.replace("export-", "").replace("-btn", "")}.csv`);
+        });
+      }
+    });
+  }
+
+  function exportTableToCSV(tableSelector, filename) {
+    const table = document.querySelector(tableSelector);
+    if (!table) return;
+
+    const rows = Array.from(table.querySelectorAll("tr"));
+    const csv = rows.map((row) => {
+      const cells = Array.from(row.querySelectorAll("th, td"));
+      return cells
+        .map((cell) => {
+          const text = cell.textContent.trim();
+          // Escape quotes and wrap in quotes if contains comma or quote
+          if (text.includes(",") || text.includes('"') || text.includes("\n")) {
+            return `"${text.replace(/"/g, '""')}"`;
+          }
+          return text;
+        })
+        .join(",");
+    }).join("\n");
+
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    window.URL.revokeObjectURL(url);
+  }
+
+  function escapeHtml(text) {
+    const div = document.createElement("div");
+    div.textContent = text;
+    return div.innerHTML;
+  }
 })();

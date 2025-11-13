@@ -6,13 +6,13 @@ from __future__ import annotations
 
 import logging
 import time
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Mapping
 
 from flask_app.importer.adapters.salesforce.extractor import SalesforceBatch, SalesforceExtractor, build_contacts_soql
-from flask_app.importer.mapping import SalesforceMappingTransformer, get_active_salesforce_mapping
+from flask_app.importer.mapping import FieldImportStats, SalesforceMappingTransformer, get_active_salesforce_mapping
 from flask_app.importer.metrics import record_salesforce_batch, record_salesforce_unmapped
 from flask_app.importer.pipeline.staging import (
     StagingSummary,
@@ -71,6 +71,10 @@ def ingest_salesforce_contacts(
 
     mapping_spec = get_active_salesforce_mapping()
     transformer = SalesforceMappingTransformer(mapping_spec)
+    
+    # Aggregate field statistics across all records
+    aggregated_field_stats: dict[str, FieldImportStats] = {}
+    target_field_contributors: dict[str, set[str]] = defaultdict(set)
 
     def flush_buffer():
         nonlocal records_staged
@@ -99,6 +103,26 @@ def ingest_salesforce_contacts(
                 if max_modstamp is None or modstamp > max_modstamp:
                     max_modstamp = modstamp
             transform_result = transformer.transform(record)
+            
+            # Aggregate field statistics
+            for source_field, stats in transform_result.field_stats.items():
+                if source_field not in aggregated_field_stats:
+                    aggregated_field_stats[source_field] = FieldImportStats(
+                        source_field=stats.source_field,
+                        target_field=stats.target_field,
+                    )
+                agg_stats = aggregated_field_stats[source_field]
+                agg_stats.records_with_value += stats.records_with_value
+                agg_stats.records_mapped += stats.records_mapped
+                agg_stats.records_transformed += stats.records_transformed
+                agg_stats.records_failed_transform += stats.records_failed_transform
+                agg_stats.records_used_default += stats.records_used_default
+                agg_stats.total_records_processed += stats.total_records_processed
+                
+                # Track target field contributors
+                if stats.target_field:
+                    target_field_contributors[stats.target_field].add(source_field)
+            
             for field_name in transform_result.unmapped_fields:
                 unmapped_counter[field_name] += 1
             if transform_result.errors:
@@ -167,7 +191,7 @@ def ingest_salesforce_contacts(
     if unmapped_counter:
         for field_name, count in unmapped_counter.items():
             record_salesforce_unmapped(field_name, count)
-    _update_import_run(import_run, summary)
+    _update_import_run(import_run, summary, field_stats=aggregated_field_stats, target_contributors=target_field_contributors)
     if not dry_run and max_modstamp:
         watermark.last_successful_modstamp = max_modstamp.astimezone(timezone.utc)
         watermark.last_run_id = import_run.id
@@ -180,7 +204,7 @@ def ingest_salesforce_contacts(
     return summary
 
 
-def _update_import_run(import_run: ImportRun, summary: SalesforceIngestSummary) -> None:
+def _update_import_run(import_run: ImportRun, summary: SalesforceIngestSummary, *, field_stats: dict[str, FieldImportStats] | None = None, target_contributors: dict[str, set[str]] | None = None) -> None:
     staging_summary = StagingSummary(
         rows_processed=summary.records_received,
         rows_staged=summary.records_staged,
@@ -204,6 +228,51 @@ def _update_import_run(import_run: ImportRun, summary: SalesforceIngestSummary) 
             "transform_errors": list(summary.errors),
         }
     )
+    
+    # Store field-level statistics
+    if field_stats:
+        field_stats_data = metrics.setdefault("field_stats", {}).setdefault("volunteers", {})
+        source_fields_data = field_stats_data.setdefault("source_fields", {})
+        target_fields_data = field_stats_data.setdefault("target_fields", {})
+        unmapped_fields_data = field_stats_data.setdefault("unmapped_source_fields", {})
+        
+        # Store source field statistics
+        for source_field, stats in field_stats.items():
+            source_fields_data[source_field] = {
+                "target": stats.target_field,
+                "records_with_value": stats.records_with_value,
+                "records_mapped": stats.records_mapped,
+                "records_transformed": stats.records_transformed,
+                "records_failed_transform": stats.records_failed_transform,
+                "records_used_default": stats.records_used_default,
+                "total_records_processed": stats.total_records_processed,
+                "population_rate": stats.population_rate,
+            }
+        
+        # Store target field statistics
+        if target_contributors:
+            total_records = summary.records_received
+            for target_field, source_fields in target_contributors.items():
+                # Calculate completeness for target field
+                total_populated = 0
+                for source_field in source_fields:
+                    if source_field in field_stats:
+                        total_populated += field_stats[source_field].records_mapped
+                
+                target_fields_data[target_field] = {
+                    "source_fields": sorted(list(source_fields)),
+                    "total_records_populated": total_populated,
+                    "total_records_processed": total_records,
+                    "completeness_rate": total_populated / total_records if total_records > 0 else 0.0,
+                }
+        
+        # Store unmapped fields
+        for unmapped_field, count in summary.unmapped_counts.items():
+            unmapped_fields_data[unmapped_field] = {
+                "records_with_value": count,
+                "total_records_processed": summary.records_received,
+            }
+    
     import_run.metrics_json = metrics
 
 

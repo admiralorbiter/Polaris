@@ -4,13 +4,70 @@
 
 {% block extra_css %}
 <style>
+  /* Override main max-width constraint ONLY for importer dashboard page */
+  /* Add a class to body or use a more specific selector */
+  body.importer-runs-page > main,
+  body:has(.importer-runs-dashboard) > main {
+    max-width: 100% !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+  }
+  /* Add padding back via wrapper for importer dashboard */
+  .importer-runs-dashboard-wrapper {
+    padding: var(--spacing-xl);
+    width: 100%;
+    max-width: 100%;
+  }
+  
   .importer-runs-dashboard {
     padding-left: 1rem;
     padding-right: 1rem;
+    width: 100%;
   }
 
   .importer-runs-dashboard .card {
     width: 100%;
+  }
+
+  /* Ensure the table container can expand and scroll */
+  .importer-runs-table-responsive {
+    max-height: 70vh;
+    overflow-y: auto;
+    overflow-x: auto;
+    width: 100%;
+    display: block;
+  }
+  .importer-runs-table-responsive .table {
+    margin-bottom: 0;
+    width: auto;
+    min-width: 100%;
+  }
+  .importer-runs-table-responsive .table th,
+  .importer-runs-table-responsive .table td {
+    white-space: nowrap;
+  }
+  /* Only remove padding from the runs table card body to prevent cutoff */
+  #runs-table-card > .card-body {
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+    overflow: visible;
+  }
+  /* Ensure card doesn't constrain table width */
+  #runs-table-card {
+    overflow: visible;
+  }
+  /* Ensure modal body can scroll properly */
+  .modal-body {
+    max-height: calc(100vh - 200px);
+    overflow-y: auto;
+  }
+  /* Field stats section styling */
+  #field-stats-section {
+    margin-top: 1.5rem;
+  }
+  #field-stats-section .table-responsive {
+    border: 1px solid #dee2e6;
+    border-radius: 0.25rem;
   }
 
   @media (min-width: 992px) {
@@ -20,12 +77,14 @@
     }
 
     .importer-runs-table-responsive {
-      overflow-x: visible;
+      overflow-x: auto;
+      overflow-y: auto;
+      width: 100%;
     }
 
     .importer-runs-table-responsive .table th,
     .importer-runs-table-responsive .table td {
-      white-space: normal;
+      white-space: nowrap;
       padding-left: 0.75rem;
       padding-right: 0.75rem;
     }
@@ -73,6 +132,11 @@
 {% endblock %}
 
 {% block content %}
+<script>
+  // Add class to body to identify this page for CSS targeting
+  document.body.classList.add('importer-runs-page');
+</script>
+<div class="importer-runs-dashboard-wrapper">
 <div class="container-fluid importer-runs-dashboard py-4" data-component="importer-runs-dashboard">
     <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4">
       <div>
@@ -173,12 +237,13 @@
     <!-- Summary cards rendered via JS -->
   </div>
 
-  <div class="card shadow-sm">
+  <div class="card shadow-sm" id="runs-table-card">
     <div class="card-header d-flex justify-content-between align-items-center">
       <h2 class="h5 mb-0">Runs</h2>
       <div id="runs-last-updated" class="text-muted small" aria-live="polite"></div>
     </div>
-    <div class="table-responsive position-relative importer-runs-table-responsive">
+    <div class="card-body p-0">
+      <div class="table-responsive position-relative importer-runs-table-responsive">
       <div id="runs-loading-overlay" class="position-absolute top-0 start-0 w-100 h-100 bg-white bg-opacity-75 d-flex align-items-center justify-content-center d-none">
         <div class="text-center">
           <div class="spinner-border text-primary mb-2" role="status" aria-hidden="true"></div>
@@ -206,6 +271,7 @@
           </tr>
         </tbody>
       </table>
+      </div>
     </div>
     <div class="card-footer d-flex flex-column flex-lg-row justify-content-between gap-2">
       <div id="runs-pagination-summary" class="text-muted small"></div>
@@ -215,7 +281,7 @@
 </div>
 
 <div class="modal fade" id="run-detail-modal" tabindex="-1" aria-hidden="true" aria-labelledby="run-detail-title">
-  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+  <div class="modal-dialog modal-fullscreen-lg-down modal-xl modal-dialog-scrollable" style="max-width: 95vw;">
     <div class="modal-content">
       <div class="modal-header">
         <h2 class="modal-title h5" id="run-detail-title">Run Detail</h2>
@@ -269,6 +335,105 @@
             <dt class="col-sm-3">Triggered By</dt>
             <dd class="col-sm-9" data-field="triggered_by"></dd>
           </dl>
+          
+          <!-- Field Import Statistics Section -->
+          <div id="field-stats-section" class="mt-4 d-none">
+            <h5 class="mb-3">Field Import Statistics</h5>
+            <ul class="nav nav-tabs" role="tablist">
+              <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="source-fields-tab" data-bs-toggle="tab" data-bs-target="#source-fields-pane" type="button" role="tab" aria-controls="source-fields-pane" aria-selected="true">
+                  Source Fields
+                </button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="target-fields-tab" data-bs-toggle="tab" data-bs-target="#target-fields-pane" type="button" role="tab" aria-controls="target-fields-pane" aria-selected="false">
+                  Target Fields
+                </button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="unmapped-fields-tab" data-bs-toggle="tab" data-bs-target="#unmapped-fields-pane" type="button" role="tab" aria-controls="unmapped-fields-pane" aria-selected="false">
+                  Unmapped Fields
+                </button>
+              </li>
+            </ul>
+            <div class="tab-content border border-top-0 rounded-bottom p-3" style="min-height: 400px; max-height: 60vh; overflow-y: auto;">
+              <div class="tab-pane fade show active" id="source-fields-pane" role="tabpanel" aria-labelledby="source-fields-tab">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                  <div>
+                    <input type="text" class="form-control form-control-sm" id="source-fields-search" placeholder="Search source fields..." style="max-width: 300px;">
+                  </div>
+                  <button class="btn btn-sm btn-outline-secondary" id="export-source-fields-btn">
+                    <i class="fas fa-download"></i> Export CSV
+                  </button>
+                </div>
+                <div class="table-responsive" style="max-height: 50vh; overflow-y: auto;">
+                  <table class="table table-sm table-hover mb-0" id="source-fields-table">
+                    <thead>
+                      <tr>
+                        <th>Source Field</th>
+                        <th>Target Field</th>
+                        <th>Records with Value</th>
+                        <th>Total Records</th>
+                        <th>Population Rate</th>
+                        <th>Transform</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="tab-pane fade" id="target-fields-pane" role="tabpanel" aria-labelledby="target-fields-tab">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                  <div>
+                    <input type="text" class="form-control form-control-sm" id="target-fields-search" placeholder="Search target fields..." style="max-width: 300px;">
+                  </div>
+                  <button class="btn btn-sm btn-outline-secondary" id="export-target-fields-btn">
+                    <i class="fas fa-download"></i> Export CSV
+                  </button>
+                </div>
+                <div class="table-responsive" style="max-height: 50vh; overflow-y: auto;">
+                  <table class="table table-sm table-hover mb-0" id="target-fields-table">
+                    <thead>
+                      <tr>
+                        <th>Target Field</th>
+                        <th>Source Fields</th>
+                        <th>Records Populated</th>
+                        <th>Total Records</th>
+                        <th>Completeness Rate</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="tab-pane fade" id="unmapped-fields-pane" role="tabpanel" aria-labelledby="unmapped-fields-tab">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                  <div>
+                    <input type="text" class="form-control form-control-sm" id="unmapped-fields-search" placeholder="Search unmapped fields..." style="max-width: 300px;">
+                  </div>
+                  <button class="btn btn-sm btn-outline-secondary" id="export-unmapped-fields-btn">
+                    <i class="fas fa-download"></i> Export CSV
+                  </button>
+                </div>
+                <div class="table-responsive" style="max-height: 50vh; overflow-y: auto;">
+                  <table class="table table-sm table-hover mb-0" id="unmapped-fields-table">
+                    <thead>
+                      <tr>
+                        <th>Field Name</th>
+                        <th>Records with Value</th>
+                        <th>Total Records</th>
+                        <th>Population Rate</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
       <div class="modal-footer justify-content-between">
@@ -281,6 +446,7 @@
       </div>
     </div>
   </div>
+</div>
 </div>
 
 <script>

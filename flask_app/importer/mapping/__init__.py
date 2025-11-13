@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Sequence
 
@@ -164,10 +164,30 @@ def _compute_checksum(payload: Mapping[str, Any]) -> str:
 
 
 @dataclass
+class FieldImportStats:
+    """Statistics for a single field during transformation."""
+    source_field: str
+    target_field: str | None
+    records_with_value: int = 0
+    records_mapped: int = 0
+    records_transformed: int = 0
+    records_failed_transform: int = 0
+    records_used_default: int = 0
+    total_records_processed: int = 0
+    
+    @property
+    def population_rate(self) -> float:
+        if self.total_records_processed == 0:
+            return 0.0
+        return self.records_with_value / self.total_records_processed
+
+
+@dataclass
 class TransformResult:
     canonical: dict[str, Any]
     unmapped_fields: dict[str, Any]
     errors: list[str]
+    field_stats: dict[str, FieldImportStats] = field(default_factory=dict)
 
 
 class SalesforceMappingTransformer:
@@ -181,25 +201,58 @@ class SalesforceMappingTransformer:
         canonical: dict[str, Any] = {}
         unmapped = dict(payload)
         errors: list[str] = []
+        field_stats: dict[str, FieldImportStats] = {}
 
         for field in self.spec.fields:
+            # Only track stats for fields with a source (not default-only fields)
+            source_field_name = field.source
+            if source_field_name:
+                if source_field_name not in field_stats:
+                    field_stats[source_field_name] = FieldImportStats(
+                        source_field=source_field_name,
+                        target_field=field.target,
+                    )
+                stats = field_stats[source_field_name]
+                stats.total_records_processed += 1
+            
             value = None
+            had_value = False
+            used_default = False
+            transform_applied = False
+            transform_failed = False
+            
             if field.source:
                 value = payload.get(field.source)
                 unmapped.pop(field.source, None)
+                if value is not None and value != "":
+                    had_value = True
+                    if source_field_name and source_field_name in field_stats:
+                        field_stats[source_field_name].records_with_value += 1
+            
             if (value is None or value == "") and field.default is not None:
                 value = field.default
+                used_default = True
+                if source_field_name and source_field_name in field_stats:
+                    field_stats[source_field_name].records_used_default += 1
+            
             if field.required and (value is None or value == ""):
                 errors.append(f"Required field '{field.target}' missing (source: {field.source})")
                 continue
+            
             if field.transform:
                 transform_fn = self.transform_registry.get(field.transform)
                 if transform_fn is None:
                     errors.append(f"Unknown transform '{field.transform}' for field '{field.target}'")
+                    transform_failed = True
+                    if source_field_name and source_field_name in field_stats:
+                        field_stats[source_field_name].records_failed_transform += 1
                 else:
                     try:
                         original_value = value
                         transformed_value = transform_fn(value)
+                        transform_applied = True
+                        if source_field_name and source_field_name in field_stats:
+                            field_stats[source_field_name].records_transformed += 1
                         # For phone/email transforms, if the original value exists but transform returns None,
                         # keep the original value (might be already normalized or in unexpected format)
                         if transformed_value is None and original_value is not None and original_value != "":
@@ -210,6 +263,15 @@ class SalesforceMappingTransformer:
                             value = transformed_value
                     except Exception as exc:  # pragma: no cover - defensive path
                         errors.append(f"Transform '{field.transform}' failed for {field.target}: {exc}")
+                        transform_failed = True
+                        if source_field_name and source_field_name in field_stats:
+                            field_stats[source_field_name].records_failed_transform += 1
+            
+            # Update mapped count if field was successfully processed
+            if source_field_name and source_field_name in field_stats:
+                if had_value or used_default:
+                    field_stats[source_field_name].records_mapped += 1
+            
             # Skip only None and empty strings, but include False (boolean) values
             # Note: False is not None and False != "", so it will pass through
             # However, if we have a boolean default and the value is None/empty, we should use the default
@@ -233,6 +295,7 @@ class SalesforceMappingTransformer:
             canonical=canonical,
             unmapped_fields={key: val for key, val in unmapped.items() if val not in (None, "", [])},
             errors=errors,
+            field_stats=field_stats,
         )
 
 
