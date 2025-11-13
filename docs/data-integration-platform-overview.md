@@ -165,6 +165,22 @@ Each rule has: `rule_code`, `severity` (error/warn/info), remediation hints, and
 
 ## 7) Identity Resolution (Duplicates & Merges)
 
+### 7.0 Duplicate Detection Scope
+
+**Important**: The import pipeline performs **one-way duplicate detection**:
+- **During Import**: New records from the current import run are checked against **existing volunteers** in the database
+- **Limitation**: Duplicates among **existing volunteers** (that were imported before duplicate review existed, or created through other means) are **not automatically detected** during import
+- **Manual Scan Required**: To find duplicates among existing volunteers, operators must run a **manual scan** via the Duplicate Review UI
+
+**Why this design?**
+- Import-time dedupe is **O(n)** where n = new records (efficient)
+- Full scan of all volunteers is **O(n²)** where n = all volunteers (expensive)
+- Manual scans are run periodically for historical cleanup, not on every import
+
+**When to use each:**
+- **Import-time dedupe**: Automatically runs on every import to prevent new duplicates
+- **Manual scan**: Run periodically (e.g., monthly) to find duplicates in historical data, or after bulk imports from legacy systems
+
 ### 7.1 Blocking Keys (fast candidates)
 
 - Normalized email
@@ -201,7 +217,7 @@ Each rule has: `rule_code`, `severity` (error/warn/info), remediation hints, and
 ### 7.5 Edge Cases
 
 - Shared emails (households, minors) → treat as **household** link, not necessarily same person.
-- Name collisions in common names (e.g., “John Smith”) → require extra signals (DOB, address).
+- Name collisions in common names (e.g., "John Smith") → require extra signals (DOB, address).
 - International phone formats; missing country → infer by locale or site default.
 - SF merges/splits: detect when an `external_id` disappears or points to a different Contact → reconcile map.
 

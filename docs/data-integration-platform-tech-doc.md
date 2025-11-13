@@ -918,6 +918,7 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - ✅ Thresholds implemented: ≥0.95 for auto-merge (`fuzzy_high`), 0.80–0.95 for review (`fuzzy_review`), <0.80 filtered out (`fuzzy_low`).
 - ✅ Candidate generation integrated into import pipeline in `flask_app/importer/pipeline/fuzzy_candidates.py`.
 - ✅ Batch candidate generation with configurable batch sizes and dry-run support.
+- ⚠️ **Important**: Import-time candidate generation only checks **new records against existing volunteers** (one-way). To find duplicates among existing volunteers, use the manual scan function `scan_existing_volunteers_for_duplicates()` via the Duplicate Review UI.
 - ⚠️ Configuration for feature weights/thresholds currently hardcoded; will be exposed via Config UI in Sprint 7.
 
 **Testing Status**

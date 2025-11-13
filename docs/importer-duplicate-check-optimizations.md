@@ -2,6 +2,31 @@
 
 This document outlines optimizations for the duplicate detection pipeline and process.
 
+## Duplicate Detection Scope
+
+**Important**: The system has two types of duplicate detection:
+
+1. **Import-time dedupe** (automatic, runs on every import):
+   - Checks **new records** from the current import run against **existing volunteers** in the database
+   - One-way comparison: new → existing
+   - Efficient: O(n) where n = new records
+   - Prevents new duplicates from being created
+
+2. **Manual scan** (manual, run periodically):
+   - Scans **all existing volunteers** against **each other** to find duplicates
+   - Two-way comparison: existing ↔ existing
+   - More expensive: O(n²) where n = all volunteers
+   - Finds duplicates in historical data that were created before duplicate review existed, or through other means (manual entry, different imports, etc.)
+
+**When to use each:**
+- **Import-time dedupe**: Automatically runs on every import - no action needed
+- **Manual scan**: Run periodically (e.g., monthly) via the Duplicate Review UI to find duplicates among existing volunteers
+
+**Why many duplicates aren't checked on import:**
+- Import-time dedupe only checks new records against existing ones
+- Duplicates among existing volunteers (especially those imported before duplicate review existed) require a manual scan
+- This design is intentional for performance: running a full O(n²) scan on every import would be too slow
+
 ## Implemented Optimizations
 
 ### 1. ✅ Name Lookup Caching (load_core.py)
