@@ -348,45 +348,17 @@ def _compose_payload(row: StagingVolunteer) -> MutableMapping[str, object | None
     # NOW update with normalized (this may add nested structures that could overwrite our values)
     payload.update(normalized)
     
-    # Re-check email/phone - normalized may have overwritten our string values with dicts
-    # If we had a value but payload now has a dict, re-extract
-    if email_value and isinstance(payload.get("email"), dict):
-        # Normalized overwrote our string with a dict - extract from dict
-        email_dict = payload["email"]
-        email_value = (
-            email_dict.get("primary") or 
-            email_dict.get("home") or 
-            email_dict.get("work") or 
-            email_dict.get("alternate")
-        )
-        if email_value:
-            email_value = str(email_value).strip()
-            if email_value:
-                payload["email"] = email_value
-                payload["email_normalized"] = email_value
-            else:
-                payload.pop("email", None)
-        else:
-            payload.pop("email", None)
-    elif not email_value and isinstance(payload.get("email"), dict):
-        # No raw value, try extracting from normalized dict
-        email_dict = payload["email"]
-        email_value = (
-            email_dict.get("primary") or 
-            email_dict.get("home") or 
-            email_dict.get("work") or 
-            email_dict.get("alternate")
-        )
-        if email_value:
-            email_value = str(email_value).strip()
-            if email_value:
-                payload["email"] = email_value
-                payload["email_normalized"] = email_value
-            else:
-                payload.pop("email", None)
-        else:
-            # If no email in nested dict, remove the dict so DQ rules see it as missing
-            payload.pop("email", None)
+    # Preserve nested email/phone structures from normalized data
+    # If normalized has a dict structure, keep it (don't flatten to string)
+    # The loader will process all email/phone types from the dict
+    if isinstance(payload.get("email"), dict):
+        # Keep the nested dict structure - don't flatten it
+        # The loader will process all email types from the dict
+        pass  # Keep the dict as-is
+    elif email_value and not payload.get("email"):
+        # Only set string email if we don't have a dict and don't have an email yet
+        payload["email"] = email_value
+        payload["email_normalized"] = email_value
     elif not email_value and "email_normalized" in normalized:
         email_value = str(normalized["email_normalized"]).strip()
         if email_value:
@@ -397,45 +369,15 @@ def _compose_payload(row: StagingVolunteer) -> MutableMapping[str, object | None
         if email_value:
             payload["email"] = email_value
     
-    # Re-check phone - normalized may have overwritten our string value with a dict
-    if phone_value and isinstance(payload.get("phone"), dict):
-        # Normalized overwrote our string with a dict - extract from dict
-        phone_dict = payload["phone"]
-        phone_value = (
-            phone_dict.get("primary") or 
-            phone_dict.get("mobile") or 
-            phone_dict.get("home") or 
-            phone_dict.get("work")
-        )
-        if phone_value:
-            phone_value = str(phone_value).strip()
-            if phone_value:
-                payload["phone"] = phone_value
-                payload["phone_e164"] = phone_value
-            else:
-                payload.pop("phone", None)
-        else:
-            payload.pop("phone", None)
-    elif not phone_value and isinstance(payload.get("phone"), dict):
-        # No raw value, try extracting from normalized dict
-        phone_dict = payload["phone"]
-        phone_value = (
-            phone_dict.get("primary") or 
-            phone_dict.get("mobile") or 
-            phone_dict.get("home") or 
-            phone_dict.get("work")
-        )
-        if phone_value:
-            phone_value = str(phone_value).strip()
-            if phone_value:
-                payload["phone"] = phone_value
-                # Note: phone might already be normalized to E.164 by the transform
-                payload["phone_e164"] = phone_value
-            else:
-                payload.pop("phone", None)
-        else:
-            # If no phone in nested dict, remove the dict so DQ rules see it as missing
-            payload.pop("phone", None)
+    # Preserve nested phone structures from normalized data
+    if isinstance(payload.get("phone"), dict):
+        # Keep the nested dict structure - don't flatten it
+        # The loader will process all phone types from the dict
+        pass  # Keep the dict as-is
+    elif phone_value and not payload.get("phone"):
+        # Only set string phone if we don't have a dict and don't have a phone yet
+        payload["phone"] = phone_value
+        payload["phone_e164"] = phone_value
     elif not phone_value and "phone_e164" in normalized:
         phone_value = str(normalized["phone_e164"]).strip()
         if phone_value:

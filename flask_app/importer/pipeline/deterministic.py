@@ -42,6 +42,8 @@ def normalize_email(value: object | None) -> str | None:
 def normalize_phone(value: object | None) -> str | None:
     """
     Normalize phone numbers to strict E.164 (+<country><number>) format.
+    Handles US phone numbers without country code by assuming +1.
+    Strips extensions (x, ext, extension) before normalizing.
     """
 
     if value is None:
@@ -50,16 +52,43 @@ def normalize_phone(value: object | None) -> str | None:
     if not token:
         return None
 
-    token = token.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+    # Strip extensions (x123, ext 123, extension 123, etc.)
+    # Handle common extension patterns: x123, ext123, ext 123, extension 123, #123
+    import re
+    # Remove extension patterns (case-insensitive)
+    token = re.sub(r'\s*(x|ext|extension|#)\s*\d+.*$', '', token, flags=re.IGNORECASE)
+    token = token.strip()
+    if not token:
+        return None
+
+    # Strip common formatting characters
+    token = token.replace(" ", "").replace("-", "").replace("(", "").replace(")", "").replace(".", "")
+    
+    # Handle international format starting with 00
     if token.startswith("00"):
         token = f"+{token[2:]}"
+    
+    # Extract digits only (excluding +) for validation
+    digits_only = ''.join(c for c in token if c.isdigit())
+    
+    # If it doesn't start with +, try to normalize it
     if not token.startswith("+"):
-        return None
-    candidate = f"+{token[1:]}" if token.startswith("+") else token
-    digits = candidate[1:]
-    if not digits.isdigit():
-        return None
-    normalized = f"+{digits}"
+        # If it's 10 digits, assume US number and prepend +1
+        if len(digits_only) == 10:
+            normalized = f"+1{digits_only}"
+        # If it's 11 digits starting with 1, prepend +
+        elif len(digits_only) == 11 and digits_only.startswith("1"):
+            normalized = f"+{digits_only}"
+        else:
+            # Can't normalize - return None
+            return None
+    else:
+        # Already has + prefix - extract just digits to validate
+        if not digits_only.isdigit():
+            return None
+        normalized = f"+{digits_only}"
+    
+    # Validate the normalized format matches E.164
     if _E164_REGEX.match(normalized):
         return normalized
     return None

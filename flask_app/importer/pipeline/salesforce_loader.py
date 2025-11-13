@@ -249,57 +249,17 @@ class SalesforceContactLoader:
             last_name=clean_row.last_name,
             middle_name=_coerce_string(payload.get("middle_name")),
             preferred_name=_coerce_string(payload.get("preferred_name")),
+            type=_coerce_string(payload.get("type")),
             source="salesforce",
         )
         self.session.add(volunteer)
         self.session.flush()
         
-        # Add email if present
-        if email_value:
-            # Normalize and validate email format before creating ContactEmail
-            email_value = email_value.strip().lower() if email_value else None
-            if email_value:
-                try:
-                    from email_validator import validate_email, EmailNotValidError
-                    validate_email(email_value, check_deliverability=False)
-                except EmailNotValidError:
-                    # Skip invalid emails - log but don't fail
-                    current_app.logger.warning(f"Skipping invalid email for volunteer {clean_row.first_name} {clean_row.last_name}: {email_value}")
-                    email_value = None
-                except Exception as e:
-                    # Log unexpected errors but continue
-                    current_app.logger.warning(f"Email validation error for {email_value}: {e}")
-                    email_value = None
+        # Apply all emails from payload
+        _apply_emails_to_volunteer(volunteer, payload, self.session)
         
-        if email_value:
-            try:
-                email = ContactEmail(
-                    contact_id=volunteer.id,
-                    email=email_value,
-                    email_type=EmailType.PERSONAL,
-                    is_primary=True,
-                    is_verified=False,
-                )
-                volunteer.emails.append(email)
-                self.session.add(email)
-            except ValueError as e:
-                # Model validator rejected the email - skip it
-                current_app.logger.warning(f"Model validator rejected email for volunteer {clean_row.first_name} {clean_row.last_name}: {email_value} - {e}")
-        
-        # Extract phone from clean_row (handle dict structures)
-        phone_value = _extract_phone(clean_row.phone_e164)
-        
-        # Add phone if present
-        if phone_value:
-            phone = ContactPhone(
-                contact_id=volunteer.id,
-                phone_number=phone_value,
-                phone_type=PhoneType.MOBILE,
-                is_primary=True,
-                can_text=True,
-            )
-            volunteer.phones.append(phone)
-            self.session.add(phone)
+        # Apply all phones from payload
+        _apply_phones_to_volunteer(volunteer, payload, self.session)
         
         # Apply contact preferences from payload
         contact_prefs = payload.get("contact_preferences", {})
@@ -328,6 +288,33 @@ class SalesforceContactLoader:
         
         # Apply demographics fields
         demographics = payload.get("demographics", {})
+        if demographics.get("birthdate"):
+            from datetime import datetime as dt
+            try:
+                birthdate_str = demographics.get("birthdate")
+                if isinstance(birthdate_str, str):
+                    # Parse ISO format date (YYYY-MM-DD)
+                    volunteer.birthdate = dt.fromisoformat(birthdate_str[:10]).date()
+                elif hasattr(birthdate_str, 'date'):
+                    volunteer.birthdate = birthdate_str.date()
+                elif hasattr(birthdate_str, 'year'):
+                    # Already a date object
+                    volunteer.birthdate = birthdate_str
+            except Exception as e:
+                current_app.logger.warning(f"Failed to parse birthdate for volunteer: {e}")
+        if demographics.get("gender"):
+            from flask_app.models.contact.enums import Gender
+            gender_value = _coerce_string(demographics.get("gender"))
+            try:
+                gender_enum = None
+                for gender in Gender:
+                    if gender.value.lower() == gender_value.lower():
+                        gender_enum = gender
+                        break
+                if gender_enum:
+                    volunteer.gender = gender_enum
+            except Exception as e:
+                current_app.logger.warning(f"Failed to set gender for volunteer: {e}")
         if demographics.get("racial_ethnic_background"):
             from flask_app.models.contact.enums import RaceEthnicity
             race_value = _coerce_string(demographics.get("racial_ethnic_background"))
@@ -550,55 +537,15 @@ class SalesforceContactLoader:
             volunteer.middle_name = _coerce_string(payload.get("middle_name"))
         if payload.get("preferred_name"):
             volunteer.preferred_name = _coerce_string(payload.get("preferred_name"))
+        if payload.get("type"):
+            volunteer.type = _coerce_string(payload.get("type"))
         volunteer.source = "salesforce"
         
-        # Extract email from clean_row (handle dict structures)
-        email_value = _extract_email(clean_row.email)
+        # Apply all emails from payload (updates existing, adds new)
+        _apply_emails_to_volunteer(volunteer, payload, self.session)
         
-        # Update email if changed
-        if email_value:
-            # Validate email format before creating ContactEmail
-            try:
-                from email_validator import validate_email
-                validate_email(email_value, check_deliverability=False)
-            except Exception:
-                # Skip invalid emails - log but don't fail
-                current_app.logger.warning(f"Skipping invalid email for volunteer {clean_row.first_name} {clean_row.last_name}: {email_value}")
-                email_value = None
-        
-        if email_value:
-            existing_email = next((e for e in volunteer.emails if e.is_primary), None)
-            if not existing_email or existing_email.email != email_value:
-                if existing_email:
-                    existing_email.is_primary = False
-                email = ContactEmail(
-                    contact_id=volunteer.id,
-                    email=email_value,
-                    email_type=EmailType.PERSONAL,
-                    is_primary=True,
-                    is_verified=False,
-                )
-                volunteer.emails.append(email)
-                self.session.add(email)
-        
-        # Extract phone from clean_row (handle dict structures)
-        phone_value = _extract_phone(clean_row.phone_e164)
-        
-        # Update phone if changed
-        if phone_value:
-            existing_phone = next((p for p in volunteer.phones if p.is_primary), None)
-            if not existing_phone or existing_phone.phone_number != phone_value:
-                if existing_phone:
-                    existing_phone.is_primary = False
-                phone = ContactPhone(
-                    contact_id=volunteer.id,
-                    phone_number=phone_value,
-                    phone_type=PhoneType.MOBILE,
-                    is_primary=True,
-                    can_text=True,
-                )
-                volunteer.phones.append(phone)
-                self.session.add(phone)
+        # Apply all phones from payload (updates existing, adds new)
+        _apply_phones_to_volunteer(volunteer, payload, self.session)
         
         # Apply contact preferences from payload
         contact_prefs = payload.get("contact_preferences", {})
@@ -628,6 +575,33 @@ class SalesforceContactLoader:
         
         # Apply demographics fields
         demographics = payload.get("demographics", {})
+        if demographics.get("birthdate"):
+            from datetime import datetime as dt
+            try:
+                birthdate_str = demographics.get("birthdate")
+                if isinstance(birthdate_str, str):
+                    # Parse ISO format date (YYYY-MM-DD)
+                    volunteer.birthdate = dt.fromisoformat(birthdate_str[:10]).date()
+                elif hasattr(birthdate_str, 'date'):
+                    volunteer.birthdate = birthdate_str.date()
+                elif hasattr(birthdate_str, 'year'):
+                    # Already a date object
+                    volunteer.birthdate = birthdate_str
+            except Exception as e:
+                current_app.logger.warning(f"Failed to parse birthdate for volunteer: {e}")
+        if demographics.get("gender"):
+            from flask_app.models.contact.enums import Gender
+            gender_value = _coerce_string(demographics.get("gender"))
+            try:
+                gender_enum = None
+                for gender in Gender:
+                    if gender.value.lower() == gender_value.lower():
+                        gender_enum = gender
+                        break
+                if gender_enum:
+                    volunteer.gender = gender_enum
+            except Exception as e:
+                current_app.logger.warning(f"Failed to set gender for volunteer: {e}")
         if demographics.get("racial_ethnic_background"):
             from flask_app.models.contact.enums import RaceEthnicity
             race_value = _coerce_string(demographics.get("racial_ethnic_background"))
@@ -944,6 +918,139 @@ def _extract_email(value: object | None) -> str | None:
     return _coerce_string(value)
 
 
+def _validate_email(email: str | None) -> str | None:
+    """Validate and normalize email address. Returns normalized email or None if invalid."""
+    if not email:
+        return None
+    email = email.strip().lower()
+    if not email:
+        return None
+    try:
+        from email_validator import validate_email, EmailNotValidError
+        validate_email(email, check_deliverability=False)
+        return email
+    except EmailNotValidError:
+        current_app.logger.warning(f"Skipping invalid email: {email}")
+        return None
+    except Exception as e:
+        current_app.logger.warning(f"Email validation error for {email}: {e}")
+        return None
+
+
+def _apply_emails_to_volunteer(volunteer: Volunteer, payload: Mapping[str, object], session: Session) -> None:
+    """Apply all email addresses from payload to volunteer, creating ContactEmail records for each."""
+    email_data = payload.get("email", {})
+    if not isinstance(email_data, dict):
+        # Fallback: if email is a string, treat it as primary
+        email_str = _coerce_string(email_data)
+        if email_str:
+            email_data = {"primary": email_str}
+        else:
+            return
+    
+    # Log what email data we're processing
+    current_app.logger.debug(f"Processing emails for volunteer {volunteer.id}: {email_data}")
+    
+    # Get preferred email type to determine which should be primary
+    # preferred_type is stored at email.preferred_type in the payload
+    preferred_type = _coerce_string(email_data.get("preferred_type"))
+    
+    # Track which emails we've already added (to avoid duplicates)
+    emails_added = set()
+    emails_to_add = []
+    
+    # Process each email type
+    email_mappings = [
+        ("primary", EmailType.PERSONAL),
+        ("home", EmailType.PERSONAL),
+        ("work", EmailType.WORK),
+        ("alternate", EmailType.OTHER),
+    ]
+    
+    for email_key, email_type in email_mappings:
+        email_value = _coerce_string(email_data.get(email_key))
+        if not email_value:
+            continue
+        
+        # Validate and normalize
+        normalized_email = _validate_email(email_value)
+        if not normalized_email:
+            continue
+        
+        # Skip if we've already added this email address
+        if normalized_email in emails_added:
+            continue
+        
+        # Determine if this should be primary
+        # Primary is determined by preferred_type matching the key, or if it's "primary" and no preferred_type is set
+        is_primary = False
+        if preferred_type:
+            # Map Salesforce preferred types to our keys
+            preferred_map = {
+                "primary": "primary",
+                "home": "home",
+                "work": "work",
+                "alternate": "alternate",
+            }
+            if preferred_map.get(preferred_type.lower()) == email_key:
+                is_primary = True
+        elif email_key == "primary":
+            # Default: primary email is primary if no preferred_type specified
+            is_primary = True
+        
+        emails_to_add.append((normalized_email, email_type, is_primary))
+        emails_added.add(normalized_email)
+    
+    # If no emails were marked as primary, make the first one primary
+    if emails_to_add and not any(is_primary for _, _, is_primary in emails_to_add):
+        if emails_to_add:
+            # Make the first email primary
+            emails_to_add[0] = (emails_to_add[0][0], emails_to_add[0][1], True)
+    
+    # Add emails to volunteer
+    for email_address, email_type, is_primary in emails_to_add:
+        # Check if email already exists for this volunteer (query database, not just in-memory)
+        existing_email = session.query(ContactEmail).filter_by(
+            contact_id=volunteer.id,
+            email=email_address
+        ).first()
+        
+        if existing_email:
+            # Update existing email if needed
+            if existing_email.email_type != email_type:
+                existing_email.email_type = email_type
+            if is_primary and not existing_email.is_primary:
+                # Mark this as primary and unmark others
+                # Update all other emails for this volunteer to non-primary
+                session.query(ContactEmail).filter_by(
+                    contact_id=volunteer.id,
+                    is_primary=True
+                ).update({"is_primary": False})
+                existing_email.is_primary = True
+            continue
+        
+        # If this is primary, ensure no other emails are primary
+        if is_primary:
+            session.query(ContactEmail).filter_by(
+                contact_id=volunteer.id,
+                is_primary=True
+            ).update({"is_primary": False})
+        
+        try:
+            email = ContactEmail(
+                contact_id=volunteer.id,
+                email=email_address,
+                email_type=email_type,
+                is_primary=is_primary,
+                is_verified=False,
+            )
+            volunteer.emails.append(email)
+            session.add(email)
+            current_app.logger.info(f"Added email {email_address} ({email_type.value}) to volunteer {volunteer.id}, primary={is_primary}")
+        except ValueError as e:
+            current_app.logger.warning(f"Model validator rejected email for volunteer {volunteer.id}: {email_address} - {e}")
+
+
 def _extract_phone(value: object | None) -> str | None:
     """Extract phone string from value, handling dict structures."""
     if value is None:
@@ -964,6 +1071,118 @@ def _extract_phone(value: object | None) -> str | None:
         phone_value = value.get("primary") or value.get("mobile") or value.get("home") or value.get("work")
         return _coerce_string(phone_value)
     return _coerce_string(value)
+
+
+def _apply_phones_to_volunteer(volunteer: Volunteer, payload: Mapping[str, object], session: Session) -> None:
+    """Apply all phone numbers from payload to volunteer, creating ContactPhone records for each."""
+    phone_data = payload.get("phone", {})
+    if not isinstance(phone_data, dict):
+        # Fallback: if phone is a string, treat it as primary
+        phone_str = _coerce_string(phone_data)
+        if phone_str:
+            phone_data = {"primary": phone_str}
+        else:
+            return
+    
+    # Get preferred phone type to determine which should be primary
+    preferred_type = _coerce_string(phone_data.get("preferred_type"))
+    
+    # Track which phones we've already added (to avoid duplicates)
+    phones_added = set()
+    phones_to_add = []
+    
+    # Process each phone type
+    phone_mappings = [
+        ("primary", PhoneType.MOBILE),  # Default primary to mobile
+        ("mobile", PhoneType.MOBILE),
+        ("home", PhoneType.HOME),
+        ("work", PhoneType.WORK),
+    ]
+    
+    for phone_key, phone_type in phone_mappings:
+        phone_value = _coerce_string(phone_data.get(phone_key))
+        if not phone_value:
+            continue
+        
+        # Normalize phone (should already be normalized by transform, but re-normalize to handle edge cases)
+        from flask_app.importer.pipeline.deterministic import normalize_phone
+        normalized_phone = normalize_phone(phone_value)
+        if not normalized_phone:
+            # If normalization fails, try using the raw value (might already be in E.164 format)
+            normalized_phone = phone_value.strip() if phone_value else None
+            if not normalized_phone:
+                continue
+        
+        # Skip if we've already added this phone number
+        if normalized_phone in phones_added:
+            continue
+        
+        # Determine if this should be primary
+        is_primary = False
+        if preferred_type:
+            # Map Salesforce preferred types to our keys
+            preferred_map = {
+                "primary": "primary",
+                "mobile": "mobile",
+                "home": "home",
+                "work": "work",
+            }
+            if preferred_map.get(preferred_type.lower()) == phone_key:
+                is_primary = True
+        elif phone_key == "primary" or phone_key == "mobile":
+            # Default: primary or mobile phone is primary if no preferred_type specified
+            is_primary = True
+        
+        phones_to_add.append((normalized_phone, phone_type, is_primary))
+        phones_added.add(normalized_phone)
+    
+    # If no phones were marked as primary, make the first one primary
+    if phones_to_add and not any(is_primary for _, _, is_primary in phones_to_add):
+        if phones_to_add:
+            # Make the first phone primary
+            phones_to_add[0] = (phones_to_add[0][0], phones_to_add[0][1], True)
+    
+    # Add phones to volunteer
+    for phone_number, phone_type, is_primary in phones_to_add:
+        # Check if phone already exists for this volunteer (query database, not just in-memory)
+        existing_phone = session.query(ContactPhone).filter_by(
+            contact_id=volunteer.id,
+            phone_number=phone_number
+        ).first()
+        
+        if existing_phone:
+            # Update existing phone if needed
+            if existing_phone.phone_type != phone_type:
+                existing_phone.phone_type = phone_type
+            if is_primary and not existing_phone.is_primary:
+                # Mark this as primary and unmark others
+                # Update all other phones for this volunteer to non-primary
+                session.query(ContactPhone).filter_by(
+                    contact_id=volunteer.id,
+                    is_primary=True
+                ).update({"is_primary": False})
+                existing_phone.is_primary = True
+            continue
+        
+        # If this is primary, ensure no other phones are primary
+        if is_primary:
+            session.query(ContactPhone).filter_by(
+                contact_id=volunteer.id,
+                is_primary=True
+            ).update({"is_primary": False})
+        
+        try:
+            phone = ContactPhone(
+                contact_id=volunteer.id,
+                phone_number=phone_number,
+                phone_type=phone_type,
+                is_primary=is_primary,
+                can_text=(phone_type == PhoneType.MOBILE),  # Default can_text for mobile
+            )
+            volunteer.phones.append(phone)
+            session.add(phone)
+        except ValueError as e:
+            current_app.logger.warning(f"Model validator rejected phone for volunteer {volunteer.id}: {phone_number} - {e}")
 
 
 def _email_exists(email: str | None) -> bool:

@@ -51,6 +51,8 @@ fields:
     target: demographics.age_group
   - source: Highest_Level_of_Educational__c
     target: demographics.highest_education_level
+  - source: Contact_Type__c
+    target: type
   - source: AccountId
     target: affiliations.account_id
   - source: npsp__Primary_Affiliation__c

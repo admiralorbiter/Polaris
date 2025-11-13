@@ -198,7 +198,16 @@ class SalesforceMappingTransformer:
                     errors.append(f"Unknown transform '{field.transform}' for field '{field.target}'")
                 else:
                     try:
-                        value = transform_fn(value)
+                        original_value = value
+                        transformed_value = transform_fn(value)
+                        # For phone/email transforms, if the original value exists but transform returns None,
+                        # keep the original value (might be already normalized or in unexpected format)
+                        if transformed_value is None and original_value is not None and original_value != "":
+                            # Transform returned None but we had a value - keep original for manual review
+                            # The loader will handle normalization/validation
+                            value = str(original_value).strip() if original_value else None
+                        else:
+                            value = transformed_value
                     except Exception as exc:  # pragma: no cover - defensive path
                         errors.append(f"Transform '{field.transform}' failed for {field.target}: {exc}")
             # Skip only None and empty strings, but include False (boolean) values
