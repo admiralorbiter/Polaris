@@ -96,36 +96,6 @@
                         </a>
                     </th>
                     <th>
-                        <a href="{{ url_for('volunteers_list', search=search_term, sort='phone', order='asc' if sort_column != 'phone' or sort_order == 'desc' else 'desc') }}" 
-                           class="text-decoration-none text-white sortable-header">
-                            Phone
-                            {% if sort_column == 'phone' %}
-                                {% if sort_order == 'asc' %}
-                                    <i class="fas fa-sort-up ms-1"></i>
-                                {% else %}
-                                    <i class="fas fa-sort-down ms-1"></i>
-                                {% endif %}
-                            {% else %}
-                                <i class="fas fa-sort ms-1" style="opacity: 0.5;"></i>
-                            {% endif %}
-                        </a>
-                    </th>
-                    <th>
-                        <a href="{{ url_for('volunteers_list', search=search_term, sort='status', order='asc' if sort_column != 'status' or sort_order == 'desc' else 'desc') }}" 
-                           class="text-decoration-none text-white sortable-header">
-                            Status
-                            {% if sort_column == 'status' %}
-                                {% if sort_order == 'asc' %}
-                                    <i class="fas fa-sort-up ms-1"></i>
-                                {% else %}
-                                    <i class="fas fa-sort-down ms-1"></i>
-                                {% endif %}
-                            {% else %}
-                                <i class="fas fa-sort ms-1" style="opacity: 0.5;"></i>
-                            {% endif %}
-                        </a>
-                    </th>
-                    <th>
                         <a href="{{ url_for('volunteers_list', search=search_term, sort='do_not_call', order='asc' if sort_column != 'do_not_call' or sort_order == 'desc' else 'desc') }}" 
                            class="text-decoration-none text-white sortable-header">
                             Contact Preferences
@@ -141,40 +111,10 @@
                         </a>
                     </th>
                     <th>
-                        <a href="{{ url_for('volunteers_list', search=search_term, sort='hours', order='asc' if sort_column != 'hours' or sort_order == 'desc' else 'desc') }}" 
-                           class="text-decoration-none text-white sortable-header">
-                            Total Hours
-                            {% if sort_column == 'hours' %}
-                                {% if sort_order == 'asc' %}
-                                    <i class="fas fa-sort-up ms-1"></i>
-                                {% else %}
-                                    <i class="fas fa-sort-down ms-1"></i>
-                                {% endif %}
-                            {% else %}
-                                <i class="fas fa-sort ms-1" style="opacity: 0.5;"></i>
-                            {% endif %}
-                        </a>
-                    </th>
-                    <th>
                         <a href="{{ url_for('volunteers_list', search=search_term, sort='last_date', order='asc' if sort_column != 'last_date' or sort_order == 'desc' else 'desc') }}" 
                            class="text-decoration-none text-white sortable-header">
                             Last Volunteer Date
                             {% if sort_column == 'last_date' %}
-                                {% if sort_order == 'asc' %}
-                                    <i class="fas fa-sort-up ms-1"></i>
-                                {% else %}
-                                    <i class="fas fa-sort-down ms-1"></i>
-                                {% endif %}
-                            {% else %}
-                                <i class="fas fa-sort ms-1" style="opacity: 0.5;"></i>
-                            {% endif %}
-                        </a>
-                    </th>
-                    <th>
-                        <a href="{{ url_for('volunteers_list', search=search_term, sort='created', order='asc' if sort_column != 'created' or sort_order == 'desc' else 'desc') }}" 
-                           class="text-decoration-none text-white sortable-header">
-                            Created
-                            {% if sort_column == 'created' %}
                                 {% if sort_order == 'asc' %}
                                     <i class="fas fa-sort-up ms-1"></i>
                                 {% else %}
@@ -205,23 +145,6 @@
                         {% endif %}
                     </td>
                     <td>
-                        {% set primary_phone = volunteer.get_primary_phone() %}
-                        {% if primary_phone %}
-                            {{ primary_phone }}
-                        {% else %}
-                            <span class="text-muted">—</span>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if volunteer.volunteer_status.value == 'active' %}
-                            <span class="badge bg-success">Active</span>
-                        {% elif volunteer.volunteer_status.value == 'hold' %}
-                            <span class="badge bg-warning">Hold</span>
-                        {% else %}
-                            <span class="badge bg-secondary">Inactive</span>
-                        {% endif %}
-                    </td>
-                    <td>
                         <div class="d-flex gap-2 align-items-center">
                             {% if volunteer.do_not_call %}
                                 <i class="fas fa-phone-slash text-warning" title="Do Not Call"></i>
@@ -238,20 +161,12 @@
                         </div>
                     </td>
                     <td>
-                        {% if volunteer.total_volunteer_hours %}
-                            {{ "%.1f"|format(volunteer.total_volunteer_hours) }}
-                        {% else %}
-                            <span class="text-muted">0.0</span>
-                        {% endif %}
-                    </td>
-                    <td>
                         {% if volunteer.last_volunteer_date %}
                             {{ volunteer.last_volunteer_date.strftime('%Y-%m-%d') }}
                         {% else %}
                             <span class="text-muted">—</span>
                         {% endif %}
                     </td>
-                    <td>{{ volunteer.created_at.strftime('%Y-%m-%d') }}</td>
                     <td>
                         <div class="btn-group" role="group">
                             <a href="{{ url_for('volunteers_view', volunteer_id=volunteer.id) }}"

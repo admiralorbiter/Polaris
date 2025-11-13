@@ -213,7 +213,7 @@ def test_pipeline_with_new_fields(app):
 
     assert "demographics" in normalized
     assert normalized["demographics"]["racial_ethnic_background"] == "asian"
-    assert normalized["demographics"]["age_group"] == "Adult"
+    assert normalized["demographics"]["age_group"] == "adult"
     assert normalized["demographics"]["highest_education_level"] == "bachelors"
     
     assert "address" in normalized
