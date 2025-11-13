@@ -460,3 +460,195 @@ def test_load_core_volunteers_flags_missing_external_id(app):
     assert clean_row.load_action == "error_missing_external_id"
     assert staging_row.status == StagingRecordStatus.QUARANTINED
     assert "external_id" in (staging_row.last_error or "").lower()
+
+
+def test_load_core_volunteers_skips_exact_name_duplicate(app):
+    """Test that exact name matches are detected and skipped, with email merging."""
+    run = _make_run()
+    
+    # Create existing volunteer with exact name
+    existing = Volunteer(first_name="Rebecca", last_name="Coulson")
+    db.session.add(existing)
+    db.session.flush()
+    db.session.add(
+        ContactEmail(
+            contact_id=existing.id,
+            email="rebecca.coulson@hallfamilyfoundation.org",
+            email_type=EmailType.PERSONAL,
+            is_primary=True,
+            is_verified=True,
+        )
+    )
+    db.session.commit()
+    
+    # Create new row with same name but different email
+    _make_validated_row(
+        run,
+        seq=1,
+        email="rebecca.hall@hallmark.com",
+        phone=None,
+        external_id="new-ext-1",
+    )
+    # Update the payload to have exact matching name
+    row = StagingVolunteer.query.filter_by(run_id=run.id).one()
+    # Update JSON by creating new dicts to ensure SQLAlchemy detects the change
+    payload_json = dict(row.payload_json or {})
+    payload_json["first_name"] = "Rebecca"
+    payload_json["last_name"] = "Coulson"
+    row.payload_json = payload_json
+    
+    normalized_json = dict(row.normalized_json or {})
+    normalized_json["first_name"] = "Rebecca"
+    normalized_json["last_name"] = "Coulson"
+    row.normalized_json = normalized_json
+    
+    db.session.commit()
+    
+    promote_clean_volunteers(run, dry_run=False)
+    summary = load_core_volunteers(run, dry_run=False)
+    db.session.commit()
+    
+    assert summary.rows_created == 0
+    assert summary.rows_skipped_duplicate_name == 1
+    assert summary.rows_updated == 0
+    
+    # Check that email was merged
+    emails = ContactEmail.query.filter_by(contact_id=existing.id).all()
+    email_addresses = {e.email for e in emails}
+    assert "rebecca.coulson@hallfamilyfoundation.org" in email_addresses
+    assert "rebecca.hall@hallmark.com" in email_addresses
+    
+    # Check that ExternalIdMap was created
+    id_map = ExternalIdMap.query.filter_by(external_id="new-ext-1").one()
+    assert id_map.entity_id == existing.id
+    
+    clean_row = CleanVolunteer.query.filter_by(run_id=run.id).one()
+    assert clean_row.load_action == "skipped_duplicate"
+    assert clean_row.core_contact_id == existing.id
+
+
+def test_load_core_volunteers_name_dedupe_case_insensitive(app):
+    """Test that name matching is case-insensitive."""
+    run = _make_run()
+    
+    # Create existing volunteer
+    existing = Volunteer(first_name="John", last_name="Smith")
+    db.session.add(existing)
+    db.session.commit()
+    
+    # Create new row with same name but different case
+    _make_validated_row(
+        run,
+        seq=1,
+        email="john.smith@example.org",
+        phone=None,
+        external_id="case-test-1",
+    )
+    row = StagingVolunteer.query.filter_by(run_id=run.id).one()
+    # Update JSON by creating new dicts to ensure SQLAlchemy detects the change
+    payload_json = dict(row.payload_json or {})
+    payload_json["first_name"] = "JOHN"
+    payload_json["last_name"] = "SMITH"
+    row.payload_json = payload_json
+    
+    normalized_json = dict(row.normalized_json or {})
+    normalized_json["first_name"] = "JOHN"
+    normalized_json["last_name"] = "SMITH"
+    row.normalized_json = normalized_json
+    
+    db.session.commit()
+    
+    promote_clean_volunteers(run, dry_run=False)
+    summary = load_core_volunteers(run, dry_run=False)
+    db.session.commit()
+    
+    assert summary.rows_skipped_duplicate_name == 1
+    assert summary.rows_created == 0
+
+
+def test_load_core_volunteers_name_dedupe_with_whitespace(app):
+    """Test that name matching handles whitespace normalization."""
+    run = _make_run()
+    
+    # Create existing volunteer
+    existing = Volunteer(first_name="Mary", last_name="Johnson")
+    db.session.add(existing)
+    db.session.commit()
+    
+    # Create new row with same name but extra whitespace
+    _make_validated_row(
+        run,
+        seq=1,
+        email="mary.johnson@example.org",
+        phone=None,
+        external_id="whitespace-test-1",
+    )
+    row = StagingVolunteer.query.filter_by(run_id=run.id).one()
+    # Update JSON by creating new dicts to ensure SQLAlchemy detects the change
+    payload_json = dict(row.payload_json or {})
+    payload_json["first_name"] = "  Mary  "
+    payload_json["last_name"] = "  Johnson  "
+    row.payload_json = payload_json
+    
+    normalized_json = dict(row.normalized_json or {})
+    normalized_json["first_name"] = "  Mary  "
+    normalized_json["last_name"] = "  Johnson  "
+    row.normalized_json = normalized_json
+    
+    db.session.commit()
+    
+    promote_clean_volunteers(run, dry_run=False)
+    summary = load_core_volunteers(run, dry_run=False)
+    db.session.commit()
+    
+    assert summary.rows_skipped_duplicate_name == 1
+    assert summary.rows_created == 0
+
+
+def test_load_core_volunteers_name_cache_works(app):
+    """Test that name lookup caching reduces database queries."""
+    run = _make_run()
+    
+    # Create existing volunteer
+    existing = Volunteer(first_name="Test", last_name="Cache")
+    db.session.add(existing)
+    db.session.commit()
+    
+    # Create multiple rows with same name (should use cache)
+    for i in range(3):
+        _make_validated_row(
+            run,
+            seq=i + 1,
+            email=f"test{i}@example.org",
+            phone=None,
+            external_id=f"cache-test-{i}",
+        )
+        row = StagingVolunteer.query.filter_by(run_id=run.id, sequence_number=i + 1).one()
+        # Update JSON by creating new dicts to ensure SQLAlchemy detects the change
+        payload_json = dict(row.payload_json or {})
+        payload_json["first_name"] = "Test"
+        payload_json["last_name"] = "Cache"
+        row.payload_json = payload_json
+        
+        normalized_json = dict(row.normalized_json or {})
+        normalized_json["first_name"] = "Test"
+        normalized_json["last_name"] = "Cache"
+        row.normalized_json = normalized_json
+    
+    db.session.commit()
+    
+    promote_clean_volunteers(run, dry_run=False)
+    summary = load_core_volunteers(run, dry_run=False)
+    db.session.commit()
+    
+    # All three should be skipped as duplicates
+    assert summary.rows_skipped_duplicate_name == 3
+    assert summary.rows_created == 0
+    
+    # All emails should be merged (3 new emails merged into existing volunteer)
+    emails = ContactEmail.query.filter_by(contact_id=existing.id).all()
+    assert len(emails) == 3  # 3 new emails merged
+    email_addresses = {e.email for e in emails}
+    assert "test0@example.org" in email_addresses
+    assert "test1@example.org" in email_addresses
+    assert "test2@example.org" in email_addresses

@@ -554,6 +554,8 @@ def _name_exists_exact(first_name: str | None, last_name: str | None, use_cache:
     
     Uses a per-session cache to avoid repeated database queries for the same name during an import run.
     """
+    global _name_cache, _name_cache_session_id
+    
     if not first_name or not last_name:
         return None
     
