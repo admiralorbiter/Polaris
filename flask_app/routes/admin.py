@@ -1350,6 +1350,10 @@ def register_admin_routes(app):
             if entity_type not in valid_entity_types:
                 return jsonify({"error": f"Invalid entity type: {entity_type}"}), 400
 
+            # Check if field is enabled (disabled fields should not be accessible)
+            if not DataQualityFieldConfigService.is_field_enabled(entity_type, field_name, organization_id):
+                return jsonify({"error": f"Field {field_name} is disabled and cannot be accessed"}), 403
+
             # Get field-specific samples
             result = DataSamplingService.get_field_samples(
                 entity_type=entity_type,
@@ -1415,6 +1419,10 @@ def register_admin_routes(app):
             ]
             if entity_type not in valid_entity_types:
                 return jsonify({"error": f"Invalid entity type: {entity_type}"}), 400
+
+            # Check if field is enabled (disabled fields should not be accessible)
+            if not DataQualityFieldConfigService.is_field_enabled(entity_type, field_name, organization_id):
+                return jsonify({"error": f"Field {field_name} is disabled and cannot be accessed"}), 403
 
             # Get field statistics
             statistics = DataSamplingService.get_field_statistics(
@@ -1483,6 +1491,10 @@ def register_admin_routes(app):
             ]
             if entity_type not in valid_entity_types:
                 return jsonify({"error": f"Invalid entity type: {entity_type}"}), 400
+
+            # Check if field is enabled (disabled fields should not be accessible)
+            if not DataQualityFieldConfigService.is_field_enabled(entity_type, field_name, organization_id):
+                return jsonify({"error": f"Field {field_name} is disabled and cannot be accessed"}), 403
 
             # Get field-specific edge cases
             edge_cases = DataSamplingService.get_field_edge_cases(

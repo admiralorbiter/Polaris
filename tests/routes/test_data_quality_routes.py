@@ -581,3 +581,69 @@ class TestDataQualityRoutes:
         if contact_metrics:
             field_names = [f["field_name"] for f in contact_metrics["fields"]]
             assert "notes" not in field_names
+
+    def test_data_quality_field_samples_blocks_disabled_fields(self, logged_in_admin, sample_contacts_for_dashboard):
+        """Test that field samples API blocks access to disabled fields"""
+        client, admin_user = logged_in_admin
+
+        # Set disabled fields
+        config = {
+            "contact": ["notes"],
+        }
+        DataQualityFieldConfigService.set_disabled_fields(config)
+
+        # Try to access disabled field samples
+        response = client.get("/admin/data-quality/api/field-samples/contact/notes")
+        assert response.status_code == 403
+
+        data = json.loads(response.data)
+        assert "error" in data
+        assert "disabled" in data["error"].lower()
+
+        # Try to access enabled field samples (should work)
+        response = client.get("/admin/data-quality/api/field-samples/contact/email")
+        assert response.status_code == 200
+
+    def test_data_quality_field_statistics_blocks_disabled_fields(self, logged_in_admin, sample_contacts_for_dashboard):
+        """Test that field statistics API blocks access to disabled fields"""
+        client, admin_user = logged_in_admin
+
+        # Set disabled fields
+        config = {
+            "contact": ["notes"],
+        }
+        DataQualityFieldConfigService.set_disabled_fields(config)
+
+        # Try to access disabled field statistics
+        response = client.get("/admin/data-quality/api/field-statistics/contact/notes")
+        assert response.status_code == 403
+
+        data = json.loads(response.data)
+        assert "error" in data
+        assert "disabled" in data["error"].lower()
+
+        # Try to access enabled field statistics (should work)
+        response = client.get("/admin/data-quality/api/field-statistics/contact/email")
+        assert response.status_code == 200
+
+    def test_data_quality_field_edge_cases_blocks_disabled_fields(self, logged_in_admin, sample_contacts_for_dashboard):
+        """Test that field edge cases API blocks access to disabled fields"""
+        client, admin_user = logged_in_admin
+
+        # Set disabled fields
+        config = {
+            "contact": ["notes"],
+        }
+        DataQualityFieldConfigService.set_disabled_fields(config)
+
+        # Try to access disabled field edge cases
+        response = client.get("/admin/data-quality/api/field-edge-cases/contact/notes")
+        assert response.status_code == 403
+
+        data = json.loads(response.data)
+        assert "error" in data
+        assert "disabled" in data["error"].lower()
+
+        # Try to access enabled field edge cases (should work)
+        response = client.get("/admin/data-quality/api/field-edge-cases/contact/email")
+        assert response.status_code == 200
