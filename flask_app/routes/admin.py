@@ -1066,7 +1066,7 @@ def register_admin_routes(app):
             # Convert to JSON-serializable format
             response = {
                 "entity_type": entity_type,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "statistics": {
                     field_name: {
                         "field_name": stat.field_name,
@@ -1131,7 +1131,7 @@ def register_admin_routes(app):
             # Convert to JSON-serializable format
             response = {
                 "entity_type": entity_type,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "edge_cases": [
                     {
                         "id": ec.id,
@@ -1386,7 +1386,7 @@ def register_admin_routes(app):
             response = {
                 "entity_type": entity_type,
                 "field_name": field_name,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "statistics": {
                     "field_name": statistics.field_name,
                     "total_count": statistics.total_count,
@@ -1451,7 +1451,7 @@ def register_admin_routes(app):
             response = {
                 "entity_type": entity_type,
                 "field_name": field_name,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "edge_cases": [
                     {
                         "id": ec.id,

@@ -4,7 +4,7 @@ Data Quality Service - Calculate field completeness metrics for all entities
 """
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from flask import current_app
@@ -90,7 +90,7 @@ class DataQualityService:
     @classmethod
     def _is_cache_valid(cls, cached_time: datetime) -> bool:
         """Check if cache is still valid"""
-        age = datetime.utcnow() - cached_time
+        age = datetime.now(timezone.utc) - cached_time
         return age.total_seconds() < cls._cache_ttl_seconds
 
     @classmethod
@@ -107,7 +107,7 @@ class DataQualityService:
     @classmethod
     def _set_cache(cls, key: str, value: Any) -> None:
         """Set value in cache"""
-        cls._cache[key] = (datetime.utcnow(), value)
+        cls._cache[key] = (datetime.now(timezone.utc), value)
 
     @classmethod
     def _clear_cache(cls, pattern: Optional[str] = None) -> None:
@@ -154,7 +154,7 @@ class DataQualityService:
             overall_health_score=round(overall_health_score, 2),
             entity_metrics=entity_metrics_list,
             total_entities=total_entities,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
         )
 
         cls._set_cache(cache_key, result)

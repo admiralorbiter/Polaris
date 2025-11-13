@@ -7,7 +7,7 @@ import math
 import random
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import and_, func, or_
@@ -105,7 +105,7 @@ class DataSamplingService:
     @classmethod
     def _is_cache_valid(cls, cached_time: datetime) -> bool:
         """Check if cache is still valid"""
-        age = datetime.utcnow() - cached_time
+        age = datetime.now(timezone.utc) - cached_time
         return age.total_seconds() < cls._cache_ttl_seconds
 
     @classmethod
@@ -122,7 +122,7 @@ class DataSamplingService:
     @classmethod
     def _set_cache(cls, key: str, value: Any) -> None:
         """Set value in cache"""
-        cls._cache[key] = (datetime.utcnow(), value)
+        cls._cache[key] = (datetime.now(timezone.utc), value)
 
     @classmethod
     def _clear_cache(cls, pattern: Optional[str] = None) -> None:
@@ -374,7 +374,7 @@ class DataSamplingService:
                 samples=[],
                 statistics={},
                 edge_cases=[],
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
             )
 
         # Calculate sample size
@@ -450,7 +450,7 @@ class DataSamplingService:
             samples=samples,
             statistics=statistics,
             edge_cases=edge_cases,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
         )
 
         cls._set_cache(cache_key, result)
@@ -811,7 +811,7 @@ class DataSamplingService:
                 samples=[],
                 statistics={},
                 edge_cases=[],
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
             )
             cls._set_cache(cache_key, result)
             return result
@@ -848,7 +848,7 @@ class DataSamplingService:
                 samples=[],
                 statistics={},
                 edge_cases=[],
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
             )
             cls._set_cache(cache_key, result)
             return result
@@ -865,7 +865,7 @@ class DataSamplingService:
                 samples=[],
                 statistics={},
                 edge_cases=[],
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
             )
             cls._set_cache(cache_key, result)
             return result
@@ -904,7 +904,7 @@ class DataSamplingService:
             samples=samples,
             statistics={},  # Loaded separately
             edge_cases=[],  # Loaded separately
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
         )
 
         cls._set_cache(cache_key, result)
