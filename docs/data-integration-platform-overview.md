@@ -51,7 +51,7 @@
     - **DQ**: field/row/set rules; quarantines.
     - **Dedupe**: deterministic + fuzzy matching; merge decisions.
     - **Orchestrator**: job graph (extract → validate → dedupe → upsert → reconcile).
-    - **Admin UI**: runs, DQ inbox, duplicates, reconciliation, mappings, controls.
+    - **Admin UI**: runs, DQ inbox, data quality dashboard, duplicates, reconciliation, mappings, controls.
 - **Worker process**: Celery worker on the `imports` queue, defaulting to a SQLite-backed broker/result store so local development needs only Python; swap to Redis/Postgres for higher throughput deployments.
 - **Storage**: Postgres (recommended), Redis (queues), object storage (CSV uploads & exports).
 
@@ -225,19 +225,32 @@ Each rule has: `rule_code`, `severity` (error/warn/info), remediation hints, and
 - Actions: **merge**, **not a duplicate**, **defer**; pick survivorship per field.
 - Batch-mode for obvious matches.
 
-### 8.4 Reconciliation & Source Health
+### 8.4 Data Quality Dashboard
+
+- **Field-Level Completeness**: Monitor data completeness across all entities (Contacts, Volunteers, Students, Teachers, Events, Organizations, Users)
+- **Overall Health Score**: Weighted health score (0-100%) based on field completeness
+- **Entity Cards**: Visual cards showing completeness per entity type with key metrics
+- **Field Tables**: Detailed field-level completeness metrics with status indicators
+- **Organization Filtering**: Filter metrics by organization (super admins) or view organization-specific metrics
+- **Export**: Export metrics as CSV or JSON for analysis and tracking
+- **Caching**: 5-minute cache for performance with manual refresh option
+- **Access**: `/admin/data-quality` (requires `view_users` permission)
+
+> **Note**: The Data Quality Dashboard is separate from the DQ Inbox. The dashboard provides field-level completeness metrics for all entities, while the DQ Inbox focuses on import violations. See `docs/data-quality-dashboard.md` for detailed documentation.
+
+### 8.5 Reconciliation & Source Health
 
 - Trend charts: records ingested over time, reject rate, duplicate rate, freshness lag.
 - Source card: credentials status, rate limits, last success, next scheduled.
 - Data drift widgets: null-rate, distribution changes, top rule offenders.
 
-### 8.5 Mappings & Settings
+### 8.6 Mappings & Settings
 
 - View the **Salesforce → Canonical** field mapping; versioned.
 - Toggle rules, set thresholds, source priorities.
 - Configure schedules, backfill windows, dry-run, alert thresholds.
 
-### 8.6 Audit & Lineage
+### 8.7 Audit & Lineage
 
 - Entity detail page: provenance timeline (which source, when, what changed), link to run & change logs.
 

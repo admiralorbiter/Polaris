@@ -52,6 +52,7 @@
 - `docs/salesforce-mapping-guide.md` — Salesforce mapping architecture, vertical/horizontal scaling guidance, and troubleshooting
 - `docs/salesforce-transforms-reference.md` — Transform registry reference with patterns for custom mapping transforms
 - `docs/salesforce-mapping-examples.md` — Copy/paste mapping recipes and real-world examples for expanding adapters
+- `docs/data-quality-dashboard.md` — Data Quality Dashboard documentation with API reference, usage examples, and troubleshooting
 
 **Test Data & Scenarios**:
 - `ops/testdata/importer_golden_dataset_v0/README.md` — Golden dataset documentation with expected outcomes
@@ -476,6 +477,7 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - ✅ DQ inbox with rule/severity filters, CSV export, remediation launcher, and stats cards (`IMP-21`)
 - ✅ Remediation workflow with steward edit modal, DQ re-run, audit logging, and remediation metrics endpoint (`IMP-22`)
 - ✅ Dry-run UI toggle, run badges, include-dry-runs filter, and telemetry counters (`IMP-23`)
+- ✅ Data Quality Dashboard with field-level completeness metrics, overall health score, entity cards, and export functionality (see `docs/data-quality-dashboard.md`)
 
 **Test Coverage**:
 - Unit tests: run filters & serialization, violation queries, remediation service, dry-run propagation

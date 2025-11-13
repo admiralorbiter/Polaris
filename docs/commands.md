@@ -94,11 +94,12 @@ flask importer run --source csv --file <path> --inline --summary-json
 
 ### Admin UI Tips
 
-- **Dry-run toggle**: On `/admin/imports/`, select “Dry run (no writes to database)” to enqueue with `dry_run=true`. Successful runs show a yellow “DRY RUN” badge and detail banner clarifying no core writes occurred.
-- **Salesforce import button**: When the Salesforce adapter is enabled and ready, the Imports page exposes a “Start a Salesforce Import” panel. Use the dry-run toggle for validation-only runs and expand “Advanced options” to set a record limit, reset the Salesforce watermark (with confirmation), or add operator notes. The UI queues the same Celery task as `flask importer run-salesforce` and is rate-limited to one trigger per minute per user—use the CLI for scripted or bulk testing.
-- **Runs dashboard filters**: `/admin/imports/runs/dashboard` now includes an “Include dry runs” checkbox. Disable it to hide simulations from aggregate stats.
+- **Dry-run toggle**: On `/admin/imports/`, select "Dry run (no writes to database)" to enqueue with `dry_run=true`. Successful runs show a yellow "DRY RUN" badge and detail banner clarifying no core writes occurred.
+- **Salesforce import button**: When the Salesforce adapter is enabled and ready, the Imports page exposes a "Start a Salesforce Import" panel. Use the dry-run toggle for validation-only runs and expand "Advanced options" to set a record limit, reset the Salesforce watermark (with confirmation), or add operator notes. The UI queues the same Celery task as `flask importer run-salesforce` and is rate-limited to one trigger per minute per user—use the CLI for scripted or bulk testing.
+- **Runs dashboard filters**: `/admin/imports/runs/dashboard` now includes an "Include dry runs" checkbox. Disable it to hide simulations from aggregate stats.
 - **Remediation stats**: DQ inbox fetches remediation outcomes from `GET /admin/imports/remediation/stats?days=<N>`; useful for tracking steward effectiveness.
 - **Runs stats API**: `GET /importer/runs/stats?include_dry_runs=0` surfaces aggregate counts for monitoring dashboards.
+- **Data Quality Dashboard**: Access at `/admin/data-quality` to monitor field-level completeness across all entities. Features include overall health score, entity-level metrics, field-level completeness tables, organization filtering, and CSV/JSON export. Metrics are cached for 5 minutes; click "Refresh" to reload. See `docs/data-quality-dashboard.md` for detailed documentation.
 
 ### Performance Considerations
 
