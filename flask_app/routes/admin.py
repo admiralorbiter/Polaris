@@ -10,6 +10,7 @@ from werkzeug.security import generate_password_hash
 from flask_app.forms import ChangePasswordForm, CreateUserForm, UpdateUserForm
 from flask_app.models import AdminLog, Organization, SystemMetrics, User, db
 from flask_app.services.data_quality_service import DataQualityService
+from flask_app.services.data_sampling_service import DataSamplingService
 from flask_app.utils.permissions import get_current_organization, permission_required
 
 
@@ -42,9 +43,7 @@ def register_admin_routes(app):
                         ).all()
                     ]
                     total_users = len(org_user_ids)
-                    active_users = User.query.filter(
-                        User.id.in_(org_user_ids), User.is_active.is_(True)
-                    ).count()
+                    active_users = User.query.filter(User.id.in_(org_user_ids), User.is_active.is_(True)).count()
                     super_admin_users = 0
                 else:
                     total_users = 0
@@ -60,13 +59,9 @@ def register_admin_routes(app):
 
                 org_user_ids = [
                     uo.user_id
-                    for uo in UserOrganization.query.filter_by(
-                        organization_id=organization.id, is_active=True
-                    ).all()
+                    for uo in UserOrganization.query.filter_by(organization_id=organization.id, is_active=True).all()
                 ]
-                recent_users = User.query.filter(
-                    User.id.in_(org_user_ids), User.created_at >= thirty_days_ago
-                ).count()
+                recent_users = User.query.filter(User.id.in_(org_user_ids), User.created_at >= thirty_days_ago).count()
             else:
                 recent_users = 0
 
@@ -123,9 +118,7 @@ def register_admin_routes(app):
 
                 org_user_ids = [
                     uo.user_id
-                    for uo in UserOrganization.query.filter_by(
-                        organization_id=organization.id, is_active=True
-                    ).all()
+                    for uo in UserOrganization.query.filter_by(organization_id=organization.id, is_active=True).all()
                 ]
                 users = User.query.filter(User.id.in_(org_user_ids)).paginate(
                     page=page, per_page=per_page, error_out=False
@@ -187,9 +180,7 @@ def register_admin_routes(app):
 
                 if is_super_admin and not current_user.is_super_admin:
                     flash("Only super admins can create super admin users.", "danger")
-                    return render_template(
-                        "admin/create_user.html", form=form, organization=organization
-                    )
+                    return render_template("admin/create_user.html", form=form, organization=organization)
 
                 # Validate organization/role only if:
                 # 1. The new user is NOT a super admin, AND
@@ -199,11 +190,7 @@ def register_admin_routes(app):
                     # Get organization ID from request.form (hidden field set by JS)
                     # or form field
                     org_id_raw = request.form.get("organization_id", "").strip()
-                    if (
-                        not org_id_raw
-                        and hasattr(form, "organization_search")
-                        and form.organization_search.data
-                    ):
+                    if not org_id_raw and hasattr(form, "organization_search") and form.organization_search.data:
                         org_id_raw = str(form.organization_search.data)
 
                     # Convert to int if it's a valid number
@@ -212,15 +199,10 @@ def register_admin_routes(app):
                     except (ValueError, TypeError):
                         org_id = None
 
-                    role_id = (
-                        form.role_id.data
-                        if hasattr(form, "role_id") and form.role_id.data
-                        else None
-                    )
+                    role_id = form.role_id.data if hasattr(form, "role_id") and form.role_id.data else None
 
                     current_app.logger.debug(
-                        f"Organization ID from request: {org_id_raw}, "
-                        f"converted: {org_id}, Role ID: {role_id}"
+                        f"Organization ID from request: {org_id_raw}, " f"converted: {org_id}, Role ID: {role_id}"
                     )
 
                     if not org_id or org_id == 0:
@@ -229,15 +211,11 @@ def register_admin_routes(app):
                             "Please select an organization from the dropdown.",
                             "danger",
                         )
-                        return render_template(
-                            "admin/create_user.html", form=form, organization=organization
-                        )
+                        return render_template("admin/create_user.html", form=form, organization=organization)
 
                     if not role_id or role_id == 0:
                         flash("Role is required when organization is selected.", "danger")
-                        return render_template(
-                            "admin/create_user.html", form=form, organization=organization
-                        )
+                        return render_template("admin/create_user.html", form=form, organization=organization)
 
                 # Create new user within transaction to prevent race conditions
                 # Database unique constraints will catch any duplicate usernames/emails
@@ -256,11 +234,7 @@ def register_admin_routes(app):
                     if error:
                         # Check if error is due to unique constraint violation (race condition)
                         error_lower = error.lower()
-                        if (
-                            "unique" in error_lower
-                            or "duplicate" in error_lower
-                            or "already exists" in error_lower
-                        ):
+                        if "unique" in error_lower or "duplicate" in error_lower or "already exists" in error_lower:
                             if "username" in error_lower or "user" in error_lower:
                                 flash(
                                     "Username already exists. Please choose a different username.",
@@ -273,46 +247,33 @@ def register_admin_routes(app):
                                 )
                             else:
                                 flash(
-                                    "A user with this information already exists. "
-                                    "Please check username and email.",
+                                    "A user with this information already exists. " "Please check username and email.",
                                     "danger",
                                 )
                         else:
                             flash(f"Error creating user: {error}", "danger")
                         current_app.logger.error(f"Error creating user: {error}")
-                        return render_template(
-                            "admin/create_user.html", form=form, organization=organization
-                        )
+                        return render_template("admin/create_user.html", form=form, organization=organization)
                 except Exception as create_exception:
                     # Catch any unexpected errors during user creation
-                    current_app.logger.error(
-                        f"Unexpected error creating user: {str(create_exception)}", exc_info=True
-                    )
+                    current_app.logger.error(f"Unexpected error creating user: {str(create_exception)}", exc_info=True)
                     flash(
                         "An unexpected error occurred while creating the user. Please try again.",
                         "danger",
                     )
-                    return render_template(
-                        "admin/create_user.html", form=form, organization=organization
-                    )
+                    return render_template("admin/create_user.html", form=form, organization=organization)
 
                 if not new_user:
                     flash("Failed to create user. Please try again.", "danger")
                     current_app.logger.error("User creation returned None without error")
-                    return render_template(
-                        "admin/create_user.html", form=form, organization=organization
-                    )
+                    return render_template("admin/create_user.html", form=form, organization=organization)
                 else:
                     # Add user to organization if organization_id is provided
                     # (for non-super-admin users)
                     # Get organization ID from request.form (hidden field set by JS)
                     # or form field
                     org_id_raw = request.form.get("organization_id", "").strip()
-                    if (
-                        not org_id_raw
-                        and hasattr(form, "organization_search")
-                        and form.organization_search.data
-                    ):
+                    if not org_id_raw and hasattr(form, "organization_search") and form.organization_search.data:
                         org_id_raw = str(form.organization_search.data)
 
                     try:
@@ -365,13 +326,10 @@ def register_admin_routes(app):
                                     )
                                 except Exception as commit_error:
                                     db.session.rollback()
-                                    current_app.logger.error(
-                                        f"Error adding user to organization: {str(commit_error)}"
-                                    )
+                                    current_app.logger.error(f"Error adding user to organization: {str(commit_error)}")
                                     # Don't fail user creation if org assignment fails
                                     flash(
-                                        f"User created but failed to add to organization: "
-                                        f"{str(commit_error)}",
+                                        f"User created but failed to add to organization: " f"{str(commit_error)}",
                                         "warning",
                                     )
                         else:
@@ -436,10 +394,7 @@ def register_admin_routes(app):
             # Get admin actions for this user
             if current_user.is_super_admin:
                 actions = (
-                    AdminLog.query.filter_by(target_user_id=user_id)
-                    .order_by(desc(AdminLog.created_at))
-                    .limit(10)
-                    .all()
+                    AdminLog.query.filter_by(target_user_id=user_id).order_by(desc(AdminLog.created_at)).limit(10).all()
                 )
             else:
                 actions = (
@@ -449,9 +404,7 @@ def register_admin_routes(app):
                     .all()
                 )
 
-            return render_template(
-                "admin/view_user.html", user=user, actions=actions, organization=organization
-            )
+            return render_template("admin/view_user.html", user=user, actions=actions, organization=organization)
 
         except Exception as e:
             current_app.logger.error(f"Error viewing user {user_id}: {str(e)}")
@@ -485,16 +438,10 @@ def register_admin_routes(app):
 
             if form.validate_on_submit():
                 # Only super admin can change super admin status
-                is_super_admin = (
-                    form.is_super_admin.data
-                    if hasattr(form, "is_super_admin")
-                    else user.is_super_admin
-                )
+                is_super_admin = form.is_super_admin.data if hasattr(form, "is_super_admin") else user.is_super_admin
                 if is_super_admin != user.is_super_admin and not current_user.is_super_admin:
                     flash("Only super admins can change super admin status.", "danger")
-                    return render_template(
-                        "admin/edit_user.html", form=form, user=user, organization=organization
-                    )
+                    return render_template("admin/edit_user.html", form=form, user=user, organization=organization)
 
                 # Update user
                 success, error = user.safe_update(
@@ -515,9 +462,7 @@ def register_admin_routes(app):
                         org_id_raw = request.form.get("organization_id", "").strip()
 
                         try:
-                            org_id = (
-                                int(org_id_raw) if org_id_raw and org_id_raw.isdigit() else None
-                            )
+                            org_id = int(org_id_raw) if org_id_raw and org_id_raw.isdigit() else None
                         except (ValueError, TypeError):
                             org_id = None
                         role_id = form.role_id.data
@@ -559,12 +504,10 @@ def register_admin_routes(app):
                                 except Exception as commit_error:
                                     db.session.rollback()
                                     current_app.logger.error(
-                                        f"Error updating user organization membership: "
-                                        f"{str(commit_error)}"
+                                        f"Error updating user organization membership: " f"{str(commit_error)}"
                                     )
                                     flash(
-                                        f"Error updating organization membership: "
-                                        f"{str(commit_error)}",
+                                        f"Error updating organization membership: " f"{str(commit_error)}",
                                         "danger",
                                     )
                                     return render_template(
@@ -597,16 +540,12 @@ def register_admin_routes(app):
                 if hasattr(form, "is_super_admin"):
                     form.is_super_admin.data = user.is_super_admin
 
-            return render_template(
-                "admin/edit_user.html", form=form, user=user, organization=organization
-            )
+            return render_template("admin/edit_user.html", form=form, user=user, organization=organization)
 
         except Exception as e:
             current_app.logger.error(f"Error editing user {user_id}: {str(e)}")
             flash("An error occurred while updating user.", "danger")
-            return render_template(
-                "admin/edit_user.html", form=form, user=user, organization=organization
-            )
+            return render_template("admin/edit_user.html", form=form, user=user, organization=organization)
 
     @app.route("/admin/users/<int:user_id>/change-password", methods=["GET", "POST"])
     @login_required
@@ -623,9 +562,7 @@ def register_admin_routes(app):
         try:
             if form.validate_on_submit():
                 # Update password
-                success, error = user.safe_update(
-                    password_hash=generate_password_hash(form.new_password.data)
-                )
+                success, error = user.safe_update(password_hash=generate_password_hash(form.new_password.data))
 
                 if error:
                     flash(f"Error changing password: {error}", "danger")
@@ -736,15 +673,11 @@ def register_admin_routes(app):
 
                 org_user_ids = [
                     uo.user_id
-                    for uo in UserOrganization.query.filter_by(
-                        organization_id=organization.id, is_active=True
-                    ).all()
+                    for uo in UserOrganization.query.filter_by(organization_id=organization.id, is_active=True).all()
                 ]
                 stats = {
                     "total_users": len(org_user_ids),
-                    "active_users": User.query.filter(
-                        User.id.in_(org_user_ids), User.is_active.is_(True)
-                    ).count(),
+                    "active_users": User.query.filter(User.id.in_(org_user_ids), User.is_active.is_(True)).count(),
                     "super_admin_users": 0,
                     "recent_logins": User.query.filter(
                         User.id.in_(org_user_ids),
@@ -773,7 +706,6 @@ def register_admin_routes(app):
         """Main data quality dashboard page"""
         try:
             organization = get_current_organization()
-            organization_id = organization.id if organization and not current_user.is_super_admin else None
 
             # Get available organizations for filter
             if current_user.is_super_admin:
@@ -785,7 +717,7 @@ def register_admin_routes(app):
             AdminLog.log_action(
                 admin_user_id=current_user.id,
                 action="DATA_QUALITY_DASHBOARD_VIEW",
-                details=f"Viewed data quality dashboard",
+                details="Viewed data quality dashboard",
                 ip_address=request.remote_addr,
                 user_agent=request.headers.get("User-Agent"),
             )
@@ -876,9 +808,7 @@ def register_admin_routes(app):
                 return jsonify({"error": f"Invalid entity type: {entity_type}"}), 400
 
             # Get entity metrics
-            metrics = DataQualityService.get_entity_metrics(
-                entity_type=entity_type, organization_id=organization_id
-            )
+            metrics = DataQualityService.get_entity_metrics(entity_type=entity_type, organization_id=organization_id)
 
             # Convert to JSON-serializable format
             response = {
@@ -901,9 +831,7 @@ def register_admin_routes(app):
 
             return jsonify(response)
         except Exception as e:
-            current_app.logger.error(
-                f"Error getting entity metrics for {entity_type}: {str(e)}", exc_info=True
-            )
+            current_app.logger.error(f"Error getting entity metrics for {entity_type}: {str(e)}", exc_info=True)
             return jsonify({"error": f"Failed to get metrics for {entity_type}"}), 500
 
     @app.route("/admin/data-quality/api/export")
@@ -1025,3 +953,520 @@ def register_admin_routes(app):
         except Exception as e:
             current_app.logger.error(f"Error exporting data quality metrics: {str(e)}", exc_info=True)
             return jsonify({"error": "Failed to export data quality metrics"}), 500
+
+    # Data Sampling API Endpoints
+    @app.route("/admin/data-quality/api/samples/<entity_type>")
+    @login_required
+    @permission_required("view_users", org_context=False)
+    def data_quality_samples(entity_type):
+        """Get sample records for an entity type"""
+        try:
+            organization = get_current_organization()
+            organization_id = None
+
+            # Get organization_id from query parameter if super admin
+            if current_user.is_super_admin:
+                org_id_param = request.args.get("organization_id", type=int)
+                if org_id_param:
+                    organization_id = org_id_param
+            elif organization:
+                # Non-super admin can only see their organization
+                organization_id = organization.id
+
+            # Get sample size from query parameter
+            sample_size = request.args.get("sample_size", type=int)
+
+            # Validate entity type
+            valid_entity_types = [
+                "contact",
+                "volunteer",
+                "student",
+                "teacher",
+                "event",
+                "organization",
+                "user",
+            ]
+            if entity_type not in valid_entity_types:
+                return jsonify({"error": f"Invalid entity type: {entity_type}"}), 400
+
+            # Get samples
+            result = DataSamplingService.get_samples(
+                entity_type=entity_type,
+                sample_size=sample_size,
+                organization_id=organization_id,
+            )
+
+            # Convert to JSON-serializable format
+            response = {
+                "entity_type": result.entity_type,
+                "total_records": result.total_records,
+                "sample_size": result.sample_size,
+                "timestamp": result.timestamp.isoformat(),
+                "samples": [
+                    {
+                        "id": s.id,
+                        "data": s.data,
+                        "completeness_score": s.completeness_score,
+                        "completeness_level": s.completeness_level,
+                        "is_edge_case": s.is_edge_case,
+                        "edge_case_reasons": s.edge_case_reasons,
+                    }
+                    for s in result.samples
+                ],
+            }
+
+            # Log access
+            AdminLog.log_action(
+                admin_user_id=current_user.id,
+                action="DATA_QUALITY_SAMPLES_VIEW",
+                details=f"Viewed samples for {entity_type}",
+                ip_address=request.remote_addr,
+                user_agent=request.headers.get("User-Agent"),
+            )
+
+            return jsonify(response)
+        except Exception as e:
+            current_app.logger.error(f"Error getting samples for {entity_type}: {str(e)}", exc_info=True)
+            return jsonify({"error": f"Failed to get samples for {entity_type}"}), 500
+
+    @app.route("/admin/data-quality/api/statistics/<entity_type>")
+    @login_required
+    @permission_required("view_users", org_context=False)
+    def data_quality_statistics(entity_type):
+        """Get statistical summaries for an entity type"""
+        try:
+            organization = get_current_organization()
+            organization_id = None
+
+            # Get organization_id from query parameter if super admin
+            if current_user.is_super_admin:
+                org_id_param = request.args.get("organization_id", type=int)
+                if org_id_param:
+                    organization_id = org_id_param
+            elif organization:
+                # Non-super admin can only see their organization
+                organization_id = organization.id
+
+            # Validate entity type
+            valid_entity_types = [
+                "contact",
+                "volunteer",
+                "student",
+                "teacher",
+                "event",
+                "organization",
+                "user",
+            ]
+            if entity_type not in valid_entity_types:
+                return jsonify({"error": f"Invalid entity type: {entity_type}"}), 400
+
+            # Get statistics
+            statistics = DataSamplingService.get_statistics(entity_type=entity_type, organization_id=organization_id)
+
+            # Convert to JSON-serializable format
+            response = {
+                "entity_type": entity_type,
+                "timestamp": datetime.utcnow().isoformat(),
+                "statistics": {
+                    field_name: {
+                        "field_name": stat.field_name,
+                        "total_count": stat.total_count,
+                        "non_null_count": stat.non_null_count,
+                        "null_count": stat.null_count,
+                        "unique_values": stat.unique_values,
+                        "most_common_values": stat.most_common_values,
+                        "min_value": str(stat.min_value) if stat.min_value is not None else None,
+                        "max_value": str(stat.max_value) if stat.max_value is not None else None,
+                        "avg_value": stat.avg_value,
+                        "value_distribution": stat.value_distribution,
+                    }
+                    for field_name, stat in statistics.items()
+                },
+            }
+
+            return jsonify(response)
+        except Exception as e:
+            current_app.logger.error(f"Error getting statistics for {entity_type}: {str(e)}", exc_info=True)
+            return jsonify({"error": f"Failed to get statistics for {entity_type}"}), 500
+
+    @app.route("/admin/data-quality/api/edge-cases/<entity_type>")
+    @login_required
+    @permission_required("view_users", org_context=False)
+    def data_quality_edge_cases(entity_type):
+        """Get edge cases for an entity type"""
+        try:
+            organization = get_current_organization()
+            organization_id = None
+
+            # Get organization_id from query parameter if super admin
+            if current_user.is_super_admin:
+                org_id_param = request.args.get("organization_id", type=int)
+                if org_id_param:
+                    organization_id = org_id_param
+            elif organization:
+                # Non-super admin can only see their organization
+                organization_id = organization.id
+
+            # Get limit from query parameter
+            limit = request.args.get("limit", type=int, default=20)
+
+            # Validate entity type
+            valid_entity_types = [
+                "contact",
+                "volunteer",
+                "student",
+                "teacher",
+                "event",
+                "organization",
+                "user",
+            ]
+            if entity_type not in valid_entity_types:
+                return jsonify({"error": f"Invalid entity type: {entity_type}"}), 400
+
+            # Get edge cases
+            edge_cases = DataSamplingService.get_edge_cases(
+                entity_type=entity_type, limit=limit, organization_id=organization_id
+            )
+
+            # Convert to JSON-serializable format
+            response = {
+                "entity_type": entity_type,
+                "timestamp": datetime.utcnow().isoformat(),
+                "edge_cases": [
+                    {
+                        "id": ec.id,
+                        "data": ec.data,
+                        "completeness_score": ec.completeness_score,
+                        "completeness_level": ec.completeness_level,
+                        "edge_case_reasons": ec.edge_case_reasons,
+                    }
+                    for ec in edge_cases
+                ],
+            }
+
+            return jsonify(response)
+        except Exception as e:
+            current_app.logger.error(f"Error getting edge cases for {entity_type}: {str(e)}", exc_info=True)
+            return jsonify({"error": f"Failed to get edge cases for {entity_type}"}), 500
+
+    @app.route("/admin/data-quality/api/export-samples/<entity_type>")
+    @login_required
+    @permission_required("view_users", org_context=False)
+    def data_quality_export_samples(entity_type):
+        """Export sample records as CSV/JSON"""
+        try:
+            import csv
+            import io
+            import json
+
+            organization = get_current_organization()
+            organization_id = None
+
+            # Get organization_id from query parameter if super admin
+            if current_user.is_super_admin:
+                org_id_param = request.args.get("organization_id", type=int)
+                if org_id_param:
+                    organization_id = org_id_param
+            elif organization:
+                # Non-super admin can only see their organization
+                organization_id = organization.id
+
+            format_type = request.args.get("format", "json").lower()
+            if format_type not in ("csv", "json"):
+                return jsonify({"error": "Format must be 'csv' or 'json'"}), 400
+
+            sample_size = request.args.get("sample_size", type=int)
+
+            # Validate entity type
+            valid_entity_types = [
+                "contact",
+                "volunteer",
+                "student",
+                "teacher",
+                "event",
+                "organization",
+                "user",
+            ]
+            if entity_type not in valid_entity_types:
+                return jsonify({"error": f"Invalid entity type: {entity_type}"}), 400
+
+            # Get samples
+            result = DataSamplingService.get_samples(
+                entity_type=entity_type,
+                sample_size=sample_size,
+                organization_id=organization_id,
+            )
+
+            # Log export
+            AdminLog.log_action(
+                admin_user_id=current_user.id,
+                action="DATA_QUALITY_SAMPLES_EXPORT",
+                details=f"Exported samples for {entity_type} as {format_type}",
+                ip_address=request.remote_addr,
+                user_agent=request.headers.get("User-Agent"),
+            )
+
+            if format_type == "json":
+                # Export as JSON
+                response_data = {
+                    "entity_type": result.entity_type,
+                    "total_records": result.total_records,
+                    "sample_size": result.sample_size,
+                    "timestamp": result.timestamp.isoformat(),
+                    "samples": [
+                        {
+                            "id": s.id,
+                            "data": s.data,
+                            "completeness_score": s.completeness_score,
+                            "completeness_level": s.completeness_level,
+                            "is_edge_case": s.is_edge_case,
+                            "edge_case_reasons": s.edge_case_reasons,
+                        }
+                        for s in result.samples
+                    ],
+                }
+
+                from flask import make_response
+
+                response = make_response(json.dumps(response_data, indent=2, default=str))
+                response.headers["Content-Type"] = "application/json"
+                timestamp_str = result.timestamp.strftime("%Y%m%d_%H%M%S")
+                response.headers[
+                    "Content-Disposition"
+                ] = f'attachment; filename="data_quality_samples_{entity_type}_{timestamp_str}.json"'
+                return response
+            else:
+                # Export as CSV
+                if not result.samples:
+                    return jsonify({"error": "No samples to export"}), 400
+
+                output = io.StringIO()
+                writer = csv.writer(output)
+
+                # Get all field names from first sample
+                field_names = list(result.samples[0].data.keys())
+                field_names.extend(["completeness_score", "completeness_level", "is_edge_case", "edge_case_reasons"])
+
+                # Write header
+                writer.writerow(field_names)
+
+                # Write data
+                for sample in result.samples:
+                    row = [sample.data.get(field, "") for field in result.samples[0].data.keys()]
+                    row.append(sample.completeness_score)
+                    row.append(sample.completeness_level)
+                    row.append(sample.is_edge_case)
+                    row.append("; ".join(sample.edge_case_reasons) if sample.edge_case_reasons else "")
+                    writer.writerow(row)
+
+                from flask import make_response
+
+                response = make_response(output.getvalue())
+                response.headers["Content-Type"] = "text/csv; charset=utf-8"
+                timestamp_str = result.timestamp.strftime("%Y%m%d_%H%M%S")
+                response.headers[
+                    "Content-Disposition"
+                ] = f'attachment; filename="data_quality_samples_{entity_type}_{timestamp_str}.csv"'
+                return response
+
+        except Exception as e:
+            current_app.logger.error(f"Error exporting samples for {entity_type}: {str(e)}", exc_info=True)
+            return jsonify({"error": f"Failed to export samples for {entity_type}"}), 500
+
+    # Field-Specific API Endpoints
+    @app.route("/admin/data-quality/api/field-samples/<entity_type>/<field_name>")
+    @login_required
+    @permission_required("view_users", org_context=False)
+    def data_quality_field_samples(entity_type, field_name):
+        """Get sample records filtered by a specific field"""
+        try:
+            organization = get_current_organization()
+            organization_id = None
+
+            # Get organization_id from query parameter if super admin
+            if current_user.is_super_admin:
+                org_id_param = request.args.get("organization_id", type=int)
+                if org_id_param:
+                    organization_id = org_id_param
+            elif organization:
+                # Non-super admin can only see their organization
+                organization_id = organization.id
+
+            # Get sample size from query parameter
+            sample_size = request.args.get("sample_size", type=int)
+
+            # Validate entity type
+            valid_entity_types = [
+                "contact",
+                "volunteer",
+                "student",
+                "teacher",
+                "event",
+                "organization",
+                "user",
+            ]
+            if entity_type not in valid_entity_types:
+                return jsonify({"error": f"Invalid entity type: {entity_type}"}), 400
+
+            # Get field-specific samples
+            result = DataSamplingService.get_field_samples(
+                entity_type=entity_type,
+                field_name=field_name,
+                sample_size=sample_size,
+                organization_id=organization_id,
+            )
+
+            # Convert to JSON-serializable format
+            response = {
+                "entity_type": result.entity_type,
+                "field_name": field_name,
+                "total_records": result.total_records,
+                "sample_size": result.sample_size,
+                "timestamp": result.timestamp.isoformat(),
+                "samples": [
+                    {
+                        "id": s.id,
+                        "data": s.data,
+                        "completeness_score": s.completeness_score,
+                        "completeness_level": s.completeness_level,
+                        "is_edge_case": s.is_edge_case,
+                        "edge_case_reasons": s.edge_case_reasons,
+                    }
+                    for s in result.samples
+                ],
+            }
+
+            return jsonify(response)
+        except Exception as e:
+            current_app.logger.error(
+                f"Error getting field samples for {entity_type}.{field_name}: {str(e)}", exc_info=True
+            )
+            return jsonify({"error": f"Failed to get field samples for {field_name}"}), 500
+
+    @app.route("/admin/data-quality/api/field-statistics/<entity_type>/<field_name>")
+    @login_required
+    @permission_required("view_users", org_context=False)
+    def data_quality_field_statistics(entity_type, field_name):
+        """Get statistics for a specific field"""
+        try:
+            organization = get_current_organization()
+            organization_id = None
+
+            # Get organization_id from query parameter if super admin
+            if current_user.is_super_admin:
+                org_id_param = request.args.get("organization_id", type=int)
+                if org_id_param:
+                    organization_id = org_id_param
+            elif organization:
+                # Non-super admin can only see their organization
+                organization_id = organization.id
+
+            # Validate entity type
+            valid_entity_types = [
+                "contact",
+                "volunteer",
+                "student",
+                "teacher",
+                "event",
+                "organization",
+                "user",
+            ]
+            if entity_type not in valid_entity_types:
+                return jsonify({"error": f"Invalid entity type: {entity_type}"}), 400
+
+            # Get field statistics
+            statistics = DataSamplingService.get_field_statistics(
+                entity_type=entity_type, field_name=field_name, organization_id=organization_id
+            )
+
+            if not statistics:
+                return jsonify({"error": f"Field {field_name} not found"}), 404
+
+            # Convert to JSON-serializable format
+            response = {
+                "entity_type": entity_type,
+                "field_name": field_name,
+                "timestamp": datetime.utcnow().isoformat(),
+                "statistics": {
+                    "field_name": statistics.field_name,
+                    "total_count": statistics.total_count,
+                    "non_null_count": statistics.non_null_count,
+                    "null_count": statistics.null_count,
+                    "unique_values": statistics.unique_values,
+                    "most_common_values": statistics.most_common_values,
+                    "min_value": str(statistics.min_value) if statistics.min_value is not None else None,
+                    "max_value": str(statistics.max_value) if statistics.max_value is not None else None,
+                    "avg_value": statistics.avg_value,
+                    "value_distribution": statistics.value_distribution,
+                },
+            }
+
+            return jsonify(response)
+        except Exception as e:
+            current_app.logger.error(
+                f"Error getting field statistics for {entity_type}.{field_name}: {str(e)}", exc_info=True
+            )
+            return jsonify({"error": f"Failed to get statistics for {field_name}"}), 500
+
+    @app.route("/admin/data-quality/api/field-edge-cases/<entity_type>/<field_name>")
+    @login_required
+    @permission_required("view_users", org_context=False)
+    def data_quality_field_edge_cases(entity_type, field_name):
+        """Get edge cases for a specific field"""
+        try:
+            organization = get_current_organization()
+            organization_id = None
+
+            # Get organization_id from query parameter if super admin
+            if current_user.is_super_admin:
+                org_id_param = request.args.get("organization_id", type=int)
+                if org_id_param:
+                    organization_id = org_id_param
+            elif organization:
+                # Non-super admin can only see their organization
+                organization_id = organization.id
+
+            # Get limit from query parameter
+            limit = request.args.get("limit", type=int, default=20)
+
+            # Validate entity type
+            valid_entity_types = [
+                "contact",
+                "volunteer",
+                "student",
+                "teacher",
+                "event",
+                "organization",
+                "user",
+            ]
+            if entity_type not in valid_entity_types:
+                return jsonify({"error": f"Invalid entity type: {entity_type}"}), 400
+
+            # Get field-specific edge cases
+            edge_cases = DataSamplingService.get_field_edge_cases(
+                entity_type=entity_type, field_name=field_name, limit=limit, organization_id=organization_id
+            )
+
+            # Convert to JSON-serializable format
+            response = {
+                "entity_type": entity_type,
+                "field_name": field_name,
+                "timestamp": datetime.utcnow().isoformat(),
+                "edge_cases": [
+                    {
+                        "id": ec.id,
+                        "data": ec.data,
+                        "completeness_score": ec.completeness_score,
+                        "completeness_level": ec.completeness_level,
+                        "edge_case_reasons": ec.edge_case_reasons,
+                    }
+                    for ec in edge_cases
+                ],
+            }
+
+            return jsonify(response)
+        except Exception as e:
+            current_app.logger.error(
+                f"Error getting field edge cases for {entity_type}.{field_name}: {str(e)}", exc_info=True
+            )
+            return jsonify({"error": f"Failed to get edge cases for {field_name}"}), 500

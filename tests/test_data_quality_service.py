@@ -1,7 +1,8 @@
 """Tests for data quality service"""
 
-import pytest
 from datetime import datetime
+
+import pytest
 
 from flask_app.models import (
     Contact,
@@ -37,7 +38,7 @@ def sample_contacts(app, test_organization):
         )
         contacts.append(contact)
         db.session.add(contact)
-    
+
     db.session.commit()
     return contacts
 
@@ -52,7 +53,7 @@ def sample_contacts_with_emails(app, sample_contacts):
             email_type="primary",
         )
         db.session.add(email)
-    
+
     db.session.commit()
     return sample_contacts
 
@@ -67,7 +68,7 @@ def sample_contacts_with_phones(app, sample_contacts):
             phone_type="mobile",
         )
         db.session.add(phone)
-    
+
     db.session.commit()
     return sample_contacts
 
@@ -85,7 +86,7 @@ def sample_contacts_with_addresses(app, sample_contacts):
             address_type="home",
         )
         db.session.add(address)
-    
+
     db.session.commit()
     return sample_contacts
 
@@ -103,7 +104,8 @@ def sample_volunteers(app, test_organization):
         )
         volunteers.append(volunteer)
         db.session.add(volunteer)
-        
+        db.session.flush()  # Flush to get volunteer.id
+
         # Link volunteer to organization via ContactOrganization
         if i < 2:
             org_link = ContactOrganization(
@@ -113,7 +115,7 @@ def sample_volunteers(app, test_organization):
                 end_date=None,
             )
             db.session.add(org_link)
-    
+
     db.session.commit()
     return volunteers
 
@@ -127,7 +129,7 @@ def sample_volunteers_with_skills(app, sample_volunteers):
             skill_name=f"Skill{i}",
         )
         db.session.add(skill)
-    
+
     db.session.commit()
     return sample_volunteers
 
@@ -136,18 +138,20 @@ def sample_volunteers_with_skills(app, sample_volunteers):
 def sample_events(app, test_organization):
     """Create sample events for testing"""
     from flask_app.models.event.models import EventOrganization
-    
+
     events = []
     for i in range(3):
         event = Event(
             title=f"Event{i}",
+            slug=f"event{i}",  # Required slug field
             description=f"Description{i}" if i < 2 else None,
             start_date=datetime(2024, 1, 1 + i),
             end_date=datetime(2024, 1, 2 + i) if i < 2 else None,
         )
         events.append(event)
         db.session.add(event)
-        
+        db.session.flush()  # Flush to get event.id
+
         # Link event to organization
         if i < 2:
             event_org = EventOrganization(
@@ -155,7 +159,7 @@ def sample_events(app, test_organization):
                 organization_id=test_organization.id,
             )
             db.session.add(event_org)
-    
+
     db.session.commit()
     return events
 
@@ -164,7 +168,7 @@ def sample_events(app, test_organization):
 def sample_users(app, test_organization):
     """Create sample users for testing"""
     from flask_app.models import UserOrganization
-    
+
     users = []
     for i in range(3):
         user = User(
@@ -176,7 +180,8 @@ def sample_users(app, test_organization):
         )
         users.append(user)
         db.session.add(user)
-        
+        db.session.flush()  # Flush to get user.id
+
         # Link user to organization
         if i < 2:
             user_org = UserOrganization(
@@ -186,7 +191,7 @@ def sample_users(app, test_organization):
                 is_active=True,
             )
             db.session.add(user_org)
-    
+
     db.session.commit()
     return users
 
@@ -196,6 +201,8 @@ class TestDataQualityService:
 
     def test_get_overall_health_score_no_data(self, app):
         """Test overall health score with no data"""
+        # Clear cache to ensure fresh calculation
+        DataQualityService._clear_cache()
         metrics = DataQualityService.get_overall_health_score()
         assert metrics.overall_health_score == 0.0
         assert metrics.total_entities == 0
@@ -210,6 +217,8 @@ class TestDataQualityService:
 
     def test_get_entity_metrics_contact_no_org(self, app, sample_contacts):
         """Test contact metrics without organization filter"""
+        # Clear cache to ensure fresh calculation
+        DataQualityService._clear_cache()
         metrics = DataQualityService.get_entity_metrics("contact")
         assert metrics.entity_type == "contact"
         assert metrics.total_records == 5
@@ -225,6 +234,8 @@ class TestDataQualityService:
 
     def test_get_entity_metrics_contact_with_emails(self, app, sample_contacts_with_emails):
         """Test contact metrics with email addresses"""
+        # Clear cache to ensure fresh calculation
+        DataQualityService._clear_cache()
         metrics = DataQualityService.get_entity_metrics("contact")
         email_field = next((f for f in metrics.fields if f.field_name == "email"), None)
         assert email_field is not None
@@ -233,6 +244,8 @@ class TestDataQualityService:
 
     def test_get_entity_metrics_contact_with_phones(self, app, sample_contacts_with_phones):
         """Test contact metrics with phone numbers"""
+        # Clear cache to ensure fresh calculation
+        DataQualityService._clear_cache()
         metrics = DataQualityService.get_entity_metrics("contact")
         phone_field = next((f for f in metrics.fields if f.field_name == "phone"), None)
         assert phone_field is not None
@@ -241,6 +254,8 @@ class TestDataQualityService:
 
     def test_get_entity_metrics_contact_with_addresses(self, app, sample_contacts_with_addresses):
         """Test contact metrics with addresses"""
+        # Clear cache to ensure fresh calculation
+        DataQualityService._clear_cache()
         metrics = DataQualityService.get_entity_metrics("contact")
         address_field = next((f for f in metrics.fields if f.field_name == "address"), None)
         assert address_field is not None
@@ -262,6 +277,8 @@ class TestDataQualityService:
 
     def test_get_entity_metrics_volunteer_with_skills(self, app, sample_volunteers_with_skills):
         """Test volunteer metrics with skills"""
+        # Clear cache to ensure fresh calculation
+        DataQualityService._clear_cache()
         metrics = DataQualityService.get_entity_metrics("volunteer")
         skills_field = next((f for f in metrics.fields if f.field_name == "skills"), None)
         assert skills_field is not None
@@ -300,6 +317,8 @@ class TestDataQualityService:
 
     def test_field_status_good(self, app):
         """Test field status classification - good"""
+        # Clear cache to ensure fresh calculation
+        DataQualityService._clear_cache()
         # Create contacts with high completeness
         for i in range(10):
             contact = Contact(
@@ -308,6 +327,7 @@ class TestDataQualityService:
                 birthdate=datetime(1990, 1, 1).date() if i < 9 else None,
             )
             db.session.add(contact)
+            db.session.flush()  # Flush to get contact.id
             if i < 9:
                 email = ContactEmail(
                     contact_id=contact.id,
@@ -315,9 +335,9 @@ class TestDataQualityService:
                     email_type="primary",
                 )
                 db.session.add(email)
-        
+
         db.session.commit()
-        
+
         metrics = DataQualityService.get_entity_metrics("contact")
         email_field = next((f for f in metrics.fields if f.field_name == "email"), None)
         assert email_field is not None
@@ -325,6 +345,8 @@ class TestDataQualityService:
 
     def test_field_status_warning(self, app):
         """Test field status classification - warning"""
+        # Clear cache to ensure fresh calculation
+        DataQualityService._clear_cache()
         # Create contacts with medium completeness
         for i in range(10):
             contact = Contact(
@@ -332,6 +354,7 @@ class TestDataQualityService:
                 last_name="Test",
             )
             db.session.add(contact)
+            db.session.flush()  # Flush to get contact.id
             if i < 6:  # 60% completeness
                 email = ContactEmail(
                     contact_id=contact.id,
@@ -339,9 +362,9 @@ class TestDataQualityService:
                     email_type="primary",
                 )
                 db.session.add(email)
-        
+
         db.session.commit()
-        
+
         metrics = DataQualityService.get_entity_metrics("contact")
         email_field = next((f for f in metrics.fields if f.field_name == "email"), None)
         assert email_field is not None
@@ -349,6 +372,8 @@ class TestDataQualityService:
 
     def test_field_status_critical(self, app):
         """Test field status classification - critical"""
+        # Clear cache to ensure fresh calculation
+        DataQualityService._clear_cache()
         # Create contacts with low completeness
         for i in range(10):
             contact = Contact(
@@ -356,6 +381,7 @@ class TestDataQualityService:
                 last_name="Test",
             )
             db.session.add(contact)
+            db.session.flush()  # Flush to get contact.id
             if i < 3:  # 30% completeness
                 email = ContactEmail(
                     contact_id=contact.id,
@@ -363,9 +389,9 @@ class TestDataQualityService:
                     email_type="primary",
                 )
                 db.session.add(email)
-        
+
         db.session.commit()
-        
+
         metrics = DataQualityService.get_entity_metrics("contact")
         email_field = next((f for f in metrics.fields if f.field_name == "email"), None)
         assert email_field is not None
@@ -375,15 +401,15 @@ class TestDataQualityService:
         """Test that caching works"""
         # Clear cache
         DataQualityService._clear_cache()
-        
+
         # First call
         metrics1 = DataQualityService.get_overall_health_score()
         timestamp1 = metrics1.timestamp
-        
+
         # Second call should use cache
         metrics2 = DataQualityService.get_overall_health_score()
         timestamp2 = metrics2.timestamp
-        
+
         # Timestamps should be the same (cached)
         assert timestamp1 == timestamp2
 
@@ -396,7 +422,7 @@ class TestDataQualityService:
         )
         db.session.add(contact1)
         db.session.flush()
-        
+
         org_link = ContactOrganization(
             contact_id=contact1.id,
             organization_id=test_organization.id,
@@ -404,7 +430,7 @@ class TestDataQualityService:
             end_date=None,
         )
         db.session.add(org_link)
-        
+
         # Create contact with direct organization_id
         contact2 = Contact(
             first_name="Contact2",
@@ -412,16 +438,16 @@ class TestDataQualityService:
             organization_id=test_organization.id,
         )
         db.session.add(contact2)
-        
+
         # Create contact not linked to organization
         contact3 = Contact(
             first_name="Contact3",
             last_name="Test",
         )
         db.session.add(contact3)
-        
+
         db.session.commit()
-        
+
         # Get metrics for organization
         metrics = DataQualityService.get_entity_metrics("contact", organization_id=test_organization.id)
         assert metrics.total_records == 2  # Should include both contact1 and contact2
@@ -435,7 +461,7 @@ class TestDataQualityService:
         )
         db.session.add(volunteer)
         db.session.flush()
-        
+
         org_link = ContactOrganization(
             contact_id=volunteer.id,
             organization_id=test_organization.id,
@@ -444,7 +470,7 @@ class TestDataQualityService:
         )
         db.session.add(org_link)
         db.session.commit()
-        
+
         # Get metrics for organization
         metrics = DataQualityService.get_entity_metrics("volunteer", organization_id=test_organization.id)
         assert metrics.total_records == 1
@@ -462,10 +488,11 @@ class TestDataQualityService:
         )
         db.session.add(address)
         db.session.commit()
-        
+
+        # Clear cache to ensure fresh calculation
+        DataQualityService._clear_cache()
         metrics = DataQualityService.get_entity_metrics("organization")
         assert metrics.entity_type == "organization"
         address_field = next((f for f in metrics.fields if f.field_name == "address"), None)
         assert address_field is not None
         assert address_field.records_with_value == 1
-

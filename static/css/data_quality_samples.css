@@ -1,0 +1,169 @@
+/* Data Quality Samples Styles */
+
+/* Clickable field rows */
+#dq-entity-table tbody tr {
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+#dq-entity-table tbody tr:hover {
+  background-color: #f8f9fa;
+}
+
+#dq-entity-table tbody tr:active {
+  background-color: #e9ecef;
+}
+
+.sample-data-preview {
+  font-size: 0.9rem;
+  color: #6c757d;
+}
+
+.sample-data-full {
+  margin-top: 0.5rem;
+  padding: 0.75rem;
+  background-color: #f8f9fa;
+  border-radius: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.sample-data-full dt {
+  font-weight: 600;
+  color: #495057;
+}
+
+.sample-data-full dd {
+  margin-bottom: 0.5rem;
+  color: #6c757d;
+}
+
+.completeness-score {
+  font-weight: 600;
+  font-size: 1rem;
+  margin-bottom: 0.25rem;
+}
+
+.table-warning {
+  background-color: #fff3cd !important;
+}
+
+.table-warning:hover {
+  background-color: #ffe69c !important;
+}
+
+.toggle-details {
+  white-space: nowrap;
+}
+
+.toggle-details i {
+  transition: transform 0.2s;
+}
+
+/* Statistics cards */
+.statistics-card {
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.statistics-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Edge cases styling */
+.edge-case-reason {
+  display: inline-block;
+  margin: 0.25rem 0.25rem 0.25rem 0;
+}
+
+/* Sample table improvements */
+#dq-samples-table th {
+  background-color: #f8f9fa;
+  font-weight: 600;
+  border-bottom: 2px solid #dee2e6;
+}
+
+#dq-samples-table th.sortable {
+  position: relative;
+  padding-right: 1.5rem;
+}
+
+#dq-samples-table th.sortable::after {
+  content: "⇅";
+  position: absolute;
+  right: 0.5rem;
+  opacity: 0.5;
+  font-size: 0.8rem;
+}
+
+#dq-samples-table th.sort-asc::after {
+  content: "↑";
+  opacity: 1;
+}
+
+#dq-samples-table th.sort-desc::after {
+  content: "↓";
+  opacity: 1;
+}
+
+#dq-samples-table tbody tr {
+  cursor: pointer;
+}
+
+#dq-samples-table tbody tr:hover {
+  background-color: #f8f9fa;
+}
+
+/* Loading states */
+.samples-loading {
+  text-align: center;
+  padding: 2rem;
+}
+
+.samples-loading .spinner-border {
+  width: 3rem;
+  height: 3rem;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .sample-data-preview {
+    font-size: 0.8rem;
+  }
+
+  .sample-data-full {
+    font-size: 0.75rem;
+  }
+
+  .completeness-score {
+    font-size: 0.9rem;
+  }
+}
+
+/* Badge improvements */
+.badge {
+  font-size: 0.75rem;
+  padding: 0.35em 0.65em;
+}
+
+/* Progress bar styling */
+.progress {
+  background-color: #e9ecef;
+}
+
+.progress-bar {
+  transition: width 0.6s ease;
+}
+
+/* Tab content spacing */
+.tab-content {
+  padding-top: 1rem;
+}
+
+/* Entity selector styling */
+#dq-samples-entity-selector {
+  max-width: 300px;
+}
+
+#dq-sample-size-selector {
+  min-width: 120px;
+}

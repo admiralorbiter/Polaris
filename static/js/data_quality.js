@@ -10,6 +10,9 @@
   let currentMetrics = null;
   let currentEntityDetails = null;
   let currentOrganizationId = config.organizationId;
+  let currentEntityType = null;
+  let currentFieldName = null;
+  let fieldStatisticsLoaded = false;
 
   const elements = {
     refreshButton: document.getElementById("dq-refresh-btn"),
@@ -92,6 +95,45 @@
           loadEntityDetails(entityType);
         } else {
           clearEntityDetails();
+        }
+      });
+    }
+
+    // Back to metrics button
+    const backToMetricsBtn = document.getElementById("dq-back-to-metrics-btn");
+    if (backToMetricsBtn) {
+      backToMetricsBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        backToMetrics();
+      });
+    }
+
+    // Tab change handlers for field exploration tabs
+    const fieldSamplesTab = document.getElementById("field-samples-tab");
+    const fieldStatisticsTab = document.getElementById("field-statistics-tab");
+
+    // Lazy load statistics when tab is clicked
+    if (fieldStatisticsTab) {
+      fieldStatisticsTab.addEventListener("shown.bs.tab", (e) => {
+        if (currentEntityType && currentFieldName && !fieldStatisticsLoaded) {
+          loadFieldStatistics(currentEntityType, currentFieldName);
+          fieldStatisticsLoaded = true;
+        }
+      });
+    }
+
+    if (fieldSamplesTab) {
+      fieldSamplesTab.addEventListener("shown.bs.tab", () => {
+        if (currentEntityType && currentFieldName) {
+          loadFieldSamples(currentEntityType, currentFieldName);
+        }
+      });
+    }
+
+    if (fieldStatisticsTab) {
+      fieldStatisticsTab.addEventListener("shown.bs.tab", () => {
+        if (currentEntityType && currentFieldName) {
+          loadFieldStatistics(currentEntityType, currentFieldName);
         }
       });
     }
@@ -289,6 +331,11 @@
   }
 
   function loadEntityDetails(entityType) {
+    currentEntityType = entityType;
+    // Hide field exploration if showing
+    const explorationCard = document.getElementById("dq-field-exploration");
+    if (explorationCard) explorationCard.style.display = "none";
+
     showLoading();
 
     const orgId = getOrganizationId();
@@ -403,6 +450,15 @@
       statusCell.appendChild(statusBadge);
       row.appendChild(statusCell);
 
+      // Make entire row clickable
+      row.addEventListener("click", (e) => {
+        // Don't trigger if clicking on a link or button
+        if (e.target.tagName === "A" || e.target.tagName === "BUTTON" || e.target.closest("a") || e.target.closest("button")) {
+          return;
+        }
+        viewFieldExploration(entity.entity_type, field.field_name, field);
+      });
+
       tbody.appendChild(row);
     });
     table.appendChild(tbody);
@@ -410,6 +466,328 @@
     // Clear container and add table
     elements.entityTableContainer.innerHTML = "";
     elements.entityTableContainer.appendChild(table);
+  }
+
+  function viewFieldExploration(entityType, fieldName, fieldData) {
+    // Store current state
+    currentEntityType = entityType;
+    currentFieldName = fieldName;
+    // Reset loaded flags when switching fields
+    fieldStatisticsLoaded = false;
+
+    // Hide metrics table, show field exploration
+    const metricsCard = document.getElementById("dq-entity-details");
+    const explorationCard = document.getElementById("dq-field-exploration");
+
+    if (metricsCard) metricsCard.style.display = "none";
+    if (explorationCard) explorationCard.style.display = "block";
+
+    // Update field exploration header
+    const titleEl = document.getElementById("dq-field-exploration-title");
+    const descEl = document.getElementById("dq-field-description");
+
+    if (titleEl) {
+      titleEl.textContent = `Field: ${formatFieldName(fieldName)}`;
+    }
+
+    if (descEl && fieldData) {
+      descEl.innerHTML = `
+        <strong>Completeness:</strong> ${fieldData.completeness_percentage.toFixed(1)}%
+        (${fieldData.records_with_value.toLocaleString()} of ${fieldData.total_records.toLocaleString()} records have this field populated)
+        <span class="badge ${fieldData.status === 'good' ? 'bg-success' : fieldData.status === 'warning' ? 'bg-warning text-dark' : 'bg-danger'} ms-2">
+          ${fieldData.status.charAt(0).toUpperCase() + fieldData.status.slice(1)}
+        </span>
+      `;
+    }
+
+    // Load only samples initially (lazy load statistics and edge cases when tabs are clicked)
+    loadFieldSamples(entityType, fieldName);
+  }
+
+  function backToMetrics() {
+    // Hide field exploration, show metrics table
+    const metricsCard = document.getElementById("dq-entity-details");
+    const explorationCard = document.getElementById("dq-field-exploration");
+
+    if (metricsCard) metricsCard.style.display = "block";
+    if (explorationCard) explorationCard.style.display = "none";
+
+    // Clear field state
+    currentFieldName = null;
+  }
+
+  async function loadFieldSamples(entityType, fieldName) {
+    const container = document.getElementById("dq-field-samples-container");
+    if (!container) return;
+
+    container.innerHTML = '<p class="text-muted text-center">Loading sample records...</p>';
+    showLoading();
+
+    try {
+      const orgId = getOrganizationId();
+      let url = config.fieldSamplesUrl
+        .replace("__ENTITY_TYPE__", entityType)
+        .replace("__FIELD_NAME__", encodeURIComponent(fieldName));
+      url += `?sample_size=20`;
+      if (orgId) {
+        url += `&organization_id=${orgId}`;
+      }
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      renderFieldSamples(data, fieldName);
+    } catch (error) {
+      console.error("Error loading field samples:", error);
+      container.innerHTML = `<div class="alert alert-danger">Error loading samples: ${error.message}</div>`;
+    } finally {
+      hideLoading();
+    }
+  }
+
+  async function loadFieldStatistics(entityType, fieldName) {
+    const container = document.getElementById("dq-field-statistics-container");
+    if (!container) return;
+
+    container.innerHTML = '<p class="text-muted text-center">Loading statistics...</p>';
+
+    try {
+      const orgId = getOrganizationId();
+      let url = config.fieldStatisticsUrl
+        .replace("__ENTITY_TYPE__", entityType)
+        .replace("__FIELD_NAME__", encodeURIComponent(fieldName));
+      if (orgId) {
+        url += `?organization_id=${orgId}`;
+      }
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      renderFieldStatistics(data);
+    } catch (error) {
+      console.error("Error loading field statistics:", error);
+      container.innerHTML = `<div class="alert alert-danger">Error loading statistics: ${error.message}</div>`;
+    }
+  }
+
+
+  function renderFieldSamples(data, fieldName) {
+    const container = document.getElementById("dq-field-samples-container");
+    if (!container) return;
+
+    if (!data.samples || data.samples.length === 0) {
+      container.innerHTML = '<p class="text-muted text-center">No sample records found for this field.</p>';
+      return;
+    }
+
+    let html = `
+      <div class="mb-3">
+        <p class="text-muted">
+          Showing <strong>${data.sample_size}</strong> sample records that have the <strong>${formatFieldName(fieldName)}</strong> field populated.
+        </p>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-hover table-striped">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th><strong>${formatFieldName(fieldName)}</strong></th>
+              <th>Other Data</th>
+              <th>Completeness</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+    `;
+
+    data.samples.forEach((sample) => {
+      const fieldValue = sample.data[fieldName] || "<em>null</em>";
+      const completenessBadge = getCompletenessBadge(sample.completeness_score, sample.completeness_level);
+
+      // Get other fields for preview (exclude the selected field)
+      const otherFields = Object.entries(sample.data)
+        .filter(([key]) => key !== fieldName)
+        .slice(0, 2)
+        .map(([key, val]) => `<strong>${formatFieldName(key)}:</strong> ${val !== null && val !== undefined ? String(val).substring(0, 30) : '<em>null</em>'}`)
+        .join(", ");
+
+      html += `
+        <tr>
+          <td>${sample.id}</td>
+          <td><strong class="text-primary">${fieldValue}</strong></td>
+          <td><small class="text-muted">${otherFields || '<em>No other data</em>'}</small></td>
+          <td>
+            <div class="completeness-score">${sample.completeness_score.toFixed(1)}%</div>
+            ${completenessBadge}
+          </td>
+          <td>
+            <button class="btn btn-sm btn-outline-primary toggle-field-details" data-sample-id="${sample.id}">
+              <i class="fas fa-chevron-down"></i> <span class="btn-text">Details</span>
+            </button>
+          </td>
+        </tr>
+        <tr id="field-details-${sample.id}" style="display: none;">
+          <td colspan="5">
+            <div class="p-3 bg-light rounded">
+              <dl class="row mb-0">
+                ${Object.entries(sample.data).map(([key, val]) => `
+                  <dt class="col-sm-3">${formatFieldName(key)}:</dt>
+                  <dd class="col-sm-9">${val !== null && val !== undefined ? String(val) : '<em>null</em>'}</dd>
+                `).join("")}
+              </dl>
+            </div>
+          </td>
+        </tr>
+      `;
+    });
+
+    html += `
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    container.innerHTML = html;
+
+    // Add click handlers for expandable rows
+    document.querySelectorAll(".toggle-field-details").forEach((btn) => {
+      btn.addEventListener("click", function () {
+        const sampleId = this.getAttribute("data-sample-id");
+        const detailsRow = document.getElementById(`field-details-${sampleId}`);
+        const icon = this.querySelector("i");
+        const textSpan = this.querySelector(".btn-text");
+
+        if (!icon) {
+          // Icon was removed, recreate button content
+          if (detailsRow && (detailsRow.style.display === "none" || detailsRow.style.display === "")) {
+            this.innerHTML = '<i class="fas fa-chevron-up"></i> <span class="btn-text">Hide Details</span>';
+          } else {
+            this.innerHTML = '<i class="fas fa-chevron-down"></i> <span class="btn-text">Details</span>';
+          }
+          return;
+        }
+
+        if (detailsRow && (detailsRow.style.display === "none" || detailsRow.style.display === "")) {
+          detailsRow.style.display = "table-row";
+          icon.classList.remove("fa-chevron-down");
+          icon.classList.add("fa-chevron-up");
+          if (textSpan) {
+            textSpan.textContent = "Hide Details";
+          }
+        } else {
+          if (detailsRow) {
+            detailsRow.style.display = "none";
+          }
+          icon.classList.remove("fa-chevron-up");
+          icon.classList.add("fa-chevron-down");
+          if (textSpan) {
+            textSpan.textContent = "Details";
+          }
+        }
+      });
+    });
+  }
+
+  function renderFieldStatistics(data) {
+    const container = document.getElementById("dq-field-statistics-container");
+    if (!container) return;
+
+    if (!data.statistics) {
+      container.innerHTML = '<p class="text-muted text-center">No statistics available for this field.</p>';
+      return;
+    }
+
+    const stat = data.statistics;
+    const completenessPercent = ((stat.non_null_count / stat.total_count) * 100).toFixed(1);
+
+    let html = `
+      <div class="row">
+        <div class="col-md-6">
+          <div class="card mb-3">
+            <div class="card-header">
+              <h6 class="mb-0">Completeness</h6>
+            </div>
+            <div class="card-body">
+              <div class="mb-2">
+                <div class="progress" style="height: 30px;">
+                  <div class="progress-bar ${stat.non_null_count / stat.total_count >= 0.8 ? 'bg-success' : stat.non_null_count / stat.total_count >= 0.5 ? 'bg-warning' : 'bg-danger'}"
+                       role="progressbar" style="width: ${completenessPercent}%">
+                    ${completenessPercent}%
+                  </div>
+                </div>
+              </div>
+              <div class="small">
+                <div><strong>Total records:</strong> ${stat.total_count.toLocaleString()}</div>
+                <div><strong>With value:</strong> ${stat.non_null_count.toLocaleString()}</div>
+                <div><strong>Without value:</strong> ${stat.null_count.toLocaleString()}</div>
+                <div><strong>Unique values:</strong> ${stat.unique_values.toLocaleString()}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+    `;
+
+    if (stat.most_common_values && stat.most_common_values.length > 0) {
+      html += `
+        <div class="col-md-6">
+          <div class="card mb-3">
+            <div class="card-header">
+              <h6 class="mb-0">Most Common Values</h6>
+            </div>
+            <div class="card-body">
+              <ul class="list-unstyled mb-0">
+                ${stat.most_common_values.slice(0, 10).map((item) => `
+                  <li class="mb-2">
+                    <strong>${item.value}</strong>
+                    <span class="badge bg-secondary">${item.count}</span>
+                    <div class="progress mt-1" style="height: 5px;">
+                      <div class="progress-bar" role="progressbar" style="width: ${(item.count / stat.non_null_count * 100)}%"></div>
+                    </div>
+                  </li>
+                `).join("")}
+              </ul>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    if (stat.min_value !== null || stat.max_value !== null || stat.avg_value !== null) {
+      html += `
+        <div class="col-md-6">
+          <div class="card mb-3">
+            <div class="card-header">
+              <h6 class="mb-0">Numeric Statistics</h6>
+            </div>
+            <div class="card-body">
+              ${stat.min_value !== null ? `<div><strong>Min:</strong> ${stat.min_value}</div>` : ''}
+              ${stat.max_value !== null ? `<div><strong>Max:</strong> ${stat.max_value}</div>` : ''}
+              ${stat.avg_value !== null ? `<div><strong>Average:</strong> ${stat.avg_value.toFixed(2)}</div>` : ''}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    html += `</div>`;
+    container.innerHTML = html;
+  }
+
+
+  function getCompletenessBadge(score, level) {
+    if (level === "high") {
+      return '<span class="badge bg-success">Good</span>';
+    } else if (level === "medium") {
+      return '<span class="badge bg-warning">Warning</span>';
+    } else {
+      return '<span class="badge bg-danger">Critical</span>';
+    }
   }
 
   function clearEntityDetails() {
@@ -477,4 +855,3 @@
     }
   }
 })();
-

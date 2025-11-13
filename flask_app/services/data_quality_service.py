@@ -3,14 +3,12 @@
 Data Quality Service - Calculate field completeness metrics for all entities
 """
 
-from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from flask import current_app
-from sqlalchemy import and_, func, or_
-from sqlalchemy.orm import Query
+from sqlalchemy import and_, func
 
 from flask_app.models import (
     Contact,
@@ -30,12 +28,12 @@ from flask_app.models import (
     VolunteerSkill,
     db,
 )
-from flask_app.models.contact.enums import ContactType
 
 
 @dataclass
 class FieldMetric:
     """Metric for a single field"""
+
     field_name: str
     total_records: int
     records_with_value: int
@@ -47,6 +45,7 @@ class FieldMetric:
 @dataclass
 class EntityMetrics:
     """Metrics for an entity type"""
+
     entity_type: str
     total_records: int
     fields: List[FieldMetric]
@@ -57,6 +56,7 @@ class EntityMetrics:
 @dataclass
 class OverallMetrics:
     """Overall system health metrics"""
+
     overall_health_score: float
     entity_metrics: List[EntityMetrics]
     total_entities: int
@@ -161,9 +161,7 @@ class DataQualityService:
         return result
 
     @classmethod
-    def get_entity_metrics(
-        cls, entity_type: str, organization_id: Optional[int] = None
-    ) -> EntityMetrics:
+    def get_entity_metrics(cls, entity_type: str, organization_id: Optional[int] = None) -> EntityMetrics:
         """Get completeness metrics for a specific entity"""
         cache_key = cls._get_cache_key(entity_type, filters={"org_id": organization_id})
         cached = cls._get_cached(cache_key)
@@ -222,17 +220,11 @@ class DataQualityService:
         from flask_app.models.contact.relationships import ContactOrganization
 
         # Get contact IDs linked via ContactOrganization (current relationships only)
-        org_links = ContactOrganization.query.filter_by(
-            organization_id=organization_id, end_date=None
-        ).all()
+        org_links = ContactOrganization.query.filter_by(organization_id=organization_id, end_date=None).all()
         org_contact_ids_via_link = [link.contact_id for link in org_links]
 
         # Get contacts that have organization_id directly
-        contact_ids_with_org = (
-            db.session.query(Contact.id)
-            .filter(Contact.organization_id == organization_id)
-            .all()
-        )
+        contact_ids_with_org = db.session.query(Contact.id).filter(Contact.organization_id == organization_id).all()
         contact_ids_direct = [c.id for c in contact_ids_with_org]
 
         # Combine both sets (remove duplicates)
@@ -277,9 +269,7 @@ class DataQualityService:
         for field_name, field_column in direct_fields:
             if field_name in ["first_name", "last_name"]:
                 # For required fields, check for non-null and non-empty
-                with_value = query.filter(
-                    and_(field_column.isnot(None), field_column != "")
-                ).count()
+                with_value = query.filter(and_(field_column.isnot(None), field_column != "")).count()
             else:
                 # For optional fields, check for non-null
                 with_value = query.filter(field_column.isnot(None)).count()
@@ -347,9 +337,7 @@ class DataQualityService:
             address_query = address_query.filter(Contact.id.in_(contact_ids))
         contacts_with_address = address_query.scalar() or 0
 
-        address_completeness = (
-            (contacts_with_address / total_records * 100) if total_records > 0 else 0.0
-        )
+        address_completeness = (contacts_with_address / total_records * 100) if total_records > 0 else 0.0
         fields.append(
             FieldMetric(
                 field_name="address",
@@ -399,9 +387,7 @@ class DataQualityService:
         ]
 
         for field_name, field_column in direct_fields:
-            with_value = query.filter(
-                and_(field_column.isnot(None), field_column != "", field_column != 0)
-            ).count()
+            with_value = query.filter(and_(field_column.isnot(None), field_column != "", field_column != 0)).count()
             without_value = total_records - with_value
             completeness = (with_value / total_records * 100) if total_records > 0 else 0.0
             status = cls._get_status(completeness)
@@ -418,23 +404,14 @@ class DataQualityService:
             )
 
         # Relationship fields - Skills
-        skills_query = (
+        # Use the same query base to ensure consistency with total_records
+        volunteer_ids_subquery = query.with_entities(Volunteer.id).subquery()
+        volunteers_with_skills = (
             db.session.query(func.count(func.distinct(VolunteerSkill.volunteer_id)))
-            .join(Volunteer, VolunteerSkill.volunteer_id == Volunteer.id)
+            .join(volunteer_ids_subquery, VolunteerSkill.volunteer_id == volunteer_ids_subquery.c.id)
+            .scalar()
+            or 0
         )
-        if organization_id:
-            from flask_app.models.contact.relationships import ContactOrganization
-
-            org_contact_ids = (
-                db.session.query(ContactOrganization.contact_id)
-                .filter(
-                    ContactOrganization.organization_id == organization_id,
-                    ContactOrganization.end_date.is_(None),
-                )
-                .subquery()
-            )
-            skills_query = skills_query.filter(Volunteer.id.in_(db.session.query(org_contact_ids)))
-        volunteers_with_skills = skills_query.scalar() or 0
 
         skills_completeness = (volunteers_with_skills / total_records * 100) if total_records > 0 else 0.0
         fields.append(
@@ -449,27 +426,16 @@ class DataQualityService:
         )
 
         # Relationship fields - Interests
-        interests_query = (
+        # Use the same query base to ensure consistency with total_records
+        volunteer_ids_subquery = query.with_entities(Volunteer.id).subquery()
+        volunteers_with_interests = (
             db.session.query(func.count(func.distinct(VolunteerInterest.volunteer_id)))
-            .join(Volunteer, VolunteerInterest.volunteer_id == Volunteer.id)
+            .join(volunteer_ids_subquery, VolunteerInterest.volunteer_id == volunteer_ids_subquery.c.id)
+            .scalar()
+            or 0
         )
-        if organization_id:
-            from flask_app.models.contact.relationships import ContactOrganization
 
-            org_contact_ids = (
-                db.session.query(ContactOrganization.contact_id)
-                .filter(
-                    ContactOrganization.organization_id == organization_id,
-                    ContactOrganization.end_date.is_(None),
-                )
-                .subquery()
-            )
-            interests_query = interests_query.filter(Volunteer.id.in_(db.session.query(org_contact_ids)))
-        volunteers_with_interests = interests_query.scalar() or 0
-
-        interests_completeness = (
-            (volunteers_with_interests / total_records * 100) if total_records > 0 else 0.0
-        )
+        interests_completeness = (volunteers_with_interests / total_records * 100) if total_records > 0 else 0.0
         fields.append(
             FieldMetric(
                 field_name="interests",
@@ -482,28 +448,17 @@ class DataQualityService:
         )
 
         # Relationship fields - Availability
-        availability_query = (
+        # Use the same query base to ensure consistency with total_records
+        volunteer_ids_subquery = query.with_entities(Volunteer.id).subquery()
+        volunteers_with_availability = (
             db.session.query(func.count(func.distinct(VolunteerAvailability.volunteer_id)))
-            .join(Volunteer, VolunteerAvailability.volunteer_id == Volunteer.id)
-            .filter(VolunteerAvailability.is_active == True)
+            .join(volunteer_ids_subquery, VolunteerAvailability.volunteer_id == volunteer_ids_subquery.c.id)
+            .filter(VolunteerAvailability.is_active.is_(True))
+            .scalar()
+            or 0
         )
-        if organization_id:
-            from flask_app.models.contact.relationships import ContactOrganization
 
-            org_contact_ids = (
-                db.session.query(ContactOrganization.contact_id)
-                .filter(
-                    ContactOrganization.organization_id == organization_id,
-                    ContactOrganization.end_date.is_(None),
-                )
-                .subquery()
-            )
-            availability_query = availability_query.filter(Volunteer.id.in_(db.session.query(org_contact_ids)))
-        volunteers_with_availability = availability_query.scalar() or 0
-
-        availability_completeness = (
-            (volunteers_with_availability / total_records * 100) if total_records > 0 else 0.0
-        )
+        availability_completeness = (volunteers_with_availability / total_records * 100) if total_records > 0 else 0.0
         fields.append(
             FieldMetric(
                 field_name="availability",
@@ -516,23 +471,14 @@ class DataQualityService:
         )
 
         # Relationship fields - Hours
-        hours_query = (
+        # Use the same query base to ensure consistency with total_records
+        volunteer_ids_subquery = query.with_entities(Volunteer.id).subquery()
+        volunteers_with_hours = (
             db.session.query(func.count(func.distinct(VolunteerHours.volunteer_id)))
-            .join(Volunteer, VolunteerHours.volunteer_id == Volunteer.id)
+            .join(volunteer_ids_subquery, VolunteerHours.volunteer_id == volunteer_ids_subquery.c.id)
+            .scalar()
+            or 0
         )
-        if organization_id:
-            from flask_app.models.contact.relationships import ContactOrganization
-
-            org_contact_ids = (
-                db.session.query(ContactOrganization.contact_id)
-                .filter(
-                    ContactOrganization.organization_id == organization_id,
-                    ContactOrganization.end_date.is_(None),
-                )
-                .subquery()
-            )
-            hours_query = hours_query.filter(Volunteer.id.in_(db.session.query(org_contact_ids)))
-        volunteers_with_hours = hours_query.scalar() or 0
 
         hours_completeness = (volunteers_with_hours / total_records * 100) if total_records > 0 else 0.0
         fields.append(
@@ -727,20 +673,12 @@ class DataQualityService:
             )
 
         # Relationship fields - Address
-        orgs_with_address = (
-            db.session.query(func.count(func.distinct(OrganizationAddress.organization_id)))
-            .join(Organization, OrganizationAddress.organization_id == Organization.id)
-            .scalar()
-            or 0
+        address_query = db.session.query(func.count(func.distinct(OrganizationAddress.organization_id))).join(
+            Organization, OrganizationAddress.organization_id == Organization.id
         )
         if organization_id:
-            orgs_with_address = (
-                db.session.query(func.count(func.distinct(OrganizationAddress.organization_id)))
-                .join(Organization, OrganizationAddress.organization_id == Organization.id)
-                .filter(Organization.id == organization_id)
-                .scalar()
-                or 0
-            )
+            address_query = address_query.filter(Organization.id == organization_id)
+        orgs_with_address = address_query.scalar() or 0
 
         address_completeness = (orgs_with_address / total_records * 100) if total_records > 0 else 0.0
         fields.append(
@@ -765,7 +703,10 @@ class DataQualityService:
 
             user_ids = (
                 db.session.query(UserOrganization.user_id)
-                .filter(UserOrganization.organization_id == organization_id, UserOrganization.is_active == True)
+                .filter(
+                    UserOrganization.organization_id == organization_id,
+                    UserOrganization.is_active.is_(True),
+                )
                 .subquery()
             )
             query = query.filter(User.id.in_(db.session.query(user_ids)))
@@ -785,9 +726,7 @@ class DataQualityService:
         ]
 
         for field_name, field_column in direct_fields:
-            with_value = query.filter(
-                and_(field_column.isnot(None), field_column != "")
-            ).count()
+            with_value = query.filter(and_(field_column.isnot(None), field_column != "")).count()
             without_value = total_records - with_value
             completeness = (with_value / total_records * 100) if total_records > 0 else 0.0
             status = cls._get_status(completeness)
@@ -814,4 +753,3 @@ class DataQualityService:
             return "warning"
         else:
             return "critical"
-

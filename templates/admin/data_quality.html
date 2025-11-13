@@ -4,6 +4,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/data_quality.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/data_quality_samples.css') }}">
 {% endblock %}
 
 {% block content %}
@@ -74,26 +75,179 @@
     <!-- Cards will be populated by JavaScript -->
   </div>
 
-  <!-- Entity Details Tables -->
-  <div class="card shadow-sm mb-4" id="dq-entity-details">
-    <div class="card-header">
-      <h2 class="h5 mb-0">Field-Level Completeness</h2>
-    </div>
-    <div class="card-body">
-      <div class="mb-3">
-        <select id="dq-entity-selector" class="form-select">
-          <option value="">Select an entity to view details...</option>
-          <option value="contact">Contacts</option>
-          <option value="volunteer">Volunteers</option>
-          <option value="student">Students</option>
-          <option value="teacher">Teachers</option>
-          <option value="event">Events</option>
-          <option value="organization">Organizations</option>
-          <option value="user">Users</option>
-        </select>
+  <!-- Navigation Tabs -->
+  <ul class="nav nav-tabs mb-4" id="dq-tabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" id="metrics-tab" data-bs-toggle="tab" data-bs-target="#metrics-pane" type="button" role="tab">
+        <i class="fas fa-chart-bar"></i> Metrics
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="samples-tab" data-bs-toggle="tab" data-bs-target="#samples-pane" type="button" role="tab">
+        <i class="fas fa-database"></i> Data Samples
+      </button>
+    </li>
+  </ul>
+
+  <!-- Tab Content -->
+  <div class="tab-content" id="dq-tab-content">
+    <!-- Metrics Tab -->
+    <div class="tab-pane fade show active" id="metrics-pane" role="tabpanel">
+      <!-- Entity Details Tables -->
+      <div class="card shadow-sm mb-4" id="dq-entity-details">
+        <div class="card-header">
+          <h2 class="h5 mb-0">Field-Level Completeness</h2>
+        </div>
+        <div class="card-body">
+          <div class="mb-3">
+            <select id="dq-entity-selector" class="form-select">
+              <option value="">Select an entity to view details...</option>
+              <option value="contact">Contacts</option>
+              <option value="volunteer">Volunteers</option>
+              <option value="student">Students</option>
+              <option value="teacher">Teachers</option>
+              <option value="event">Events</option>
+              <option value="organization">Organizations</option>
+              <option value="user">Users</option>
+            </select>
+          </div>
+          <div id="dq-entity-table-container">
+            <p class="text-muted text-center">Select an entity above to view field-level completeness metrics.</p>
+            <p class="text-muted text-center small mt-2">
+              <i class="fas fa-info-circle"></i> Click on any field row to explore sample records, statistics, and edge cases for that field.
+            </p>
+          </div>
+        </div>
       </div>
-      <div id="dq-entity-table-container">
-        <p class="text-muted text-center">Select an entity above to view field-level completeness metrics.</p>
+
+      <!-- Field Exploration View (initially hidden) -->
+      <div class="card shadow-sm mb-4" id="dq-field-exploration" style="display: none;">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <div>
+            <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="dq-back-to-metrics-btn">
+              <i class="fas fa-arrow-left"></i> Back to Metrics
+            </button>
+            <h2 class="h5 mb-0 d-inline" id="dq-field-exploration-title">Field Exploration</h2>
+          </div>
+        </div>
+        <div class="card-body">
+          <!-- Field Info Header -->
+          <div class="mb-3" id="dq-field-info">
+            <p class="text-muted mb-0" id="dq-field-description"></p>
+          </div>
+
+          <!-- Tabs for Field Exploration -->
+          <ul class="nav nav-pills mb-3" id="field-exploration-tabs" role="tablist">
+            <li class="nav-item" role="presentation">
+              <button class="nav-link active" id="field-samples-tab" data-bs-toggle="tab" data-bs-target="#field-samples-pane" type="button" role="tab">
+                Sample Records
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="field-statistics-tab" data-bs-toggle="tab" data-bs-target="#field-statistics-pane" type="button" role="tab">
+                Statistics
+              </button>
+            </li>
+          </ul>
+
+          <div class="tab-content" id="field-exploration-tab-content">
+            <!-- Sample Records Pane -->
+            <div class="tab-pane fade show active" id="field-samples-pane" role="tabpanel">
+              <div id="dq-field-samples-container">
+                <p class="text-muted text-center">Loading sample records...</p>
+              </div>
+            </div>
+
+            <!-- Statistics Pane -->
+            <div class="tab-pane fade" id="field-statistics-pane" role="tabpanel">
+              <div id="dq-field-statistics-container">
+                <p class="text-muted text-center">Loading statistics...</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Samples Tab -->
+    <div class="tab-pane fade" id="samples-pane" role="tabpanel">
+      <div class="card shadow-sm mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h2 class="h5 mb-0">Data Samples & Exploration</h2>
+          <div class="d-flex gap-2">
+            <select id="dq-sample-size-selector" class="form-select form-select-sm" style="width: auto;">
+              <option value="10">10 records</option>
+              <option value="20" selected>20 records</option>
+              <option value="30">30 records</option>
+              <option value="50">50 records</option>
+            </select>
+            <div class="btn-group">
+              <button type="button" class="btn btn-sm btn-outline-success dropdown-toggle" data-bs-toggle="dropdown">
+                <i class="fas fa-download"></i> Export Samples
+              </button>
+              <ul class="dropdown-menu">
+                <li><a class="dropdown-item" href="#" id="dq-export-samples-csv-btn">Export CSV</a></li>
+                <li><a class="dropdown-item" href="#" id="dq-export-samples-json-btn">Export JSON</a></li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="mb-3">
+            <select id="dq-samples-entity-selector" class="form-select">
+              <option value="">Select an entity to view samples...</option>
+              <option value="contact">Contacts</option>
+              <option value="volunteer">Volunteers</option>
+              <option value="student">Students</option>
+              <option value="teacher">Teachers</option>
+              <option value="event">Events</option>
+              <option value="organization">Organizations</option>
+              <option value="user">Users</option>
+            </select>
+          </div>
+
+          <!-- Sub-tabs for Samples -->
+          <ul class="nav nav-pills mb-3" id="samples-sub-tabs" role="tablist">
+            <li class="nav-item" role="presentation">
+              <button class="nav-link active" id="sample-records-tab" data-bs-toggle="tab" data-bs-target="#sample-records-pane" type="button" role="tab">
+                Sample Records
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="statistics-tab" data-bs-toggle="tab" data-bs-target="#statistics-pane" type="button" role="tab">
+                Statistics
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="edge-cases-tab" data-bs-toggle="tab" data-bs-target="#edge-cases-pane" type="button" role="tab">
+                Edge Cases
+              </button>
+            </li>
+          </ul>
+
+          <div class="tab-content" id="samples-sub-tab-content">
+            <!-- Sample Records Pane -->
+            <div class="tab-pane fade show active" id="sample-records-pane" role="tabpanel">
+              <div id="dq-samples-container">
+                <p class="text-muted text-center">Select an entity above to view sample records.</p>
+              </div>
+            </div>
+
+            <!-- Statistics Pane -->
+            <div class="tab-pane fade" id="statistics-pane" role="tabpanel">
+              <div id="dq-statistics-container">
+                <p class="text-muted text-center">Select an entity above to view statistical summaries.</p>
+              </div>
+            </div>
+
+            <!-- Edge Cases Pane -->
+            <div class="tab-pane fade" id="edge-cases-pane" role="tabpanel">
+              <div id="dq-edge-cases-container">
+                <p class="text-muted text-center">Select an entity above to view edge cases.</p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -114,10 +268,17 @@
     metricsUrl: "{{ url_for('data_quality_metrics') }}",
     entityMetricsUrl: "{{ url_for('data_quality_entity_metrics', entity_type='__ENTITY_TYPE__') }}",
     exportUrl: "{{ url_for('data_quality_export') }}",
+    samplesUrl: "{{ url_for('data_quality_samples', entity_type='__ENTITY_TYPE__') }}",
+    statisticsUrl: "{{ url_for('data_quality_statistics', entity_type='__ENTITY_TYPE__') }}",
+    edgeCasesUrl: "{{ url_for('data_quality_edge_cases', entity_type='__ENTITY_TYPE__') }}",
+    exportSamplesUrl: "{{ url_for('data_quality_export_samples', entity_type='__ENTITY_TYPE__') }}",
+    fieldSamplesUrl: "{{ url_for('data_quality_field_samples', entity_type='__ENTITY_TYPE__', field_name='__FIELD_NAME__') }}",
+    fieldStatisticsUrl: "{{ url_for('data_quality_field_statistics', entity_type='__ENTITY_TYPE__', field_name='__FIELD_NAME__') }}",
+    fieldEdgeCasesUrl: "{{ url_for('data_quality_field_edge_cases', entity_type='__ENTITY_TYPE__', field_name='__FIELD_NAME__') }}",
     organizationId: {% if organization %}{{ organization.id }}{% else %}null{% endif %},
     isSuperAdmin: {{ 'true' if is_super_admin else 'false' }},
   };
 </script>
 <script src="{{ url_for('static', filename='js/data_quality.js') }}"></script>
+<script src="{{ url_for('static', filename='js/data_quality_samples.js') }}"></script>
 {% endblock %}
-

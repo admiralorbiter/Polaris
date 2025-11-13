@@ -226,6 +226,228 @@ The dashboard is powered by `DataQualityService` in `flask_app/services/data_qua
 - **Required Fields**: Fields that are required (e.g., `first_name`, `last_name`) are checked for non-empty values
 - **Optional Fields**: Fields that are optional are checked for non-null values
 
+## Data Sampling & Exploration
+
+### Overview
+
+The Data Quality Dashboard includes a comprehensive data sampling feature that allows administrators to explore actual record examples, view statistical summaries, and identify edge cases. This helps understand the actual content and quality of data beyond just completeness percentages.
+
+### Features
+
+#### Sample Records Viewer
+
+- **Intelligent Sampling**: Stratified sampling across completeness levels (high/medium/low) to show diverse data patterns
+- **Configurable Sample Size**: Choose from 10, 20, 30, or 50 records (dynamically adjusted based on data volume)
+- **Interactive Table**: Sortable columns, expandable rows for full record details
+- **Completeness Indicators**: Visual badges showing completeness level (good/warning/critical)
+- **Edge Case Highlighting**: Records with unusual patterns are highlighted and marked
+
+#### Statistical Summaries
+
+- **Field-Level Statistics**: For each field, view:
+  - Completeness percentage
+  - Total, non-null, and null counts
+  - Unique value counts
+  - Most common values (top 10)
+  - Min/max/average for numeric fields
+  - Value distributions
+- **Visual Progress Bars**: Progress bars showing completeness percentages
+- **Card-Based Layout**: Easy-to-scan statistics cards
+
+#### Edge Cases Detection
+
+- **Automatic Detection**: Identifies records with unusual patterns:
+  - Missing critical fields (e.g., email AND phone for contacts)
+  - Unusual value combinations
+  - Outliers (very old dates, extreme numeric values)
+  - Records with all optional fields but missing required ones
+- **Issue Tagging**: Each edge case is tagged with specific reasons
+- **Prioritized Display**: Edge cases sorted by number of issues
+
+### Access
+
+- **Navigation**: Click the "Data Samples" tab in the Data Quality Dashboard
+- **Entity Selection**: Select an entity type from the dropdown
+- **Sub-Tabs**: Switch between "Sample Records", "Statistics", and "Edge Cases"
+
+### API Endpoints
+
+#### Get Sample Records
+
+```
+GET /admin/data-quality/api/samples/<entity_type>?sample_size=<size>&organization_id=<org_id>
+```
+
+Returns intelligent sample of records for an entity type.
+
+**Parameters**:
+- `entity_type`: Entity type (contact, volunteer, student, teacher, event, organization, user)
+- `sample_size`: Optional sample size (10, 20, 30, 50)
+- `organization_id`: Optional organization filter (super admins only)
+
+**Response**:
+```json
+{
+  "entity_type": "contact",
+  "total_records": 500,
+  "sample_size": 20,
+  "timestamp": "2024-01-15T10:30:00Z",
+  "samples": [
+    {
+      "id": 123,
+      "data": {
+        "first_name": "John",
+        "last_name": "Doe",
+        "email": "john@example.com",
+        ...
+      },
+      "completeness_score": 85.5,
+      "completeness_level": "high",
+      "is_edge_case": false,
+      "edge_case_reasons": []
+    }
+  ]
+}
+```
+
+#### Get Statistics
+
+```
+GET /admin/data-quality/api/statistics/<entity_type>?organization_id=<org_id>
+```
+
+Returns statistical summaries for an entity type.
+
+**Response**:
+```json
+{
+  "entity_type": "contact",
+  "timestamp": "2024-01-15T10:30:00Z",
+  "statistics": {
+    "first_name": {
+      "field_name": "first_name",
+      "total_count": 500,
+      "non_null_count": 500,
+      "null_count": 0,
+      "unique_values": 450,
+      "most_common_values": [
+        {"value": "John", "count": 25},
+        {"value": "Jane", "count": 20}
+      ],
+      "min_value": null,
+      "max_value": null,
+      "avg_value": null,
+      "value_distribution": {...}
+    }
+  }
+}
+```
+
+#### Get Edge Cases
+
+```
+GET /admin/data-quality/api/edge-cases/<entity_type>?limit=<limit>&organization_id=<org_id>
+```
+
+Returns edge cases for an entity type.
+
+**Parameters**:
+- `limit`: Maximum number of edge cases to return (default: 20)
+
+**Response**:
+```json
+{
+  "entity_type": "contact",
+  "timestamp": "2024-01-15T10:30:00Z",
+  "edge_cases": [
+    {
+      "id": 456,
+      "data": {...},
+      "completeness_score": 30.0,
+      "completeness_level": "low",
+      "edge_case_reasons": [
+        "Missing both email and phone",
+        "Missing required name fields"
+      ]
+    }
+  ]
+}
+```
+
+#### Export Samples
+
+```
+GET /admin/data-quality/api/export-samples/<entity_type>?format=<csv|json>&sample_size=<size>&organization_id=<org_id>
+```
+
+Exports sample records as CSV or JSON.
+
+**Parameters**:
+- `format`: `csv` or `json` (required)
+- `sample_size`: Optional sample size
+- `organization_id`: Optional organization filter
+
+**Response**: File download with appropriate content type and filename
+
+### Sampling Strategy
+
+The sampling algorithm uses intelligent stratification:
+
+1. **Completeness Stratification**:
+   - 30% high completeness (≥80%)
+   - 40% medium completeness (50-79%)
+   - 30% low completeness (<50%)
+
+2. **Value Diversity**: Ensures samples show different values for key fields
+
+3. **Edge Case Inclusion**: Includes 10-20% edge cases (records with unusual patterns)
+
+4. **Dynamic Sample Size**: Automatically adjusts based on data volume (log scale):
+   - Small datasets (<100 records): Up to 10 records
+   - Medium datasets (100-1000 records): Log-scaled (10-50 records)
+   - Large datasets (>1000 records): Maximum 50 records
+
+### Usage Examples
+
+#### Exploring Data Patterns
+
+1. Navigate to Data Quality Dashboard
+2. Click "Data Samples" tab
+3. Select an entity type (e.g., "Contacts")
+4. Review sample records to see actual data patterns
+5. Click "Details" to expand full record information
+6. Sort columns to identify patterns
+
+#### Analyzing Statistics
+
+1. Select an entity type
+2. Click "Statistics" sub-tab
+3. Review field-level statistics
+4. Identify fields with low completeness or unusual distributions
+5. Use most common values to understand data patterns
+
+#### Identifying Problem Records
+
+1. Select an entity type
+2. Click "Edge Cases" sub-tab
+3. Review records with issues
+4. Check edge case reasons to understand problems
+5. Export edge cases for remediation
+
+#### Exporting for Analysis
+
+1. Select an entity type and configure sample size
+2. Click "Export Samples" dropdown
+3. Choose CSV or JSON format
+4. Download file for external analysis
+
+### Performance Considerations
+
+- **Caching**: Sample results are cached for 5 minutes (same as metrics)
+- **Lazy Loading**: Statistics and edge cases load on-demand when tabs are accessed
+- **Efficient Queries**: Uses optimized queries with limits
+- **Scalability**: Handles large datasets efficiently with dynamic sample sizing
+
 ## Future Enhancements
 
 ### Planned Features
@@ -236,14 +458,17 @@ The dashboard is powered by `DataQualityService` in `flask_app/services/data_qua
 - **Bulk Actions**: Bulk update capabilities for improving data quality
 - **Data Quality Rules**: Integration with DQ rules from the importer
 - **Historical Comparison**: Compare current metrics with historical snapshots
+- **Advanced Filtering**: Filter samples by completeness level, date ranges, field values
+- **Comparison Mode**: Compare samples across organizations
 
 ### Potential Improvements
 
 - **Performance**: Background jobs for pre-computed metrics
-- **Visualization**: Charts and graphs for trend analysis
+- **Visualization**: Charts and graphs for trend analysis and value distributions
 - **Export Formats**: Additional export formats (Excel, PDF)
 - **Scheduling**: Scheduled exports and reports
 - **Integration**: Integration with external data quality tools
+- **ML-Based Anomaly Detection**: Advanced edge case detection using machine learning
 
 ## Troubleshooting
 
@@ -290,4 +515,3 @@ For issues or questions:
 3. **Clear Cache**: Click "Refresh" to clear cache and reload metrics
 4. **Check Database**: Verify database queries are completing successfully
 5. **Contact Support**: Reach out to the development team for assistance
-
