@@ -532,6 +532,110 @@ def _build_transform_registry() -> Dict[str, Any]:
         # This will help identify new values that need mapping
         return None
 
+    def normalize_age_group(value: Any) -> str | None:
+        """Normalize Salesforce age group values to AgeGroup enum values."""
+        if not value:
+            return None
+        text = str(value).strip().lower()
+        if not text:
+            return None
+        
+        # Mapping of Salesforce values to enum values (case-insensitive)
+        # AgeGroup enum values: child (0-12), teen (13-17), adult (18-64), senior (65+)
+        mapping = {
+            # Direct enum value matches
+            "child": "child",
+            "teen": "teen",
+            "adult": "adult",
+            "senior": "senior",
+            
+            # Age range formats (e.g., "60-69", "60-69 years", etc.)
+            "0-12": "child",
+            "0-12 years": "child",
+            "under 13": "child",
+            "12 and under": "child",
+            
+            "13-17": "teen",
+            "13-17 years": "teen",
+            "teenager": "teen",
+            "teens": "teen",
+            
+            "18-64": "adult",
+            "18-64 years": "adult",
+            "adult": "adult",
+            "adults": "adult",
+            
+            "65+": "senior",
+            "65 and over": "senior",
+            "65 and older": "senior",
+            "over 65": "senior",
+            "senior": "senior",
+            "seniors": "senior",
+            "elderly": "senior",
+            
+            # Specific age ranges that map to senior
+            "60-69": "senior",
+            "60-69 years": "senior",
+            "70-79": "senior",
+            "70-79 years": "senior",
+            "80+": "senior",
+            "80 and over": "senior",
+        }
+        
+        # Direct lookup
+        normalized = mapping.get(text)
+        if normalized:
+            return normalized
+        
+        # Try to extract numeric age ranges from text
+        import re
+        # Match patterns like "60-69", "18-64", "65+", etc.
+        range_match = re.search(r'(\d+)\s*-\s*(\d+)', text)
+        if range_match:
+            start_age = int(range_match.group(1))
+            end_age = int(range_match.group(2))
+            # Determine age group based on range
+            if end_age <= 12:
+                return "child"
+            elif start_age >= 13 and end_age <= 17:
+                return "teen"
+            elif start_age >= 18 and end_age <= 64:
+                return "adult"
+            elif start_age >= 65:
+                return "senior"
+            # For ranges that span multiple groups, use the majority or higher group
+            elif start_age < 13 and end_age > 17:
+                # Spans child and teen, default to teen
+                return "teen"
+            elif start_age < 18 and end_age > 64:
+                # Spans teen and adult, default to adult
+                return "adult"
+            elif start_age < 65:
+                # Spans adult and senior, default to senior
+                return "senior"
+        
+        # Match patterns like "65+", "80+", etc.
+        plus_match = re.search(r'(\d+)\s*\+', text)
+        if plus_match:
+            age = int(plus_match.group(1))
+            if age >= 65:
+                return "senior"
+            elif age >= 18:
+                return "adult"
+            elif age >= 13:
+                return "teen"
+            else:
+                return "child"
+        
+        # Fuzzy matching for partial matches
+        for key, enum_value in mapping.items():
+            if key in text or text in key:
+                return enum_value
+        
+        # If no match found, return None to let the loader log it
+        # This will help identify new values that need mapping
+        return None
+
     return {
         "normalize_phone": normalize_phone,
         "parse_date": parse_date,
@@ -539,6 +643,7 @@ def _build_transform_registry() -> Dict[str, Any]:
         "split_semicolon": split_semicolon,
         "normalize_race_ethnicity": normalize_race_ethnicity,
         "normalize_education_level": normalize_education_level,
+        "normalize_age_group": normalize_age_group,
     }
 
 

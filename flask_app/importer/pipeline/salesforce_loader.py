@@ -523,13 +523,29 @@ class SalesforceContactLoader:
         payload_metadata = payload.get("metadata", {})
         if payload_metadata.get("email_bounced_date"):
             metadata["email_bounced_date"] = payload_metadata.get("email_bounced_date")
+        # Store source system timestamps in metadata
+        if payload_metadata.get("source_modstamp"):
+            metadata["source_modstamp"] = payload_metadata.get("source_modstamp")
+        if payload_metadata.get("source_last_modified"):
+            metadata["source_last_modified"] = payload_metadata.get("source_last_modified")
         # Store attended sessions count in metadata
         if engagement.get("attended_sessions_count") is not None:
             metadata["attended_sessions_count"] = engagement.get("attended_sessions_count")
-        # Store account ID in metadata
+        # Store engagement datetime fields in metadata
+        if engagement.get("last_email_message_at"):
+            metadata["last_email_message_at"] = engagement.get("last_email_message_at")
+        if engagement.get("last_external_email_activity_at"):
+            metadata["last_external_email_activity_at"] = engagement.get("last_external_email_activity_at")
+        if engagement.get("last_mailchimp_email_at"):
+            metadata["last_mailchimp_email_at"] = engagement.get("last_mailchimp_email_at")
+        if engagement.get("last_activity_date"):
+            metadata["last_activity_date"] = engagement.get("last_activity_date")
+        # Store account ID and primary affiliation in metadata
         affiliations = payload.get("affiliations", {})
         if affiliations.get("account_id"):
             metadata["account_id"] = affiliations.get("account_id")
+        if affiliations.get("primary_organization_id"):
+            metadata["primary_organization_id"] = affiliations.get("primary_organization_id")
         
         # Apply addresses
         address_data = payload.get("address", {})
@@ -856,13 +872,29 @@ class SalesforceContactLoader:
         payload_metadata = payload.get("metadata", {})
         if payload_metadata.get("email_bounced_date"):
             metadata["email_bounced_date"] = payload_metadata.get("email_bounced_date")
+        # Store source system timestamps in metadata
+        if payload_metadata.get("source_modstamp"):
+            metadata["source_modstamp"] = payload_metadata.get("source_modstamp")
+        if payload_metadata.get("source_last_modified"):
+            metadata["source_last_modified"] = payload_metadata.get("source_last_modified")
         # Store attended sessions count in metadata
         if engagement.get("attended_sessions_count") is not None:
             metadata["attended_sessions_count"] = engagement.get("attended_sessions_count")
-        # Store account ID in metadata
+        # Store engagement datetime fields in metadata
+        if engagement.get("last_email_message_at"):
+            metadata["last_email_message_at"] = engagement.get("last_email_message_at")
+        if engagement.get("last_external_email_activity_at"):
+            metadata["last_external_email_activity_at"] = engagement.get("last_external_email_activity_at")
+        if engagement.get("last_mailchimp_email_at"):
+            metadata["last_mailchimp_email_at"] = engagement.get("last_mailchimp_email_at")
+        if engagement.get("last_activity_date"):
+            metadata["last_activity_date"] = engagement.get("last_activity_date")
+        # Store account ID and primary affiliation in metadata
         affiliations = payload.get("affiliations", {})
         if affiliations.get("account_id"):
             metadata["account_id"] = affiliations.get("account_id")
+        if affiliations.get("primary_organization_id"):
+            metadata["primary_organization_id"] = affiliations.get("primary_organization_id")
         
         # Apply addresses (update or create)
         address_data = payload.get("address", {})

@@ -46,7 +46,7 @@
     // Refresh button
     if (elements.refreshButton) {
       elements.refreshButton.addEventListener("click", () => {
-        loadMetrics();
+        clearCacheAndReload();
       });
     }
 
@@ -159,13 +159,35 @@
     return config.organizationId;
   }
 
+  function clearCacheAndReload() {
+    // Clear cache on server, then reload metrics
+    fetch("/admin/data-quality/api/clear-cache", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    })
+      .then((response) => {
+        if (!response.ok) {
+          console.warn("Failed to clear cache, but continuing with reload");
+        }
+        // Reload metrics after clearing cache
+        loadMetrics();
+      })
+      .catch((error) => {
+        console.warn("Error clearing cache:", error);
+        // Still try to reload metrics
+        loadMetrics();
+      });
+  }
+
   function loadMetrics() {
     showLoading();
 
     const orgId = getOrganizationId();
     const url = orgId
-      ? `${config.metricsUrl}?organization_id=${orgId}`
-      : config.metricsUrl;
+      ? `${config.metricsUrl}?organization_id=${orgId}&clear_cache=true`
+      : `${config.metricsUrl}?clear_cache=true`;
 
     fetch(url)
       .then((response) => {

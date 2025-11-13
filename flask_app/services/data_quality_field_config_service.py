@@ -44,13 +44,17 @@ class DataQualityFieldConfigService:
             "birthdate",
             "gender",
             "race",
+            "age_group",
             "education_level",
             "preferred_language",
             "photo_url",
             "notes",
+            "type",
             "email",
             "phone",
             "address",
+            # Note: Metadata fields from ExternalIdMap are auto-discovered dynamically
+            # They will appear in the dashboard automatically if present in metadata_json
         ],
         "student": [
             "grade",

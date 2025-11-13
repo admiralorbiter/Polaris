@@ -298,10 +298,12 @@ class DataQualityService:
             ("birthdate", Contact.birthdate),
             ("gender", Contact.gender),
             ("race", Contact.race),
+            ("age_group", Contact.age_group),
             ("education_level", Contact.education_level),
             ("preferred_language", Contact.preferred_language),
             ("photo_url", Contact.photo_url),
             ("notes", Contact.notes),
+            ("type", Contact.type),
         ]
 
         for field_name, field_column in direct_fields:
@@ -386,6 +388,130 @@ class DataQualityService:
                 status=cls._get_status(address_completeness),
             )
         )
+
+        # Metadata fields from ExternalIdMap (Salesforce import metadata)
+        # Dynamically discover and display all metadata fields
+        from flask_app.models.importer import ExternalIdMap
+        
+        # Get all contact IDs we're tracking (for filtering ExternalIdMap)
+        if contact_ids:
+            contact_ids_to_check = contact_ids
+        else:
+            # Get all contact IDs from the query
+            contact_ids_to_check = [c.id for c in query.all()]
+        
+        # Get ExternalIdMap entries for Salesforce imports
+        # Query for all Salesforce ExternalIdMap entries, then filter by contact IDs
+        # Note: Salesforce imports use entity_type="salesforce_contact" (not "volunteer")
+        external_map_query = ExternalIdMap.query.filter(
+            ExternalIdMap.external_system == "salesforce",
+            ExternalIdMap.entity_type == "salesforce_contact"
+        )
+        
+        if contact_ids_to_check:
+            external_map_query = external_map_query.filter(
+                ExternalIdMap.entity_id.in_(contact_ids_to_check)
+            )
+        
+        # Get all ExternalIdMap entries
+        external_maps = external_map_query.all()
+        
+        # Build a map of contact_id -> metadata_json for quick lookup
+        metadata_by_contact_id = {}
+        all_metadata_keys = set()
+        
+        for e in external_maps:
+            if e.entity_id and e.metadata_json and isinstance(e.metadata_json, dict):
+                metadata_by_contact_id[e.entity_id] = e.metadata_json
+                # Collect all unique keys (excluding internal fields)
+                excluded_keys = {"payload_hash", "last_payload"}
+                for key in e.metadata_json.keys():
+                    if key not in excluded_keys:
+                        all_metadata_keys.add(key)
+        
+        # Log for debugging (only in debug mode)
+        if external_maps:
+            current_app.logger.debug(
+                f"Data Quality Dashboard: Found {len(external_maps)} ExternalIdMap entries, "
+                f"{len(metadata_by_contact_id)} with metadata_json, "
+                f"{len(all_metadata_keys)} unique metadata keys: {sorted(all_metadata_keys)}"
+            )
+        
+        # Mapping from metadata keys to Salesforce field names for display
+        # This ensures users see the original Salesforce field names in the dashboard
+        METADATA_TO_SALESFORCE_FIELD = {
+            "account_id": "AccountId",
+            "primary_organization_id": "npsp__Primary_Affiliation__c",
+            "last_email_message_at": "Last_Email_Message__c",
+            "last_external_email_activity_at": "Last_Non_Internal_Email_Activity__c",
+            "last_mailchimp_email_at": "Last_Mailchimp_Email_Date__c",
+            "last_activity_date": "Last_Activity_Date__c",
+            "email_bounced_date": "EmailBouncedDate",
+            "source_modstamp": "SystemModstamp",
+            "source_last_modified": "LastModifiedDate",
+            "attended_sessions_count": "Number_of_Attended_Volunteer_Sessions__c",
+        }
+        
+        # Expected metadata fields from Salesforce imports (always show these, even if empty)
+        # This ensures users can see all tracked fields, not just ones that happen to have values
+        expected_metadata_fields = {
+            "account_id",
+            "primary_organization_id", 
+            "last_email_message_at",
+            "last_external_email_activity_at",
+            "last_mailchimp_email_at",
+            "last_activity_date",
+            "email_bounced_date",
+            "source_modstamp",
+            "source_last_modified",
+            "attended_sessions_count",
+        }
+        
+        # Combine discovered keys with expected keys (discovered takes precedence for ordering)
+        all_metadata_keys_to_show = sorted(all_metadata_keys | expected_metadata_fields)
+        
+        # Always show metadata fields (even if no ExternalIdMap entries exist yet)
+        # This ensures users can see all tracked fields, not just ones that happen to have values
+        for metadata_key in all_metadata_keys_to_show:
+            # Count how many contacts have this metadata field
+            if external_maps and metadata_by_contact_id:
+                records_with_metadata = sum(
+                    1 for contact_id in contact_ids_to_check
+                    if contact_id in metadata_by_contact_id
+                    and metadata_by_contact_id[contact_id].get(metadata_key) is not None
+                    and metadata_by_contact_id[contact_id].get(metadata_key) != ""
+                )
+            else:
+                records_with_metadata = 0
+            
+            metadata_completeness = (records_with_metadata / total_records * 100) if total_records > 0 else 0.0
+            
+            # Use Salesforce field name for display if available, otherwise use metadata key
+            display_field_name = METADATA_TO_SALESFORCE_FIELD.get(metadata_key, metadata_key)
+            
+            fields.append(
+                FieldMetric(
+                    field_name=display_field_name,
+                    total_records=total_records,
+                    records_with_value=records_with_metadata,
+                    records_without_value=total_records - records_with_metadata,
+                    completeness_percentage=round(metadata_completeness, 2),
+                    status=cls._get_status(metadata_completeness),
+                )
+            )
+        
+        # Log for debugging
+        if external_maps:
+            current_app.logger.debug(
+                f"Data Quality Dashboard: Added {len(all_metadata_keys_to_show)} metadata fields to Contact metrics. "
+                f"ExternalIdMap entries: {len(external_maps)}, Metadata keys: {sorted(all_metadata_keys_to_show)}"
+            )
+        else:
+            current_app.logger.debug(
+                f"Data Quality Dashboard: No ExternalIdMap entries found for Salesforce imports. "
+                f"Total contacts: {total_records}, Contact IDs checked: {len(contact_ids_to_check) if contact_ids_to_check else 'all'}. "
+                f"Still showing {len(all_metadata_keys_to_show)} expected metadata fields with 0% completeness."
+            )
 
         return fields, total_records
 

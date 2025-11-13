@@ -50,6 +50,7 @@ fields:
     transform: normalize_race_ethnicity
   - source: Age_Group__c
     target: demographics.age_group
+    transform: normalize_age_group
   - source: Highest_Level_of_Educational__c
     target: demographics.highest_education_level
     transform: normalize_education_level
@@ -140,4 +141,6 @@ transforms:
     description: Normalize Salesforce racial/ethnic background values to match RaceEthnicity enum values.
   normalize_education_level:
     description: Normalize Salesforce education level values to match EducationLevel enum values.
+  normalize_age_group:
+    description: Normalize Salesforce age group values (e.g., "60-69", "18-64") to match AgeGroup enum values (child, teen, adult, senior).
 

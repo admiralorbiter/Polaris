@@ -765,12 +765,29 @@ def register_admin_routes(app):
             flash("An error occurred while loading the field configuration page.", "danger")
             return redirect(url_for("data_quality_dashboard"))
 
+    @app.route("/admin/data-quality/api/clear-cache", methods=["POST"])
+    @login_required
+    @permission_required("view_users", org_context=False)
+    def data_quality_clear_cache():
+        """Clear data quality metrics cache"""
+        try:
+            DataQualityService._clear_cache()
+            return jsonify({"success": True, "message": "Cache cleared successfully"}), 200
+        except Exception as e:
+            current_app.logger.error(f"Error clearing data quality cache: {str(e)}", exc_info=True)
+            return jsonify({"error": "Failed to clear cache"}), 500
+
     @app.route("/admin/data-quality/api/metrics")
     @login_required
     @permission_required("view_users", org_context=False)
     def data_quality_metrics():
         """Get overall metrics as JSON"""
         try:
+            # Check if cache should be cleared
+            clear_cache = request.args.get("clear_cache", "false").lower() == "true"
+            if clear_cache:
+                DataQualityService._clear_cache()
+            
             organization = get_current_organization()
             organization_id = None
 
@@ -824,6 +841,11 @@ def register_admin_routes(app):
     def data_quality_entity_metrics(entity_type):
         """Get entity-specific metrics"""
         try:
+            # Check if cache should be cleared
+            clear_cache = request.args.get("clear_cache", "false").lower() == "true"
+            if clear_cache:
+                DataQualityService._clear_cache()
+            
             organization = get_current_organization()
             organization_id = None
 
