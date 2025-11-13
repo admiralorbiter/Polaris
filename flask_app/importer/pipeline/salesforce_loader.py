@@ -23,9 +23,10 @@ from flask_app.importer.pipeline.load_core import (
     _merge_email_to_volunteer,
     _name_exists_exact,
     _name_exists_fuzzy,
+    _record_import_skip,
 )
 from flask_app.models import ExternalIdMap, db
-from flask_app.models.importer.schema import CleanVolunteer, ImportRun, ImportRunStatus, ImporterWatermark, StagingVolunteer
+from flask_app.models.importer.schema import CleanVolunteer, ImportRun, ImportRunStatus, ImportSkip, ImportSkipType, ImporterWatermark, StagingVolunteer
 from flask_app.models import Volunteer, ContactEmail, ContactPhone, EmailType, PhoneType
 from flask_app.models.contact.info import ContactAddress
 from flask_app.models.contact.enums import AddressType
@@ -202,11 +203,39 @@ class SalesforceContactLoader:
             skip_reason = "name"
         
         if should_skip:
+            # Handle both CleanVolunteer and SimpleNamespace objects
+            staging_volunteer_id = None
+            clean_volunteer_id = None
+            if hasattr(clean_row, 'staging_volunteer_id'):
+                # CleanVolunteer instance
+                staging_volunteer_id = clean_row.staging_volunteer_id
+                clean_volunteer_id = clean_row.id
+            elif hasattr(clean_row, 'staging_row') and clean_row.staging_row:
+                # SimpleNamespace fallback
+                staging_volunteer_id = clean_row.staging_row.id if hasattr(clean_row.staging_row, 'id') else None
+            
             if skip_reason == "email":
                 # Skip duplicate - don't create volunteer or external_id_map
                 clean_row.load_action = "skipped_duplicate"
                 clean_row.core_contact_id = None
                 clean_row.core_volunteer_id = None
+                # Record skip
+                _record_import_skip(
+                    self.session,
+                    self.run.id,
+                    ImportSkipType.DUPLICATE_EMAIL,
+                    f"Duplicate email address: {email_value}",
+                    staging_volunteer_id=staging_volunteer_id,
+                    clean_volunteer_id=clean_volunteer_id,
+                    entity_type="volunteer",
+                    record_key=f"{clean_row.first_name} {clean_row.last_name} ({email_value})" if email_value else f"{clean_row.first_name} {clean_row.last_name}",
+                    details_json={
+                        "email": email_value,
+                        "first_name": clean_row.first_name,
+                        "last_name": clean_row.last_name,
+                        "external_id": external_id,
+                    },
+                )
                 return "unchanged"
             elif skip_reason == "name":
                 # Merge email if provided and different
@@ -236,6 +265,24 @@ class SalesforceContactLoader:
                 clean_row.load_action = "skipped_duplicate"
                 clean_row.core_contact_id = name_match_volunteer.id
                 clean_row.core_volunteer_id = name_match_volunteer.id
+                # Record skip
+                _record_import_skip(
+                    self.session,
+                    self.run.id,
+                    ImportSkipType.DUPLICATE_NAME,
+                    f"Duplicate name: {clean_row.first_name} {clean_row.last_name} (matched volunteer ID: {name_match_volunteer.id})",
+                    staging_volunteer_id=staging_volunteer_id,
+                    clean_volunteer_id=clean_volunteer_id,
+                    entity_type="volunteer",
+                    record_key=f"{clean_row.first_name} {clean_row.last_name}",
+                    details_json={
+                        "first_name": clean_row.first_name,
+                        "last_name": clean_row.last_name,
+                        "email": email_value,
+                        "matched_volunteer_id": name_match_volunteer.id,
+                        "external_id": external_id,
+                    },
+                )
                 if has_app_context():
                     current_app.logger.info(
                         "Salesforce import run %s skipped duplicate by name: %s %s",

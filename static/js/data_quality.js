@@ -854,4 +854,325 @@
       dashboard.insertBefore(alert, dashboard.firstChild);
     }
   }
+
+  // Skipped Records Tab Functionality
+  let skipsCurrentPage = 1;
+  const skipsPageSize = 50;
+
+  function initializeSkippedRecordsTab() {
+    const skippedRecordsTab = document.getElementById("skipped-records-tab");
+    const runFilter = document.getElementById("dq-skips-run-filter");
+    const typeFilter = document.getElementById("dq-skips-type-filter");
+    const dateFromFilter = document.getElementById("dq-skips-date-from");
+    const dateToFilter = document.getElementById("dq-skips-date-to");
+    const exportBtn = document.getElementById("dq-export-skips-btn");
+
+    if (!skippedRecordsTab) return;
+
+    // Load runs for filter dropdown
+    if (config.runsUrl) {
+      fetch(config.runsUrl + "?limit=100")
+        .then((response) => response.json())
+        .then((data) => {
+          if (runFilter && data.items) {
+            data.items.forEach((run) => {
+              const option = document.createElement("option");
+              option.value = run.id;
+              option.textContent = `Run ${run.id} - ${run.source || "Unknown"} (${new Date(run.started_at).toLocaleDateString()})`;
+              runFilter.appendChild(option);
+            });
+          }
+        })
+        .catch((error) => {
+          console.error("Failed to load runs:", error);
+        });
+    }
+
+    // Tab shown handler
+    skippedRecordsTab.addEventListener("shown.bs.tab", () => {
+      loadSkippedRecords();
+    });
+
+    // Filter change handlers
+    if (runFilter) {
+      runFilter.addEventListener("change", () => {
+        skipsCurrentPage = 1;
+        loadSkippedRecords();
+      });
+    }
+
+    if (typeFilter) {
+      typeFilter.addEventListener("change", () => {
+        skipsCurrentPage = 1;
+        loadSkippedRecords();
+      });
+    }
+
+    if (dateFromFilter) {
+      dateFromFilter.addEventListener("change", () => {
+        skipsCurrentPage = 1;
+        loadSkippedRecords();
+      });
+    }
+
+    if (dateToFilter) {
+      dateToFilter.addEventListener("change", () => {
+        skipsCurrentPage = 1;
+        loadSkippedRecords();
+      });
+    }
+
+    if (exportBtn) {
+      exportBtn.addEventListener("click", () => {
+        exportSkippedRecords();
+      });
+    }
+  }
+
+  function loadSkippedRecords(page = 1) {
+    if (!config.skipsUrl) return;
+
+    const tableBody = document.getElementById("dq-skips-table-body");
+    const paginationInfo = document.getElementById("dq-skips-pagination-info");
+    const pagination = document.getElementById("dq-skips-pagination");
+
+    if (!tableBody) return;
+
+    tableBody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">Loading skipped records...</td></tr>';
+
+    const params = new URLSearchParams({
+      limit: skipsPageSize,
+      offset: (page - 1) * skipsPageSize,
+    });
+
+    const runFilter = document.getElementById("dq-skips-run-filter");
+    const typeFilter = document.getElementById("dq-skips-type-filter");
+    const dateFromFilter = document.getElementById("dq-skips-date-from");
+    const dateToFilter = document.getElementById("dq-skips-date-to");
+
+    if (runFilter && runFilter.value) {
+      params.append("run_id", runFilter.value);
+    }
+
+    if (typeFilter && typeFilter.value) {
+      params.append("skip_type", typeFilter.value);
+    }
+
+    if (dateFromFilter && dateFromFilter.value) {
+      params.append("created_from", dateFromFilter.value + "T00:00:00Z");
+    }
+
+    if (dateToFilter && dateToFilter.value) {
+      params.append("created_to", dateToFilter.value + "T23:59:59Z");
+    }
+
+    fetch(`${config.skipsUrl}?${params}`)
+      .then((response) => response.json())
+      .then((data) => {
+        const items = data.items || [];
+        const total = data.total || 0;
+
+        if (items.length === 0) {
+          tableBody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">No skipped records found</td></tr>';
+          paginationInfo.textContent = "";
+          pagination.innerHTML = "";
+          return;
+        }
+
+        tableBody.innerHTML = items
+          .map((skip) => {
+            const skipTypeBadge = skip.skip_type
+              .split("_")
+              .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+              .join(" ");
+            const badgeClass =
+              skip.skip_type === "duplicate_email" || skip.skip_type === "duplicate_name"
+                ? "warning"
+                : skip.skip_type === "duplicate_fuzzy"
+                ? "info"
+                : "secondary";
+            const createdDate = skip.created_at ? new Date(skip.created_at).toLocaleString() : "—";
+            const reasonPreview = skip.skip_reason ? (skip.skip_reason.length > 60 ? skip.skip_reason.substring(0, 60) + "..." : skip.skip_reason) : "—";
+            return `
+              <tr>
+                <td>${skip.id}</td>
+                <td><a href="${config.adminBase || "/admin/importer"}/runs/${skip.run_id}" target="_blank">${skip.run_id}</a></td>
+                <td><span class="badge bg-${badgeClass}">${skipTypeBadge}</span></td>
+                <td title="${skip.skip_reason || ""}">${escapeHtml(reasonPreview)}</td>
+                <td>${escapeHtml(skip.record_key || "—")}</td>
+                <td>${createdDate}</td>
+                <td>
+                  <button type="button" class="btn btn-sm btn-outline-primary skip-detail-btn" data-skip-id="${skip.id}">
+                    View
+                  </button>
+                </td>
+              </tr>
+            `;
+          })
+          .join("");
+
+        // Pagination
+        const totalPages = Math.ceil(total / skipsPageSize);
+        if (paginationInfo) {
+          paginationInfo.textContent = `Showing ${(page - 1) * skipsPageSize + 1}–${Math.min(page * skipsPageSize, total)} of ${total}`;
+        }
+
+        if (pagination && totalPages > 1) {
+          let paginationHtml = '<ul class="pagination pagination-sm mb-0">';
+          if (page > 1) {
+            paginationHtml += `<li class="page-item"><a class="page-link" href="#" data-page="${page - 1}">Previous</a></li>`;
+          }
+          for (let i = Math.max(1, page - 2); i <= Math.min(totalPages, page + 2); i++) {
+            paginationHtml += `<li class="page-item ${i === page ? "active" : ""}"><a class="page-link" href="#" data-page="${i}">${i}</a></li>`;
+          }
+          if (page < totalPages) {
+            paginationHtml += `<li class="page-item"><a class="page-link" href="#" data-page="${page + 1}">Next</a></li>`;
+          }
+          paginationHtml += "</ul>";
+          pagination.innerHTML = paginationHtml;
+
+          pagination.querySelectorAll("a").forEach((link) => {
+            link.addEventListener("click", (e) => {
+              e.preventDefault();
+              loadSkippedRecords(parseInt(link.dataset.page));
+            });
+          });
+        } else if (pagination) {
+          pagination.innerHTML = "";
+        }
+
+        // Add detail button handlers
+        tableBody.querySelectorAll(".skip-detail-btn").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const skipId = btn.dataset.skipId;
+            const skipDetailUrl = config.skipDetailUrl.replace("/0", `/${skipId}`);
+            fetch(skipDetailUrl)
+              .then((response) => response.json())
+              .then((skip) => {
+                showSkipDetailModal(skip);
+              })
+              .catch((error) => {
+                console.error("Failed to load skip detail:", error);
+                alert("Failed to load skip details");
+              });
+          });
+        });
+      })
+      .catch((error) => {
+        console.error("Failed to load skipped records:", error);
+        tableBody.innerHTML = '<tr><td colspan="7" class="text-center text-danger py-3">Failed to load skipped records</td></tr>';
+      });
+  }
+
+  function showSkipDetailModal(skip) {
+    const modal = document.createElement("div");
+    modal.className = "modal fade";
+    modal.innerHTML = `
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">Skip Record #${skip.id}</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <dl class="row">
+              <dt class="col-sm-3">Skip Type</dt>
+              <dd class="col-sm-9"><span class="badge bg-secondary">${skip.skip_type}</span></dd>
+              <dt class="col-sm-3">Reason</dt>
+              <dd class="col-sm-9">${escapeHtml(skip.skip_reason || "—")}</dd>
+              <dt class="col-sm-3">Record Key</dt>
+              <dd class="col-sm-9">${escapeHtml(skip.record_key || "—")}</dd>
+              <dt class="col-sm-3">Run ID</dt>
+              <dd class="col-sm-9"><a href="${config.adminBase || "/admin/importer"}/runs/${skip.run_id}" target="_blank">${skip.run_id}</a></dd>
+              <dt class="col-sm-3">Created</dt>
+              <dd class="col-sm-9">${skip.created_at ? new Date(skip.created_at).toLocaleString() : "—"}</dd>
+              <dt class="col-sm-3">Details</dt>
+              <dd class="col-sm-9">
+                <pre class="bg-light border rounded p-3 small mb-0">${JSON.stringify(skip.details_json || {}, null, 2)}</pre>
+              </dd>
+            </dl>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    const bsModal = new bootstrap.Modal(modal);
+    bsModal.show();
+    modal.addEventListener("hidden.bs.modal", () => {
+      document.body.removeChild(modal);
+    });
+  }
+
+  function exportSkippedRecords() {
+    // Simple CSV export
+    const params = new URLSearchParams();
+    params.append("limit", "10000"); // Get all records
+
+    const runFilter = document.getElementById("dq-skips-run-filter");
+    const typeFilter = document.getElementById("dq-skips-type-filter");
+    const dateFromFilter = document.getElementById("dq-skips-date-from");
+    const dateToFilter = document.getElementById("dq-skips-date-to");
+
+    if (runFilter && runFilter.value) {
+      params.append("run_id", runFilter.value);
+    }
+
+    if (typeFilter && typeFilter.value) {
+      params.append("skip_type", typeFilter.value);
+    }
+
+    if (dateFromFilter && dateFromFilter.value) {
+      params.append("created_from", dateFromFilter.value + "T00:00:00Z");
+    }
+
+    if (dateToFilter && dateToFilter.value) {
+      params.append("created_to", dateToFilter.value + "T23:59:59Z");
+    }
+
+    fetch(`${config.skipsUrl}?${params}`)
+      .then((response) => response.json())
+      .then((data) => {
+        const items = data.items || [];
+        const csv = [
+          ["ID", "Run ID", "Skip Type", "Reason", "Record Key", "Created"].join(","),
+          ...items.map((skip) =>
+            [
+              skip.id,
+              skip.run_id,
+              skip.skip_type,
+              `"${(skip.skip_reason || "").replace(/"/g, '""')}"`,
+              `"${(skip.record_key || "").replace(/"/g, '""')}"`,
+              skip.created_at || "",
+            ].join(",")
+          ),
+        ].join("\n");
+
+        const blob = new Blob([csv], { type: "text/csv" });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `skipped_records_${new Date().toISOString().split("T")[0]}.csv`;
+        a.click();
+        window.URL.revokeObjectURL(url);
+      })
+      .catch((error) => {
+        console.error("Failed to export skipped records:", error);
+        alert("Failed to export skipped records");
+      });
+  }
+
+  function escapeHtml(text) {
+    if (!text) return "";
+    const div = document.createElement("div");
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  // Initialize skipped records tab on page load
+  document.addEventListener("DOMContentLoaded", () => {
+    initializeSkippedRecordsTab();
+  });
 })();

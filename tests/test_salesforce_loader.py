@@ -3,9 +3,17 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from flask_app.importer.pipeline.salesforce_loader import SalesforceContactLoader
-from flask_app.models import ExternalIdMap
+from flask_app.models import ContactEmail, EmailType, ExternalIdMap, Volunteer
 from flask_app.models.base import db
-from flask_app.models.importer.schema import ImportRun, ImportRunStatus, ImporterWatermark, StagingVolunteer
+from flask_app.models.importer.schema import (
+    CleanVolunteer,
+    ImportRun,
+    ImportRunStatus,
+    ImportSkip,
+    ImportSkipType,
+    ImporterWatermark,
+    StagingVolunteer,
+)
 
 
 def _create_run() -> ImportRun:
@@ -43,12 +51,14 @@ def _make_payload(external_id: str, first_name: str = "Ada", deleted: bool = Fal
 
 
 def _add_staging_row(run: ImportRun, sequence: int, payload: dict) -> None:
+    from flask_app.models.importer.schema import StagingRecordStatus
     staging = StagingVolunteer(
         run_id=run.id,
         sequence_number=sequence,
         external_system="salesforce",
         payload_json=payload,
         normalized_json=payload,
+        status=StagingRecordStatus.VALIDATED,
     )
     db.session.add(staging)
     db.session.commit()
@@ -449,5 +459,100 @@ def test_loader_updates_addresses(app):
     addresses = ContactAddress.query.filter_by(contact_id=volunteer.id, address_type=AddressType.MAILING).all()
     assert len(addresses) == 1
     assert addresses[0].street_address_1 == "789 New St"
+
+
+def test_loader_records_skip_for_duplicate_email(app):
+    """Test that loader records ImportSkip when skipping duplicate email."""
+    _ensure_watermark()
+    
+    # Create existing volunteer with email
+    existing = Volunteer(first_name="Existing", last_name="Person")
+    db.session.add(existing)
+    db.session.flush()
+    db.session.add(
+        ContactEmail(
+            contact_id=existing.id,
+            email="duplicate@example.org",
+            email_type=EmailType.PERSONAL,
+            is_primary=True,
+            is_verified=True,
+        )
+    )
+    db.session.commit()
+    
+    # Create run with duplicate email
+    run = _create_run()
+    payload = _make_payload("dup-email-001")
+    payload["last_name"] = "NewPerson"
+    payload["email"] = "duplicate@example.org"
+    _add_staging_row(run, 1, payload)
+    
+    # Promote to clean
+    from flask_app.importer.pipeline.clean import promote_clean_volunteers
+    promote_clean_volunteers(run, dry_run=False)
+    db.session.commit()
+    
+    # Execute loader
+    loader = SalesforceContactLoader(run)
+    counters = loader.execute()
+    db.session.commit()
+    
+    # Verify skip was recorded
+    assert counters.unchanged == 1
+    skip = ImportSkip.query.filter_by(run_id=run.id, skip_type=ImportSkipType.DUPLICATE_EMAIL).first()
+    assert skip is not None
+    assert skip.skip_type == ImportSkipType.DUPLICATE_EMAIL
+    assert "duplicate@example.org" in skip.skip_reason.lower()
+    assert skip.details_json["email"] == "duplicate@example.org"
+    assert skip.staging_volunteer_id is not None
+    # clean_volunteer_id may be None if using SimpleNamespace fallback
+    # but should be set if clean volunteer was created
+    if skip.clean_volunteer_id is not None:
+        clean_vol = db.session.get(CleanVolunteer, skip.clean_volunteer_id)
+        assert clean_vol is not None
+
+
+def test_loader_records_skip_for_duplicate_name(app):
+    """Test that loader records ImportSkip when skipping duplicate name."""
+    _ensure_watermark()
+    
+    # Create existing volunteer with exact name
+    existing = Volunteer(first_name="John", last_name="Doe")
+    db.session.add(existing)
+    db.session.commit()
+    
+    # Create run with duplicate name
+    run = _create_run()
+    payload = _make_payload("dup-name-001")
+    payload["first_name"] = "John"
+    payload["last_name"] = "Doe"
+    payload["email"] = "newemail@example.org"
+    _add_staging_row(run, 1, payload)
+    
+    # Promote to clean
+    from flask_app.importer.pipeline.clean import promote_clean_volunteers
+    promote_clean_volunteers(run, dry_run=False)
+    db.session.commit()
+    
+    # Execute loader
+    loader = SalesforceContactLoader(run)
+    counters = loader.execute()
+    db.session.commit()
+    
+    # Verify skip was recorded
+    assert counters.unchanged == 1
+    skip = ImportSkip.query.filter_by(run_id=run.id, skip_type=ImportSkipType.DUPLICATE_NAME).first()
+    assert skip is not None
+    assert skip.skip_type == ImportSkipType.DUPLICATE_NAME
+    assert "John Doe" in skip.skip_reason
+    assert skip.details_json["first_name"] == "John"
+    assert skip.details_json["last_name"] == "Doe"
+    assert skip.details_json["matched_volunteer_id"] == existing.id
+    assert skip.staging_volunteer_id is not None
+    # clean_volunteer_id may be None if using SimpleNamespace fallback
+    # but should be set if clean volunteer was created
+    if skip.clean_volunteer_id is not None:
+        clean_vol = db.session.get(CleanVolunteer, skip.clean_volunteer_id)
+        assert clean_vol is not None
 
 

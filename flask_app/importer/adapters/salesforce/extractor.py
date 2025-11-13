@@ -107,9 +107,9 @@ def build_contacts_soql(
             filter_volunteers = True
     
     if filter_volunteers:
-        # Filter: Contact_Type__c = 'Volunteer' OR Contact_Type__c = ''
-        # Using empty string check as per working query pattern
-        where_clauses.append("(Contact_Type__c = 'Volunteer' OR Contact_Type__c = '')")
+        # Filter: Contact_Type__c = 'Volunteer' OR Contact_Type__c = '' OR Contact_Type__c = null
+        # Include null values to match all records where Contact_Type__c is Volunteer, empty string, or null
+        where_clauses.append("(Contact_Type__c = 'Volunteer' OR Contact_Type__c = '' OR Contact_Type__c = null)")
     
     if last_modstamp is not None:
         where_clauses.append(f"SystemModstamp > { _format_modstamp(last_modstamp) }")

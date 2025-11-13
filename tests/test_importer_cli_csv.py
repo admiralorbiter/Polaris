@@ -54,7 +54,11 @@ def test_importer_run_cli_queues_by_default(app, runner, tmp_path):
         )
 
     assert result.exit_code == 0, result.output
-    payload = json.loads(result.output.strip())
+    # Extract JSON line (logging errors may be mixed in)
+    lines = result.output.splitlines()
+    json_line = next((line for line in lines if line.strip().startswith("{")), None)
+    assert json_line is not None, f"No JSON found in output: {result.output}"
+    payload = json.loads(json_line.strip())
     assert payload["status"] == "queued"
     assert payload["task_id"] == async_result.id
 
@@ -215,8 +219,20 @@ def test_importer_run_cli_summary_json(app, runner, tmp_path):
 
     assert result.exit_code == 0, result.output
     lines = result.output.splitlines()
+    # Find the start of JSON (multiline formatted JSON)
     json_start = next(i for i, line in enumerate(lines) if line.strip().startswith("{"))
-    summary_payload = json.loads("\n".join(lines[json_start:]))
+    # Find where JSON ends - look for the last line that's part of the JSON structure
+    # JSON is formatted with indent=2, so we need to find the matching closing brace
+    json_lines = []
+    brace_count = 0
+    for i in range(json_start, len(lines)):
+        line = lines[i]
+        json_lines.append(line)
+        # Count braces to find the end of the JSON object
+        brace_count += line.count("{") - line.count("}")
+        if brace_count == 0 and line.strip().endswith("}"):
+            break
+    summary_payload = json.loads("\n".join(json_lines))
     assert summary_payload["core"]["rows_created"] == 2
     assert summary_payload["core"]["rows_updated"] == 0
     assert summary_payload["core"]["rows_skipped_duplicates"] == 0
@@ -269,7 +285,11 @@ def test_importer_retry_cli_success(app, runner, tmp_path):
         )
 
     assert result.exit_code == 0
-    initial_payload = json.loads(result.output.strip())
+    # Extract JSON line (logging errors may be mixed in)
+    lines = result.output.splitlines()
+    json_line = next((line for line in lines if line.strip().startswith("{")), None)
+    assert json_line is not None, f"No JSON found in output: {result.output}"
+    initial_payload = json.loads(json_line.strip())
     run_id = initial_payload["run_id"]
 
     # Mark run as failed
@@ -290,7 +310,11 @@ def test_importer_retry_cli_success(app, runner, tmp_path):
         )
 
     assert result.exit_code == 0, result.output
-    retry_payload = json.loads(result.output.strip())
+    # Extract JSON line (logging errors may be mixed in)
+    lines = result.output.splitlines()
+    json_line = next((line for line in lines if line.strip().startswith("{")), None)
+    assert json_line is not None, f"No JSON found in output: {result.output}"
+    retry_payload = json.loads(json_line.strip())
     assert retry_payload["run_id"] == run_id
     assert retry_payload["status"] == "queued"
     assert retry_payload["task_id"] == async_result.id

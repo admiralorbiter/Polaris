@@ -336,6 +336,52 @@
             <dd class="col-sm-9" data-field="triggered_by"></dd>
           </dl>
           
+          <!-- Skipped Records Section -->
+          <div class="mt-4">
+            <h5 class="mb-3">Skipped Records</h5>
+            <div id="run-detail-skips-summary" class="mb-3">
+              <div class="spinner-border spinner-border-sm text-primary me-2" role="status" aria-hidden="true"></div>
+              Loading skip summary...
+            </div>
+            <div id="run-detail-skips-table-wrapper" class="d-none">
+              <div class="mb-2">
+                <label for="skip-type-filter" class="form-label small">Filter by skip type:</label>
+                <select id="skip-type-filter" class="form-select form-select-sm" style="max-width: 200px;">
+                  <option value="">All types</option>
+                  <option value="duplicate_email">Duplicate Email</option>
+                  <option value="duplicate_name">Duplicate Name</option>
+                  <option value="duplicate_fuzzy">Fuzzy Match</option>
+                  <option value="missing_required_field">Missing Required Field</option>
+                  <option value="validation_error">Validation Error</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div class="table-responsive">
+                <table class="table table-sm table-hover">
+                  <thead class="table-light">
+                    <tr>
+                      <th scope="col">ID</th>
+                      <th scope="col">Skip Type</th>
+                      <th scope="col">Reason</th>
+                      <th scope="col">Record Key</th>
+                      <th scope="col">Created</th>
+                      <th scope="col">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="run-detail-skips-table-body">
+                    <tr>
+                      <td colspan="6" class="text-center text-muted py-3">No skipped records</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="d-flex justify-content-between align-items-center mt-2">
+                <div id="run-detail-skips-pagination-info" class="text-muted small"></div>
+                <nav id="run-detail-skips-pagination"></nav>
+              </div>
+            </div>
+          </div>
+          
           <!-- Field Import Statistics Section -->
           <div id="field-stats-section" class="mt-4 d-none">
             <h5 class="mb-3">Field Import Statistics</h5>

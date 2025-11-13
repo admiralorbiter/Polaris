@@ -25,6 +25,8 @@ from flask_app.models.importer.schema import (
     DedupeDecision,
     DedupeSuggestion,
     ExternalIdMap,
+    ImportSkip,
+    ImportSkipType,
     StagingRecordStatus,
     StagingVolunteer,
 )
@@ -82,6 +84,50 @@ def _get_active_survivorship_profile() -> SurvivorshipProfile:
     """
 
     return load_profile(dict(os.environ))
+
+
+def _record_import_skip(
+    session: Session,
+    run_id: int,
+    skip_type: ImportSkipType,
+    skip_reason: str,
+    *,
+    staging_volunteer_id: int | None = None,
+    clean_volunteer_id: int | None = None,
+    entity_type: str = "volunteer",
+    record_key: str | None = None,
+    details_json: dict | None = None,
+) -> ImportSkip:
+    """
+    Record a skip event for a record that passed DQ but was not created in core.
+    
+    Args:
+        session: Database session
+        run_id: Import run ID
+        skip_type: Type of skip reason
+        skip_reason: Human-readable reason message
+        staging_volunteer_id: Optional staging volunteer ID
+        clean_volunteer_id: Optional clean volunteer ID
+        entity_type: Entity type (default: "volunteer")
+        record_key: Optional record key for lookup
+        details_json: Optional additional details (matched email, volunteer IDs, etc.)
+    
+    Returns:
+        Created ImportSkip record
+    """
+    skip_record = ImportSkip(
+        run_id=run_id,
+        staging_volunteer_id=staging_volunteer_id,
+        clean_volunteer_id=clean_volunteer_id,
+        entity_type=entity_type,
+        skip_type=skip_type,
+        skip_reason=skip_reason,
+        record_key=record_key,
+        details_json=details_json or {},
+        created_at=datetime.now(timezone.utc),
+    )
+    session.add(skip_record)
+    return skip_record
 
 
 def load_core_volunteers(
@@ -153,6 +199,8 @@ def load_core_volunteers(
             dry_run=True,
         )
         _update_core_counts(import_run, summary, potential_inserts=rows_created)
+        # Flush to ensure counts_json is persisted before returning
+        session.flush()
         return summary
 
     # Reset name lookup cache at start of import run
@@ -279,6 +327,24 @@ def load_core_volunteers(
                     if staging_row is not None:
                         _mark_staging_loaded(staging_row, duplicate=True, duplicate_type="email")
                     _log_duplicate(candidate.email, import_run.id, match_type="email")
+                    # Record skip
+                    _record_import_skip(
+                        session,
+                        import_run.id,
+                        ImportSkipType.DUPLICATE_EMAIL,
+                        f"Duplicate email address: {candidate.email}",
+                        staging_volunteer_id=staging_row.id if staging_row else None,
+                        clean_volunteer_id=clean_row.id if clean_row else None,
+                        entity_type="volunteer",
+                        record_key=f"{candidate.first_name} {candidate.last_name} ({candidate.email})" if candidate.email else f"{candidate.first_name} {candidate.last_name}",
+                        details_json={
+                            "email": candidate.email,
+                            "first_name": candidate.first_name,
+                            "last_name": candidate.last_name,
+                            "external_id": candidate.external_id,
+                            "external_system": candidate.external_system,
+                        },
+                    )
                 elif skip_reason == "name":
                     rows_skipped_duplicate_name += 1
                     clean_row.load_action = "skipped_duplicate"
@@ -311,6 +377,25 @@ def load_core_volunteers(
                     if staging_row is not None:
                         _mark_staging_loaded(staging_row, duplicate=True, duplicate_type="name")
                     _log_duplicate(None, import_run.id, match_type="name")
+                    # Record skip
+                    _record_import_skip(
+                        session,
+                        import_run.id,
+                        ImportSkipType.DUPLICATE_NAME,
+                        f"Duplicate name: {candidate.first_name} {candidate.last_name} (matched volunteer ID: {name_match_volunteer.id})",
+                        staging_volunteer_id=staging_row.id if staging_row else None,
+                        clean_volunteer_id=clean_row.id if clean_row else None,
+                        entity_type="volunteer",
+                        record_key=f"{candidate.first_name} {candidate.last_name}",
+                        details_json={
+                            "first_name": candidate.first_name,
+                            "last_name": candidate.last_name,
+                            "email": candidate.email,
+                            "matched_volunteer_id": name_match_volunteer.id,
+                            "external_id": candidate.external_id,
+                            "external_system": candidate.external_system,
+                        },
+                    )
                 elif skip_reason == "fuzzy":
                     rows_skipped_duplicate_name += 1
                     clean_row.load_action = "skipped_duplicate_fuzzy"
@@ -319,6 +404,27 @@ def load_core_volunteers(
                     if staging_row is not None:
                         _mark_staging_loaded(staging_row, duplicate=True, duplicate_type="fuzzy")
                     _log_duplicate(None, import_run.id, match_type="fuzzy")
+                    # Record skip
+                    fuzzy_match_id = fuzzy_match_volunteers[0].id if fuzzy_match_volunteers else None
+                    _record_import_skip(
+                        session,
+                        import_run.id,
+                        ImportSkipType.DUPLICATE_FUZZY,
+                        f"Fuzzy name match: {candidate.first_name} {candidate.last_name} (similar to volunteer ID: {fuzzy_match_id})",
+                        staging_volunteer_id=staging_row.id if staging_row else None,
+                        clean_volunteer_id=clean_row.id if clean_row else None,
+                        entity_type="volunteer",
+                        record_key=f"{candidate.first_name} {candidate.last_name}",
+                        details_json={
+                            "first_name": candidate.first_name,
+                            "last_name": candidate.last_name,
+                            "email": candidate.email,
+                            "matched_volunteer_id": fuzzy_match_id,
+                            "external_id": candidate.external_id,
+                            "external_system": candidate.external_system,
+                            "match_type": "fuzzy",
+                        },
+                    )
                 continue
 
             volunteer = _create_volunteer_from_candidate(candidate)
@@ -454,6 +560,8 @@ def load_core_volunteers(
         dry_run=False,
     )
     _update_core_counts(import_run, summary)
+    # Flush to ensure counts_json is persisted before returning
+    session.flush()
     metrics_enabled = True
     metrics_source = getattr(import_run, "source", None)
     metrics_environment = None
@@ -740,6 +848,30 @@ def _update_core_counts(
     reactivated_count = summary.rows_reactivated if not summary.dry_run else 0
     changed_count = summary.rows_changed if not summary.dry_run else 0
     deduped_count = summary.rows_deduped_auto if not summary.dry_run else 0
+    
+    # Calculate skip counts from ImportSkip records
+    skip_counts = {"total_skipped": 0, "by_type": {}, "by_reason": {}}
+    try:
+        from flask_app.importer.pipeline.skip_service import ImportSkipService
+        skip_service = ImportSkipService(db.session)
+        skip_summary = skip_service.get_skip_summary(import_run.id)
+        skip_counts = {
+            "total_skipped": skip_summary.total_skips,
+            "by_type": skip_summary.by_type,
+            "by_reason": skip_summary.by_reason,
+        }
+    except Exception:
+        # If skip service fails, calculate from summary
+        total_skipped = summary.rows_skipped_duplicates + summary.rows_skipped_duplicate_name
+        skip_counts = {
+            "total_skipped": total_skipped,
+            "by_type": {
+                "duplicate_email": summary.rows_skipped_duplicates,
+                "duplicate_name": summary.rows_skipped_duplicate_name,
+            },
+            "by_reason": {},
+        }
+    
     core_counts.update(
         {
             "rows_processed": summary.rows_processed,
@@ -753,10 +885,14 @@ def _update_core_counts(
             "rows_skipped_no_change": summary.rows_skipped_no_change,
             "rows_missing_external_id": summary.rows_missing_external_id,
             "rows_soft_deleted": summary.rows_soft_deleted,
+            "skips": skip_counts,
             "dry_run": summary.dry_run,
         }
     )
     import_run.counts_json = counts
+    # Flag the column as modified so SQLAlchemy persists it
+    from sqlalchemy.orm import attributes
+    attributes.flag_modified(import_run, "counts_json")
 
     metrics = dict(import_run.metrics_json or {})
     core_metrics = metrics.setdefault("core", {}).setdefault("volunteers", {})
@@ -778,6 +914,8 @@ def _update_core_counts(
         }
     )
     import_run.metrics_json = metrics
+    # Flag the column as modified so SQLAlchemy persists it
+    attributes.flag_modified(import_run, "metrics_json")
 
 
 def _coerce_string(value: object | None) -> str | None:
@@ -1129,8 +1267,12 @@ def _record_survivorship_metrics(import_run, survivorship: SurvivorshipResult) -
     if not stats:
         return
 
+    # Preserve existing counts_json structure - don't create a fresh dict that would lose
+    # updates from _update_core_counts. Instead, work with the existing structure.
     counts = dict(import_run.counts_json or {})
     core_counts = counts.setdefault("core", {}).setdefault("volunteers", {})
+    # Preserve existing keys in core_counts (from _update_core_counts)
+    # Only update survivorship-specific metrics - don't overwrite other keys
     survivorship_counts = core_counts.setdefault("survivorship", {"stats": {}, "groups": {}})
 
     stats_bucket = survivorship_counts.setdefault("stats", {})
@@ -1146,6 +1288,9 @@ def _record_survivorship_metrics(import_run, survivorship: SurvivorshipResult) -
 
     core_counts["survivorship"] = survivorship_counts
     import_run.counts_json = counts
+    # Flag the column as modified so SQLAlchemy persists it
+    from sqlalchemy.orm import attributes
+    attributes.flag_modified(import_run, "counts_json")
 
     metrics = dict(import_run.metrics_json or {})
     core_metrics = metrics.setdefault("core", {}).setdefault("volunteers", {})
@@ -1154,6 +1299,8 @@ def _record_survivorship_metrics(import_run, survivorship: SurvivorshipResult) -
         survivorship_metrics[key] = int(survivorship_metrics.get(key, 0) or 0) + int(value)
     core_metrics["survivorship"] = survivorship_metrics
     import_run.metrics_json = metrics
+    # Flag the column as modified so SQLAlchemy persists it
+    attributes.flag_modified(import_run, "metrics_json")
 
     manual_overridden = [
         decision.field_name

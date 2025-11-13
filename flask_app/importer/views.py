@@ -15,6 +15,9 @@ from sqlalchemy.exc import NoResultFound
 from config.monitoring import ImporterMonitoring
 from flask_app.importer.pipeline.dq_service import DataQualityViolationService, ViolationFilters
 from flask_app.importer.pipeline.run_service import ImportRunService, RunFilters
+from flask_app.importer.pipeline.skip_service import ImportSkipService, SkipSummary
+from flask_app.models import db
+from flask_app.models.importer.schema import ImportSkipType
 from flask_app.utils.importer import is_importer_enabled
 from flask_app.utils.permissions import has_permission
 
@@ -342,6 +345,19 @@ def importer_run_detail(run_id: int):
     field_stats = metrics_json.get("field_stats", {}).get("volunteers", {})
     if field_stats:
         payload["field_stats"] = field_stats
+    
+    # Include skip summary if available
+    try:
+        skip_service = ImportSkipService(db.session)
+        skip_summary = skip_service.get_skip_summary(run_id)
+        payload["skip_summary"] = {
+            "total_skips": skip_summary.total_skips,
+            "by_type": skip_summary.by_type,
+            "by_reason": skip_summary.by_reason,
+        }
+    except Exception:
+        # If skip service fails, just omit skip summary
+        payload["skip_summary"] = None
 
     current_app.logger.info(
         "Importer run detail accessed",
@@ -742,3 +758,150 @@ def importer_violations_rule_codes():
 
     codes = _dq_service.list_rule_codes()
     return jsonify({"rule_codes": codes}), HTTPStatus.OK
+
+
+# Skip endpoints
+_skip_service = ImportSkipService(None)
+
+
+def _serialize_skip_detail(skip) -> dict:
+    """Serialize an ImportSkip record for API response."""
+    return {
+        "id": skip.id,
+        "run_id": skip.run_id,
+        "staging_volunteer_id": skip.staging_volunteer_id,
+        "clean_volunteer_id": skip.clean_volunteer_id,
+        "entity_type": skip.entity_type,
+        "skip_type": skip.skip_type.value,
+        "skip_reason": skip.skip_reason,
+        "record_key": skip.record_key,
+        "details_json": skip.details_json or {},
+        "created_at": skip.created_at.isoformat() if skip.created_at else None,
+    }
+
+
+@importer_blueprint.get("/skips")
+def importer_skips_list():
+    """List skip records with filtering and pagination."""
+    enabled_response = _ensure_importer_enabled_api()
+    if enabled_response:
+        return enabled_response
+
+    auth_response = _ensure_authenticated_api()
+    if auth_response:
+        return auth_response
+
+    permission_response = _ensure_imports_view_permission()
+    if permission_response:
+        return permission_response
+
+    try:
+        run_id = request.args.get("run_id", type=int)
+        skip_type_str = request.args.get("skip_type")
+        entity_type = request.args.get("entity_type")
+        record_key = request.args.get("record_key")
+        limit = request.args.get("limit", default=100, type=int)
+        offset = request.args.get("offset", default=0, type=int)
+
+        skip_type = None
+        if skip_type_str:
+            try:
+                skip_type = ImportSkipType(skip_type_str)
+            except ValueError:
+                return _json_error(f"Invalid skip_type: {skip_type_str}", HTTPStatus.BAD_REQUEST)
+
+        service = ImportSkipService(db.session)
+        skips, total = service.search_skips(
+            run_id=run_id,
+            skip_type=skip_type,
+            entity_type=entity_type,
+            record_key=record_key,
+            limit=limit,
+            offset=offset,
+        )
+
+        return jsonify(
+            {
+                "items": [_serialize_skip_detail(skip) for skip in skips],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            }
+        ), HTTPStatus.OK
+
+    except Exception as exc:  # pragma: no cover
+        current_app.logger.exception("Failed to list skips", exc_info=exc)
+        return _json_error("Failed to list skips.", HTTPStatus.INTERNAL_SERVER_ERROR)
+
+
+@importer_blueprint.get("/skips/<int:skip_id>")
+def importer_skip_detail(skip_id: int):
+    """Get a single skip record by ID."""
+    enabled_response = _ensure_importer_enabled_api()
+    if enabled_response:
+        return enabled_response
+
+    auth_response = _ensure_authenticated_api()
+    if auth_response:
+        return auth_response
+
+    permission_response = _ensure_imports_view_permission()
+    if permission_response:
+        return permission_response
+
+    try:
+        service = ImportSkipService(db.session)
+        skip = service.get_skip(skip_id)
+
+        if skip is None:
+            return _json_error(f"Skip {skip_id} not found.", HTTPStatus.NOT_FOUND)
+
+        return jsonify(_serialize_skip_detail(skip)), HTTPStatus.OK
+
+    except Exception as exc:  # pragma: no cover
+        current_app.logger.exception("Failed to get skip detail", exc_info=exc)
+        return _json_error("Failed to get skip detail.", HTTPStatus.INTERNAL_SERVER_ERROR)
+
+
+@importer_blueprint.get("/runs/<int:run_id>/skips")
+def importer_run_skips(run_id: int):
+    """Get all skip records for a specific import run."""
+    enabled_response = _ensure_importer_enabled_api()
+    if enabled_response:
+        return enabled_response
+
+    auth_response = _ensure_authenticated_api()
+    if auth_response:
+        return auth_response
+
+    permission_response = _ensure_imports_view_permission()
+    if permission_response:
+        return permission_response
+
+    try:
+        skip_type_str = request.args.get("skip_type")
+        entity_type = request.args.get("entity_type")
+        limit = request.args.get("limit", type=int)
+        offset = request.args.get("offset", default=0, type=int)
+
+        skip_type = None
+        if skip_type_str:
+            try:
+                skip_type = ImportSkipType(skip_type_str)
+            except ValueError:
+                return _json_error(f"Invalid skip_type: {skip_type_str}", HTTPStatus.BAD_REQUEST)
+
+        service = ImportSkipService(db.session)
+        skips = service.get_skips_for_run(
+            run_id,
+            skip_type=skip_type,
+            entity_type=entity_type,
+            limit=limit,
+            offset=offset,
+        )
+
+        return jsonify({"items": [_serialize_skip_detail(skip) for skip in skips]}), HTTPStatus.OK
+
+    except Exception as exc:  # pragma: no cover
+        current_app.logger.exception("Failed to get run skips", exc_info=exc)
+        return _json_error("Failed to get run skips.", HTTPStatus.INTERNAL_SERVER_ERROR)

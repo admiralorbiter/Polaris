@@ -110,6 +110,12 @@ class ImportRun(BaseModel):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+    import_skips = relationship(
+        "ImportSkip",
+        back_populates="import_run",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     __table_args__ = (Index("idx_import_runs_source_status", "source", "status"),)
 
@@ -176,6 +182,12 @@ class StagingVolunteer(BaseModel):
     )
     dedupe_suggestions = relationship(
         "DedupeSuggestion",
+        back_populates="staging_row",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    import_skips = relationship(
+        "ImportSkip",
         back_populates="staging_row",
         cascade="all, delete-orphan",
         passive_deletes=True,
@@ -259,6 +271,64 @@ class DataQualityViolation(BaseModel):
     __table_args__ = (Index("idx_dq_violations_run_rule", "run_id", "rule_code"),)
 
 
+class ImportSkipType(str, enum.Enum):
+    """Types of reasons why a record was skipped during core load."""
+
+    DUPLICATE_EMAIL = "duplicate_email"
+    DUPLICATE_NAME = "duplicate_name"
+    DUPLICATE_FUZZY = "duplicate_fuzzy"
+    MISSING_REQUIRED_FIELD = "missing_required_field"
+    VALIDATION_ERROR = "validation_error"
+    OTHER = "other"
+
+
+class ImportSkip(BaseModel):
+    """Records that passed DQ validation but were skipped during core load."""
+
+    __tablename__ = "import_skips"
+
+    id: Mapped[int] = mapped_column(db.Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("import_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    staging_volunteer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("staging_volunteers.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    clean_volunteer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("clean_volunteers.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    entity_type: Mapped[str] = mapped_column(db.String(50), nullable=False, default="volunteer")
+    skip_type: Mapped[ImportSkipType] = mapped_column(
+        Enum(ImportSkipType, name="import_skip_type_enum"),
+        nullable=False,
+        index=True,
+    )
+    skip_reason: Mapped[str | None] = mapped_column(db.Text, nullable=True)
+    record_key: Mapped[str | None] = mapped_column(db.String(255), nullable=True)
+    details_json: Mapped[dict | None] = mapped_column(db.JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        index=True,
+    )
+
+    import_run = relationship("ImportRun", back_populates="import_skips")
+    staging_row = relationship("StagingVolunteer", back_populates="import_skips")
+    clean_row = relationship("CleanVolunteer", back_populates="import_skips")
+
+    __table_args__ = (
+        Index("idx_import_skips_run_type", "run_id", "skip_type"),
+        Index("idx_import_skips_entity_type", "entity_type"),
+    )
+
+
 class CleanVolunteer(BaseModel):
     """Normalized volunteer rows promoted from staging prior to core load."""
 
@@ -294,6 +364,12 @@ class CleanVolunteer(BaseModel):
 
     import_run = relationship("ImportRun", back_populates="clean_volunteers")
     staging_row = relationship("StagingVolunteer", back_populates="clean_record")
+    import_skips = relationship(
+        "ImportSkip",
+        back_populates="clean_row",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     __table_args__ = (
         UniqueConstraint(

@@ -87,6 +87,11 @@
         <i class="fas fa-database"></i> Data Samples
       </button>
     </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="skipped-records-tab" data-bs-toggle="tab" data-bs-target="#skipped-records-pane" type="button" role="tab">
+        <i class="fas fa-exclamation-triangle"></i> Skipped Records
+      </button>
+    </li>
   </ul>
 
   <!-- Tab Content -->
@@ -250,6 +255,74 @@
         </div>
       </div>
     </div>
+
+    <!-- Skipped Records Tab -->
+    <div class="tab-pane fade" id="skipped-records-pane" role="tabpanel">
+      <div class="card shadow-sm mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h2 class="h5 mb-0">Import Skipped Records</h2>
+          <div class="d-flex gap-2">
+            <button type="button" class="btn btn-sm btn-outline-success" id="dq-export-skips-btn">
+              <i class="fas fa-download"></i> Export CSV
+            </button>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="row g-3 mb-3">
+            <div class="col-md-3">
+              <label for="dq-skips-run-filter" class="form-label">Import Run</label>
+              <select id="dq-skips-run-filter" class="form-select">
+                <option value="">All Runs</option>
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label for="dq-skips-type-filter" class="form-label">Skip Type</label>
+              <select id="dq-skips-type-filter" class="form-select">
+                <option value="">All Types</option>
+                <option value="duplicate_email">Duplicate Email</option>
+                <option value="duplicate_name">Duplicate Name</option>
+                <option value="duplicate_fuzzy">Fuzzy Match</option>
+                <option value="missing_required_field">Missing Required Field</option>
+                <option value="validation_error">Validation Error</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label for="dq-skips-date-from" class="form-label">Date From</label>
+              <input type="date" id="dq-skips-date-from" class="form-control">
+            </div>
+            <div class="col-md-3">
+              <label for="dq-skips-date-to" class="form-label">Date To</label>
+              <input type="date" id="dq-skips-date-to" class="form-control">
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-sm table-hover">
+              <thead class="table-light">
+                <tr>
+                  <th scope="col">ID</th>
+                  <th scope="col">Run ID</th>
+                  <th scope="col">Skip Type</th>
+                  <th scope="col">Reason</th>
+                  <th scope="col">Record Key</th>
+                  <th scope="col">Created</th>
+                  <th scope="col">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="dq-skips-table-body">
+                <tr>
+                  <td colspan="7" class="text-center text-muted py-3">Loading skipped records...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="d-flex justify-content-between align-items-center mt-3">
+            <div id="dq-skips-pagination-info" class="text-muted small"></div>
+            <nav id="dq-skips-pagination"></nav>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Loading Overlay -->
@@ -275,6 +348,10 @@
     fieldSamplesUrl: "{{ url_for('data_quality_field_samples', entity_type='__ENTITY_TYPE__', field_name='__FIELD_NAME__') }}",
     fieldStatisticsUrl: "{{ url_for('data_quality_field_statistics', entity_type='__ENTITY_TYPE__', field_name='__FIELD_NAME__') }}",
     fieldEdgeCasesUrl: "{{ url_for('data_quality_field_edge_cases', entity_type='__ENTITY_TYPE__', field_name='__FIELD_NAME__') }}",
+    skipsUrl: "{{ url_for('importer.importer_skips_list') }}",
+    skipDetailUrl: "{{ url_for('importer.importer_skip_detail', skip_id=0) }}",
+    runsUrl: "{{ url_for('importer.importer_runs_list') }}",
+    adminBase: "{{ url_for('admin_importer.importer_dashboard').rstrip('/') }}",
     organizationId: {% if organization %}{{ organization.id }}{% else %}null{% endif %},
     isSuperAdmin: {{ 'true' if is_super_admin else 'false' }},
   };

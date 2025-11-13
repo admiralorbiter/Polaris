@@ -578,6 +578,210 @@
       }
     }
 
+    function renderSkipSummary(skipSummary, runId) {
+      const summaryEl = document.getElementById("run-detail-skips-summary");
+      const tableWrapper = document.getElementById("run-detail-skips-table-wrapper");
+      const tableBody = document.getElementById("run-detail-skips-table-body");
+      const paginationInfo = document.getElementById("run-detail-skips-pagination-info");
+      const pagination = document.getElementById("run-detail-skips-pagination");
+      const filterSelect = document.getElementById("skip-type-filter");
+
+      if (!summaryEl || !tableWrapper || !tableBody) return;
+
+      const total = skipSummary.total_skips || 0;
+      const byType = skipSummary.by_type || {};
+      const byReason = skipSummary.by_reason || {};
+
+      if (total === 0) {
+        summaryEl.innerHTML = '<span class="text-muted">No skipped records</span>';
+        tableWrapper.classList.add("d-none");
+        return;
+      }
+
+      // Render summary badges
+      let summaryHtml = `<div class="mb-2"><strong>Total skipped: ${total}</strong></div>`;
+      if (Object.keys(byType).length > 0) {
+        summaryHtml += '<div class="mb-2">';
+        Object.entries(byType).forEach(([type, count]) => {
+          const badgeClass = type.includes("duplicate") ? "warning" : type.includes("missing") ? "danger" : "secondary";
+          summaryHtml += `<span class="badge bg-${badgeClass} me-2 mb-1">${type.replace(/_/g, " ")}: ${count}</span>`;
+        });
+        summaryHtml += '</div>';
+      }
+      summaryEl.innerHTML = summaryHtml;
+      tableWrapper.classList.remove("d-none");
+
+      // Load and render skip records
+      let currentPage = 1;
+      const pageSize = 20;
+      let currentFilter = "";
+
+      function loadSkips(page = 1, skipType = "") {
+        const params = new URLSearchParams({
+          run_id: runId,
+          limit: pageSize,
+          offset: (page - 1) * pageSize,
+        });
+        if (skipType) {
+          params.append("skip_type", skipType);
+        }
+
+        const skipListUrl = config.api.detailTemplate.replace("/runs/0", `/runs/${runId}/skips`);
+        fetch(`${skipListUrl}?${params}`)
+          .then((response) => response.json())
+          .then((data) => {
+            const items = data.items || [];
+            const total = data.total || 0;
+
+            if (items.length === 0) {
+              tableBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No skipped records match the filter</td></tr>';
+              paginationInfo.textContent = "";
+              pagination.innerHTML = "";
+              return;
+            }
+
+            tableBody.innerHTML = items
+              .map((skip) => {
+                const skipTypeBadge = skip.skip_type
+                  .split("_")
+                  .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+                  .join(" ");
+                const badgeClass =
+                  skip.skip_type === "duplicate_email" || skip.skip_type === "duplicate_name"
+                    ? "warning"
+                    : skip.skip_type === "duplicate_fuzzy"
+                    ? "info"
+                    : "secondary";
+                const createdDate = skip.created_at ? new Date(skip.created_at).toLocaleString() : "—";
+                const reasonPreview = skip.skip_reason ? (skip.skip_reason.length > 60 ? skip.skip_reason.substring(0, 60) + "..." : skip.skip_reason) : "—";
+                return `
+                  <tr>
+                    <td>${skip.id}</td>
+                    <td><span class="badge bg-${badgeClass}">${skipTypeBadge}</span></td>
+                    <td title="${skip.skip_reason || ""}">${escapeHtml(reasonPreview)}</td>
+                    <td>${escapeHtml(skip.record_key || "—")}</td>
+                    <td>${createdDate}</td>
+                    <td>
+                      <button type="button" class="btn btn-sm btn-outline-primary skip-detail-btn" data-skip-id="${skip.id}">
+                        View
+                      </button>
+                    </td>
+                  </tr>
+                `;
+              })
+              .join("");
+
+            // Pagination
+            const totalPages = Math.ceil(total / pageSize);
+            paginationInfo.textContent = `Showing ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)} of ${total}`;
+
+            if (totalPages > 1) {
+              let paginationHtml = '<ul class="pagination pagination-sm mb-0">';
+              if (page > 1) {
+                paginationHtml += `<li class="page-item"><a class="page-link" href="#" data-page="${page - 1}">Previous</a></li>`;
+              }
+              for (let i = Math.max(1, page - 2); i <= Math.min(totalPages, page + 2); i++) {
+                paginationHtml += `<li class="page-item ${i === page ? "active" : ""}"><a class="page-link" href="#" data-page="${i}">${i}</a></li>`;
+              }
+              if (page < totalPages) {
+                paginationHtml += `<li class="page-item"><a class="page-link" href="#" data-page="${page + 1}">Next</a></li>`;
+              }
+              paginationHtml += "</ul>";
+              pagination.innerHTML = paginationHtml;
+
+              pagination.querySelectorAll("a").forEach((link) => {
+                link.addEventListener("click", (e) => {
+                  e.preventDefault();
+                  loadSkips(parseInt(link.dataset.page), currentFilter);
+                });
+              });
+            } else {
+              pagination.innerHTML = "";
+            }
+
+            // Add detail button handlers
+            tableBody.querySelectorAll(".skip-detail-btn").forEach((btn) => {
+              btn.addEventListener("click", () => {
+                const skipId = btn.dataset.skipId;
+                const skipDetailUrl = (config.api.base || "/api/importer") + `/skips/${skipId}`;
+                fetch(skipDetailUrl)
+                  .then((response) => response.json())
+                  .then((skip) => {
+                    showSkipDetailModal(skip);
+                  })
+                  .catch((error) => {
+                    console.error("Failed to load skip detail:", error);
+                    alert("Failed to load skip details");
+                  });
+              });
+            });
+          })
+          .catch((error) => {
+            console.error("Failed to load skips:", error);
+            tableBody.innerHTML = '<tr><td colspan="6" class="text-center text-danger py-3">Failed to load skipped records</td></tr>';
+          });
+      }
+
+      // Filter change handler
+      if (filterSelect) {
+        filterSelect.addEventListener("change", (e) => {
+          currentFilter = e.target.value;
+          currentPage = 1;
+          loadSkips(1, currentFilter);
+        });
+      }
+
+      // Initial load
+      loadSkips(1, currentFilter);
+    }
+
+    function showSkipDetailModal(skip) {
+      const modal = document.createElement("div");
+      modal.className = "modal fade";
+      modal.innerHTML = `
+        <div class="modal-dialog modal-lg">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title">Skip Record #${skip.id}</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+              <dl class="row">
+                <dt class="col-sm-3">Skip Type</dt>
+                <dd class="col-sm-9"><span class="badge bg-secondary">${skip.skip_type}</span></dd>
+                <dt class="col-sm-3">Reason</dt>
+                <dd class="col-sm-9">${escapeHtml(skip.skip_reason || "—")}</dd>
+                <dt class="col-sm-3">Record Key</dt>
+                <dd class="col-sm-9">${escapeHtml(skip.record_key || "—")}</dd>
+                <dt class="col-sm-3">Created</dt>
+                <dd class="col-sm-9">${skip.created_at ? new Date(skip.created_at).toLocaleString() : "—"}</dd>
+                <dt class="col-sm-3">Details</dt>
+                <dd class="col-sm-9">
+                  <pre class="bg-light border rounded p-3 small mb-0">${JSON.stringify(skip.details_json || {}, null, 2)}</pre>
+                </dd>
+              </dl>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+      const bsModal = new bootstrap.Modal(modal);
+      bsModal.show();
+      modal.addEventListener("hidden.bs.modal", () => {
+        document.body.removeChild(modal);
+      });
+    }
+
+    function escapeHtml(text) {
+      if (!text) return "";
+      const div = document.createElement("div");
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
     function updateModalFields(detail) {
       if (!elements.modalContent) return;
       elements.modalTitle.textContent = `Run ${detail.run_id}`;
@@ -620,6 +824,16 @@
       }
 
       renderSurvivorshipSummary(detail.survivorship);
+      
+      // Render skip summary and table
+      if (detail.skip_summary) {
+        renderSkipSummary(detail.skip_summary, detail.run_id);
+      } else {
+        const skipSummaryEl = document.getElementById("run-detail-skips-summary");
+        if (skipSummaryEl) {
+          skipSummaryEl.textContent = "No skipped records";
+        }
+      }
       
       // Render field statistics if available
       if (detail.field_stats) {
