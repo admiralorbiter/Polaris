@@ -45,6 +45,14 @@ fields:
   - source: Birthdate
     target: demographics.birthdate
     transform: parse_date
+  - source: Racial_Ethnic_Background__c
+    target: demographics.racial_ethnic_background
+  - source: Age_Group__c
+    target: demographics.age_group
+  - source: Highest_Level_of_Educational__c
+    target: demographics.highest_education_level
+  - source: AccountId
+    target: affiliations.account_id
   - source: npsp__Primary_Affiliation__c
     target: affiliations.primary_organization_id
   - source: Last_Mailchimp_Email_Date__c
@@ -53,6 +61,44 @@ fields:
   - source: Last_Volunteer_Date__c
     target: engagement.last_volunteer_date
     transform: parse_date
+  - source: First_Volunteer_Date__c
+    target: engagement.first_volunteer_date
+    transform: parse_date
+  - source: Number_of_Attended_Volunteer_Sessions__c
+    target: engagement.attended_sessions_count
+  - source: Last_Email_Message__c
+    target: engagement.last_email_message_at
+    transform: parse_datetime
+  - source: Last_Non_Internal_Email_Activity__c
+    target: engagement.last_external_email_activity_at
+    transform: parse_datetime
+  - source: Last_Activity_Date__c
+    target: engagement.last_activity_date
+    transform: parse_date
+  - source: Volunteer_Skills__c
+    target: skills.volunteer_skills
+    transform: split_semicolon
+  - source: Volunteer_Skills_Text__c
+    target: skills.volunteer_skills_text
+  - source: Volunteer_Interests__c
+    target: interests.volunteer_interests
+    transform: split_semicolon
+  - source: Volunteer_Recruitment_Notes__c
+    target: notes.recruitment_notes
+  - source: Description
+    target: notes.description
+  - source: MailingStreet
+    target: address.mailing.street
+  - source: MailingCity
+    target: address.mailing.city
+  - source: MailingState
+    target: address.mailing.state
+  - source: MailingPostalCode
+    target: address.mailing.postal_code
+  - source: MailingCountry
+    target: address.mailing.country
+  # Note: NPSP address component fields (npe01__Home_Street__c, npe01__Work_Street__c, etc.) 
+  # are not available in this Salesforce instance. Only standard MailingAddress components are mapped.
   - source: DoNotCall
     target: contact_preferences.do_not_call
     default: false
@@ -84,4 +130,6 @@ transforms:
     description: Parse date values (YYYY-MM-DD) into ISO-8601.
   parse_datetime:
     description: Parse Salesforce datetime strings into ISO-8601 (UTC).
+  split_semicolon:
+    description: Split semicolon-separated values (multi-select picklists) into arrays.
 

@@ -217,3 +217,237 @@ def test_loader_stores_email_bounced_date_in_metadata(app):
     assert "email_bounced_date" in metadata.get("last_payload", {}).get("metadata", {})
 
 
+def test_loader_creates_skills_and_interests(app):
+    """Test that loader creates VolunteerSkill and VolunteerInterest records."""
+    from flask_app.models import Volunteer
+    from flask_app.models.contact.volunteer import VolunteerSkill, VolunteerInterest
+    
+    _ensure_watermark()
+    run = _create_run()
+    payload = _make_payload("008")
+    payload["last_name"] = "Lovelace"
+    payload["skills"] = {
+        "volunteer_skills": ["Teaching", "Tutoring"],
+    }
+    payload["interests"] = {
+        "volunteer_interests": ["Education", "Technology"],
+    }
+    _add_staging_row(run, 1, payload)
+    
+    loader = SalesforceContactLoader(run)
+    counters = loader.execute()
+    
+    assert counters.created == 1
+    entry = ExternalIdMap.query.filter_by(external_system="salesforce", external_id="008").first()
+    assert entry is not None
+    volunteer = db.session.get(Volunteer, entry.entity_id)
+    assert volunteer is not None
+    
+    skills = VolunteerSkill.query.filter_by(volunteer_id=volunteer.id).all()
+    assert len(skills) == 2
+    skill_names = [s.skill_name for s in skills]
+    assert "Teaching" in skill_names
+    assert "Tutoring" in skill_names
+    
+    interests = VolunteerInterest.query.filter_by(volunteer_id=volunteer.id).all()
+    assert len(interests) == 2
+    interest_names = [i.interest_name for i in interests]
+    assert "Education" in interest_names
+    assert "Technology" in interest_names
+
+
+def test_loader_creates_addresses(app):
+    """Test that loader creates ContactAddress records."""
+    from flask_app.models import Volunteer
+    from flask_app.models.contact.info import ContactAddress
+    from flask_app.models.contact.enums import AddressType
+    
+    _ensure_watermark()
+    run = _create_run()
+    payload = _make_payload("009")
+    payload["last_name"] = "Lovelace"
+    payload["address"] = {
+        "mailing": {
+            "street": "123 Main St",
+            "city": "Springfield",
+            "state": "IL",
+            "postal_code": "62701",
+            "country": "US",
+        },
+    }
+    _add_staging_row(run, 1, payload)
+    
+    loader = SalesforceContactLoader(run)
+    counters = loader.execute()
+    
+    assert counters.created == 1
+    entry = ExternalIdMap.query.filter_by(external_system="salesforce", external_id="009").first()
+    assert entry is not None
+    volunteer = db.session.get(Volunteer, entry.entity_id)
+    assert volunteer is not None
+    
+    addresses = ContactAddress.query.filter_by(contact_id=volunteer.id).all()
+    assert len(addresses) == 1  # Only mailing address available
+    
+    mailing = next((a for a in addresses if a.address_type == AddressType.MAILING), None)
+    assert mailing is not None
+    assert mailing.street_address_1 == "123 Main St"
+    assert mailing.city == "Springfield"
+    assert mailing.state == "IL"
+    assert mailing.postal_code == "62701"
+    assert mailing.country == "US"
+    assert mailing.is_primary is True
+
+
+def test_loader_applies_notes(app):
+    """Test that loader applies notes fields."""
+    from flask_app.models import Volunteer
+    
+    _ensure_watermark()
+    run = _create_run()
+    payload = _make_payload("010")
+    payload["last_name"] = "Lovelace"
+    payload["notes"] = {
+        "description": "General description",
+        "recruitment_notes": "Recruited at event",
+    }
+    _add_staging_row(run, 1, payload)
+    
+    loader = SalesforceContactLoader(run)
+    counters = loader.execute()
+    
+    assert counters.created == 1
+    entry = ExternalIdMap.query.filter_by(external_system="salesforce", external_id="010").first()
+    assert entry is not None
+    volunteer = db.session.get(Volunteer, entry.entity_id)
+    assert volunteer is not None
+    assert volunteer.notes == "General description"
+    assert volunteer.internal_notes == "Recruited at event"
+
+
+def test_loader_applies_engagement_fields(app):
+    """Test that loader applies engagement fields."""
+    from datetime import date
+    from flask_app.models import Volunteer
+    
+    _ensure_watermark()
+    run = _create_run()
+    payload = _make_payload("011")
+    payload["last_name"] = "Lovelace"
+    payload["engagement"] = {
+        "first_volunteer_date": "2024-01-15",
+        "attended_sessions_count": 5,
+    }
+    _add_staging_row(run, 1, payload)
+    
+    loader = SalesforceContactLoader(run)
+    counters = loader.execute()
+    
+    assert counters.created == 1
+    entry = ExternalIdMap.query.filter_by(external_system="salesforce", external_id="011").first()
+    assert entry is not None
+    volunteer = db.session.get(Volunteer, entry.entity_id)
+    assert volunteer is not None
+    assert volunteer.first_volunteer_date == date(2024, 1, 15)
+    
+    # Check metadata
+    metadata = entry.metadata_json or {}
+    assert metadata.get("attended_sessions_count") == 5
+
+
+def test_loader_handles_duplicate_skills(app):
+    """Test that loader doesn't create duplicate skills."""
+    from flask_app.models import Volunteer
+    from flask_app.models.contact.volunteer import VolunteerSkill
+    
+    _ensure_watermark()
+    run = _create_run()
+    payload = _make_payload("012")
+    payload["last_name"] = "Lovelace"
+    payload["skills"] = {
+        "volunteer_skills": ["Teaching"],
+    }
+    _add_staging_row(run, 1, payload)
+    
+    loader = SalesforceContactLoader(run)
+    loader.execute()
+    
+    entry = ExternalIdMap.query.filter_by(external_system="salesforce", external_id="012").first()
+    volunteer = db.session.get(Volunteer, entry.entity_id)
+    
+    # Verify skill was created
+    skills_before = VolunteerSkill.query.filter_by(volunteer_id=volunteer.id).all()
+    assert len(skills_before) == 1
+    assert skills_before[0].skill_name == "Teaching"
+    
+    # Run loader again with same skill plus a new one
+    run2 = _create_run()
+    payload2 = _make_payload("012")
+    payload2["last_name"] = "Lovelace"
+    payload2["skills"] = {
+        "volunteer_skills": ["Teaching", "Tutoring"],  # Teaching already exists, Tutoring is new
+    }
+    _add_staging_row(run2, 1, payload2)
+    
+    loader2 = SalesforceContactLoader(run2)
+    loader2.execute()
+    
+    # Should only have 2 skills (Teaching already existed, Tutoring added)
+    skills = VolunteerSkill.query.filter_by(volunteer_id=volunteer.id).all()
+    assert len(skills) == 2
+    skill_names = [s.skill_name for s in skills]
+    assert "Teaching" in skill_names
+    assert "Tutoring" in skill_names
+
+
+def test_loader_updates_addresses(app):
+    """Test that loader updates existing addresses instead of creating duplicates."""
+    from flask_app.models import Volunteer
+    from flask_app.models.contact.info import ContactAddress
+    from flask_app.models.contact.enums import AddressType
+    
+    _ensure_watermark()
+    run = _create_run()
+    payload = _make_payload("013")
+    payload["last_name"] = "Lovelace"
+    payload["address"] = {
+        "mailing": {
+            "street": "123 Main St",
+            "city": "Springfield",
+            "state": "IL",
+            "postal_code": "62701",
+            "country": "US",
+        },
+    }
+    _add_staging_row(run, 1, payload)
+    
+    loader = SalesforceContactLoader(run)
+    loader.execute()
+    
+    entry = ExternalIdMap.query.filter_by(external_system="salesforce", external_id="013").first()
+    volunteer = db.session.get(Volunteer, entry.entity_id)
+    
+    # Update address
+    run2 = _create_run()
+    payload2 = _make_payload("013")
+    payload2["last_name"] = "Lovelace"
+    payload2["address"] = {
+        "mailing": {
+            "street": "789 New St",  # Updated street
+            "city": "Springfield",
+            "state": "IL",
+            "postal_code": "62701",
+            "country": "US",
+        },
+    }
+    _add_staging_row(run2, 1, payload2)
+    
+    loader2 = SalesforceContactLoader(run2)
+    loader2.execute()
+    
+    # Should still have only one mailing address, but updated
+    addresses = ContactAddress.query.filter_by(contact_id=volunteer.id, address_type=AddressType.MAILING).all()
+    assert len(addresses) == 1
+    assert addresses[0].street_address_1 == "789 New St"
+
+

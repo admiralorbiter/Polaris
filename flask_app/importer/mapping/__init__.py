@@ -253,10 +253,20 @@ def _build_transform_registry() -> Dict[str, Any]:
             return text
         return f"{text}Z"
 
+    def split_semicolon(value: Any) -> list[str] | None:
+        """Split semicolon-separated values into list."""
+        if not value:
+            return []
+        text = str(value).strip()
+        if not text:
+            return []
+        return [v.strip() for v in text.split(";") if v.strip()]
+
     return {
         "normalize_phone": normalize_phone,
         "parse_date": parse_date,
         "parse_datetime": parse_datetime,
+        "split_semicolon": split_semicolon,
     }
 
 

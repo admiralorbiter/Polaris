@@ -198,6 +198,15 @@
                                 <label>Total Volunteer Hours:</label>
                                 <span>{{ "%.2f"|format(volunteer.total_volunteer_hours) }}</span>
                             </div>
+                            {% if external_id_map and external_id_map.metadata_json %}
+                                {% set metadata = external_id_map.metadata_json %}
+                                {% if metadata.get("attended_sessions_count") %}
+                                <div class="info-item">
+                                    <label>Attended Sessions:</label>
+                                    <span>{{ metadata.attended_sessions_count }}</span>
+                                </div>
+                                {% endif %}
+                            {% endif %}
                         </div>
                         <div class="col-md-6">
                             <div class="info-item">
@@ -217,6 +226,27 @@
                                     {% endif %}
                                 </div>
                             </div>
+                            {% if external_id_map and external_id_map.metadata_json %}
+                                {% set metadata = external_id_map.metadata_json %}
+                                {% if metadata.get("last_payload") %}
+                                    {% set payload = metadata.last_payload %}
+                                    {% if payload.get("engagement") %}
+                                        {% set engagement = payload.engagement %}
+                                        {% if engagement.get("last_email_message_at") %}
+                                        <div class="info-item mt-2">
+                                            <label>Last Email Message:</label>
+                                            <span class="text-muted small">{{ engagement.last_email_message_at }}</span>
+                                        </div>
+                                        {% endif %}
+                                        {% if engagement.get("last_activity_date") %}
+                                        <div class="info-item">
+                                            <label>Last Activity Date:</label>
+                                            <span class="text-muted small">{{ engagement.last_activity_date }}</span>
+                                        </div>
+                                        {% endif %}
+                                    {% endif %}
+                                {% endif %}
+                            {% endif %}
                         </div>
                     </div>
                 </div>
@@ -369,28 +399,34 @@
                     {% if volunteer.gender %}
                     <div class="info-item">
                         <label>Gender:</label>
-                        <span>{{ volunteer.gender }}</span>
+                        <span>{{ volunteer.gender.value if volunteer.gender.value else volunteer.gender }}</span>
                     </div>
                     {% endif %}
                     {% if volunteer.race %}
                     <div class="info-item">
-                        <label>Race:</label>
-                        <span>{{ volunteer.race }}</span>
+                        <label>Race/Ethnicity:</label>
+                        <span>{{ volunteer.race.value if volunteer.race.value else volunteer.race }}</span>
+                    </div>
+                    {% endif %}
+                    {% if volunteer.age_group %}
+                    <div class="info-item">
+                        <label>Age Group:</label>
+                        <span>{{ volunteer.age_group.value if volunteer.age_group.value else volunteer.age_group }}</span>
                     </div>
                     {% endif %}
                     {% if volunteer.education_level %}
                     <div class="info-item">
                         <label>Education Level:</label>
-                        <span>{{ volunteer.education_level }}</span>
+                        <span>{{ volunteer.education_level.value if volunteer.education_level.value else volunteer.education_level }}</span>
                     </div>
                     {% endif %}
                     {% if volunteer.preferred_language %}
                     <div class="info-item">
                         <label>Preferred Language:</label>
-                        <span>{{ volunteer.preferred_language }}</span>
+                        <span>{{ volunteer.preferred_language.value if volunteer.preferred_language.value else volunteer.preferred_language }}</span>
                     </div>
                     {% endif %}
-                    {% if not volunteer.birthdate and not volunteer.gender and not volunteer.race and not volunteer.education_level and not volunteer.preferred_language %}
+                    {% if not volunteer.birthdate and not volunteer.gender and not volunteer.race and not volunteer.age_group and not volunteer.education_level and not volunteer.preferred_language %}
                         <p class="text-muted">No demographic information on file.</p>
                     {% endif %}
                 </div>

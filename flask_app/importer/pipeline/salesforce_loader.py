@@ -27,6 +27,8 @@ from flask_app.importer.pipeline.load_core import (
 from flask_app.models import ExternalIdMap, db
 from flask_app.models.importer.schema import CleanVolunteer, ImportRun, ImportRunStatus, ImporterWatermark, StagingVolunteer
 from flask_app.models import Volunteer, ContactEmail, ContactPhone, EmailType, PhoneType
+from flask_app.models.contact.info import ContactAddress
+from flask_app.models.contact.enums import AddressType
 
 ENTITY_TYPE = "salesforce_contact"
 DELETE_REASON = "salesforce_is_deleted"
@@ -324,6 +326,114 @@ class SalesforceContactLoader:
         volunteer.do_not_email = do_not_email_val
         volunteer.do_not_contact = do_not_contact_val
         
+        # Apply demographics fields
+        demographics = payload.get("demographics", {})
+        if demographics.get("racial_ethnic_background"):
+            from flask_app.models.contact.enums import RaceEthnicity
+            race_value = _coerce_string(demographics.get("racial_ethnic_background"))
+            try:
+                race_enum = None
+                for race in RaceEthnicity:
+                    if race.value.lower() == race_value.lower():
+                        race_enum = race
+                        break
+                if race_enum:
+                    volunteer.race = race_enum
+            except Exception as e:
+                current_app.logger.warning(f"Failed to set race for volunteer: {e}")
+        if demographics.get("age_group"):
+            from flask_app.models.contact.enums import AgeGroup
+            age_group_value = _coerce_string(demographics.get("age_group"))
+            try:
+                age_group_enum = None
+                for age_group in AgeGroup:
+                    if age_group.value.lower() == age_group_value.lower():
+                        age_group_enum = age_group
+                        break
+                if age_group_enum:
+                    volunteer.age_group = age_group_enum
+            except Exception as e:
+                current_app.logger.warning(f"Failed to set age_group for volunteer: {e}")
+        if demographics.get("highest_education_level"):
+            from flask_app.models.contact.enums import EducationLevel
+            education_value = _coerce_string(demographics.get("highest_education_level"))
+            try:
+                education_enum = None
+                for edu in EducationLevel:
+                    if edu.value.lower() == education_value.lower():
+                        education_enum = edu
+                        break
+                if education_enum:
+                    volunteer.education_level = education_enum
+            except Exception as e:
+                current_app.logger.warning(f"Failed to set education_level for volunteer: {e}")
+        
+        # Apply engagement fields
+        engagement = payload.get("engagement", {})
+        if engagement.get("first_volunteer_date"):
+            from datetime import datetime as dt
+            try:
+                date_str = engagement.get("first_volunteer_date")
+                if isinstance(date_str, str):
+                    volunteer.first_volunteer_date = dt.fromisoformat(date_str[:10]).date()
+                elif hasattr(date_str, 'date'):
+                    volunteer.first_volunteer_date = date_str.date()
+            except Exception as e:
+                current_app.logger.warning(f"Failed to parse first_volunteer_date: {e}")
+        
+        # Apply notes
+        notes_data = payload.get("notes", {})
+        if notes_data.get("description"):
+            volunteer.notes = _coerce_string(notes_data.get("description"))
+        if notes_data.get("recruitment_notes"):
+            volunteer.internal_notes = _coerce_string(notes_data.get("recruitment_notes"))
+        
+        # Apply skills
+        skills_data = payload.get("skills", {})
+        if skills_data.get("volunteer_skills"):
+            from flask_app.models.contact.volunteer import VolunteerSkill
+            skills_list = skills_data.get("volunteer_skills")
+            if isinstance(skills_list, list):
+                for skill_name in skills_list:
+                    if skill_name and isinstance(skill_name, str):
+                        # Check if skill already exists
+                        existing_skill = VolunteerSkill.query.filter_by(
+                            volunteer_id=volunteer.id, skill_name=skill_name
+                        ).first()
+                        if not existing_skill:
+                            skill = VolunteerSkill(
+                                volunteer_id=volunteer.id,
+                                skill_name=skill_name.strip(),
+                                verified=False,
+                            )
+                            self.session.add(skill)
+        if skills_data.get("volunteer_skills_text"):
+            # Store skills text in metadata or notes
+            skills_text = _coerce_string(skills_data.get("volunteer_skills_text"))
+            if skills_text and not volunteer.notes:
+                volunteer.notes = f"Skills: {skills_text}"
+            elif skills_text:
+                volunteer.notes = f"{volunteer.notes}\nSkills: {skills_text}"
+        
+        # Apply interests
+        interests_data = payload.get("interests", {})
+        if interests_data.get("volunteer_interests"):
+            from flask_app.models.contact.volunteer import VolunteerInterest
+            interests_list = interests_data.get("volunteer_interests")
+            if isinstance(interests_list, list):
+                for interest_name in interests_list:
+                    if interest_name and isinstance(interest_name, str):
+                        # Check if interest already exists
+                        existing_interest = VolunteerInterest.query.filter_by(
+                            volunteer_id=volunteer.id, interest_name=interest_name
+                        ).first()
+                        if not existing_interest:
+                            interest = VolunteerInterest(
+                                volunteer_id=volunteer.id,
+                                interest_name=interest_name.strip(),
+                            )
+                            self.session.add(interest)
+        
         # Create ExternalIdMap entry
         metadata = {
             "payload_hash": payload_hash,
@@ -333,6 +443,79 @@ class SalesforceContactLoader:
         payload_metadata = payload.get("metadata", {})
         if payload_metadata.get("email_bounced_date"):
             metadata["email_bounced_date"] = payload_metadata.get("email_bounced_date")
+        # Store attended sessions count in metadata
+        if engagement.get("attended_sessions_count") is not None:
+            metadata["attended_sessions_count"] = engagement.get("attended_sessions_count")
+        # Store account ID in metadata
+        affiliations = payload.get("affiliations", {})
+        if affiliations.get("account_id"):
+            metadata["account_id"] = affiliations.get("account_id")
+        
+        # Apply addresses
+        address_data = payload.get("address", {})
+        primary_type = address_data.get("primary_type", "").lower() if address_data.get("primary_type") else None
+        
+        # Helper function to create address
+        def _create_address(addr_type_str, addr_data, is_primary=False):
+            if not addr_data or not addr_data.get("street") or not addr_data.get("city"):
+                return None
+            try:
+                # Map address type string to enum
+                addr_type_map = {
+                    "mailing": AddressType.MAILING,
+                    "home": AddressType.HOME,
+                    "work": AddressType.WORK,
+                    "other": AddressType.OTHER,
+                }
+                addr_type = addr_type_map.get(addr_type_str.lower(), AddressType.OTHER)
+                
+                address = ContactAddress(
+                    contact_id=volunteer.id,
+                    address_type=addr_type,
+                    street_address_1=_coerce_string(addr_data.get("street")) or "",
+                    street_address_2=_coerce_string(addr_data.get("street2")),
+                    city=_coerce_string(addr_data.get("city")) or "",
+                    state=_coerce_string(addr_data.get("state")) or "",
+                    postal_code=_coerce_string(addr_data.get("postal_code")) or "",
+                    country=_coerce_string(addr_data.get("country")) or "US",
+                    is_primary=is_primary,
+                )
+                self.session.add(address)
+                return address
+            except Exception as e:
+                current_app.logger.warning(f"Failed to create {addr_type_str} address: {e}")
+                return None
+        
+        # Determine primary address based on primary_type preference
+        addresses_created = []
+        if address_data.get("mailing"):
+            is_primary = primary_type in ("mailing", None) and not any(addresses_created)
+            addr = _create_address("mailing", address_data.get("mailing"), is_primary)
+            if addr:
+                addresses_created.append(addr)
+        if address_data.get("home"):
+            is_primary = primary_type == "home" and not any(a.is_primary for a in addresses_created)
+            addr = _create_address("home", address_data.get("home"), is_primary)
+            if addr:
+                addresses_created.append(addr)
+        if address_data.get("work"):
+            is_primary = primary_type == "work" and not any(a.is_primary for a in addresses_created)
+            addr = _create_address("work", address_data.get("work"), is_primary)
+            if addr:
+                addresses_created.append(addr)
+        if address_data.get("other"):
+            is_primary = primary_type == "other" and not any(a.is_primary for a in addresses_created)
+            addr = _create_address("other", address_data.get("other"), is_primary)
+            if addr:
+                addresses_created.append(addr)
+        
+        # Ensure only one primary address
+        if addresses_created:
+            ContactAddress.ensure_single_primary(volunteer.id)
+            # If no primary was set, set the first one as primary
+            if not any(a.is_primary for a in addresses_created):
+                addresses_created[0].is_primary = True
+        
         entry = ExternalIdMap(
             entity_type=ENTITY_TYPE,
             entity_id=volunteer.id,
@@ -443,6 +626,114 @@ class SalesforceContactLoader:
         volunteer.do_not_email = do_not_email_val
         volunteer.do_not_contact = do_not_contact_val
         
+        # Apply demographics fields
+        demographics = payload.get("demographics", {})
+        if demographics.get("racial_ethnic_background"):
+            from flask_app.models.contact.enums import RaceEthnicity
+            race_value = _coerce_string(demographics.get("racial_ethnic_background"))
+            try:
+                race_enum = None
+                for race in RaceEthnicity:
+                    if race.value.lower() == race_value.lower():
+                        race_enum = race
+                        break
+                if race_enum:
+                    volunteer.race = race_enum
+            except Exception as e:
+                current_app.logger.warning(f"Failed to set race for volunteer: {e}")
+        if demographics.get("age_group"):
+            from flask_app.models.contact.enums import AgeGroup
+            age_group_value = _coerce_string(demographics.get("age_group"))
+            try:
+                age_group_enum = None
+                for age_group in AgeGroup:
+                    if age_group.value.lower() == age_group_value.lower():
+                        age_group_enum = age_group
+                        break
+                if age_group_enum:
+                    volunteer.age_group = age_group_enum
+            except Exception as e:
+                current_app.logger.warning(f"Failed to set age_group for volunteer: {e}")
+        if demographics.get("highest_education_level"):
+            from flask_app.models.contact.enums import EducationLevel
+            education_value = _coerce_string(demographics.get("highest_education_level"))
+            try:
+                education_enum = None
+                for edu in EducationLevel:
+                    if edu.value.lower() == education_value.lower():
+                        education_enum = edu
+                        break
+                if education_enum:
+                    volunteer.education_level = education_enum
+            except Exception as e:
+                current_app.logger.warning(f"Failed to set education_level for volunteer: {e}")
+        
+        # Apply engagement fields
+        engagement = payload.get("engagement", {})
+        if engagement.get("first_volunteer_date"):
+            from datetime import datetime as dt
+            try:
+                date_str = engagement.get("first_volunteer_date")
+                if isinstance(date_str, str):
+                    volunteer.first_volunteer_date = dt.fromisoformat(date_str[:10]).date()
+                elif hasattr(date_str, 'date'):
+                    volunteer.first_volunteer_date = date_str.date()
+            except Exception as e:
+                current_app.logger.warning(f"Failed to parse first_volunteer_date: {e}")
+        
+        # Apply notes (update if provided)
+        notes_data = payload.get("notes", {})
+        if notes_data.get("description"):
+            volunteer.notes = _coerce_string(notes_data.get("description"))
+        if notes_data.get("recruitment_notes"):
+            volunteer.internal_notes = _coerce_string(notes_data.get("recruitment_notes"))
+        
+        # Apply skills (add new ones, don't remove existing)
+        skills_data = payload.get("skills", {})
+        if skills_data.get("volunteer_skills"):
+            from flask_app.models.contact.volunteer import VolunteerSkill
+            skills_list = skills_data.get("volunteer_skills")
+            if isinstance(skills_list, list):
+                for skill_name in skills_list:
+                    if skill_name and isinstance(skill_name, str):
+                        # Check if skill already exists
+                        existing_skill = VolunteerSkill.query.filter_by(
+                            volunteer_id=volunteer.id, skill_name=skill_name
+                        ).first()
+                        if not existing_skill:
+                            skill = VolunteerSkill(
+                                volunteer_id=volunteer.id,
+                                skill_name=skill_name.strip(),
+                                verified=False,
+                            )
+                            self.session.add(skill)
+        if skills_data.get("volunteer_skills_text"):
+            # Update skills text in notes if not already present
+            skills_text = _coerce_string(skills_data.get("volunteer_skills_text"))
+            if skills_text:
+                current_notes = volunteer.notes or ""
+                if "Skills:" not in current_notes:
+                    volunteer.notes = f"{current_notes}\nSkills: {skills_text}".strip() if current_notes else f"Skills: {skills_text}"
+        
+        # Apply interests (add new ones, don't remove existing)
+        interests_data = payload.get("interests", {})
+        if interests_data.get("volunteer_interests"):
+            from flask_app.models.contact.volunteer import VolunteerInterest
+            interests_list = interests_data.get("volunteer_interests")
+            if isinstance(interests_list, list):
+                for interest_name in interests_list:
+                    if interest_name and isinstance(interest_name, str):
+                        # Check if interest already exists
+                        existing_interest = VolunteerInterest.query.filter_by(
+                            volunteer_id=volunteer.id, interest_name=interest_name
+                        ).first()
+                        if not existing_interest:
+                            interest = VolunteerInterest(
+                                volunteer_id=volunteer.id,
+                                interest_name=interest_name.strip(),
+                            )
+                            self.session.add(interest)
+        
         # Update ExternalIdMap
         entry.is_active = True
         entry.deactivated_at = None
@@ -452,6 +743,93 @@ class SalesforceContactLoader:
         payload_metadata = payload.get("metadata", {})
         if payload_metadata.get("email_bounced_date"):
             metadata["email_bounced_date"] = payload_metadata.get("email_bounced_date")
+        # Store attended sessions count in metadata
+        if engagement.get("attended_sessions_count") is not None:
+            metadata["attended_sessions_count"] = engagement.get("attended_sessions_count")
+        # Store account ID in metadata
+        affiliations = payload.get("affiliations", {})
+        if affiliations.get("account_id"):
+            metadata["account_id"] = affiliations.get("account_id")
+        
+        # Apply addresses (update or create)
+        address_data = payload.get("address", {})
+        primary_type = address_data.get("primary_type", "").lower() if address_data.get("primary_type") else None
+        
+        # Helper function to update or create address
+        def _update_or_create_address(addr_type_str, addr_data, is_primary=False):
+            if not addr_data or not addr_data.get("street") or not addr_data.get("city"):
+                return None
+            try:
+                # Map address type string to enum
+                addr_type_map = {
+                    "mailing": AddressType.MAILING,
+                    "home": AddressType.HOME,
+                    "work": AddressType.WORK,
+                    "other": AddressType.OTHER,
+                }
+                addr_type = addr_type_map.get(addr_type_str.lower(), AddressType.OTHER)
+                
+                # Check if address of this type already exists
+                existing = ContactAddress.query.filter_by(
+                    contact_id=volunteer.id, address_type=addr_type
+                ).first()
+                
+                if existing:
+                    # Update existing address
+                    existing.street_address_1 = _coerce_string(addr_data.get("street")) or ""
+                    existing.street_address_2 = _coerce_string(addr_data.get("street2"))
+                    existing.city = _coerce_string(addr_data.get("city")) or ""
+                    existing.state = _coerce_string(addr_data.get("state")) or ""
+                    existing.postal_code = _coerce_string(addr_data.get("postal_code")) or ""
+                    existing.country = _coerce_string(addr_data.get("country")) or "US"
+                    existing.is_primary = is_primary
+                    return existing
+                else:
+                    # Create new address
+                    address = ContactAddress(
+                        contact_id=volunteer.id,
+                        address_type=addr_type,
+                        street_address_1=_coerce_string(addr_data.get("street")) or "",
+                        street_address_2=_coerce_string(addr_data.get("street2")),
+                        city=_coerce_string(addr_data.get("city")) or "",
+                        state=_coerce_string(addr_data.get("state")) or "",
+                        postal_code=_coerce_string(addr_data.get("postal_code")) or "",
+                        country=_coerce_string(addr_data.get("country")) or "US",
+                        is_primary=is_primary,
+                    )
+                    self.session.add(address)
+                    return address
+            except Exception as e:
+                current_app.logger.warning(f"Failed to update/create {addr_type_str} address: {e}")
+                return None
+        
+        # Determine primary address based on primary_type preference
+        addresses_updated = []
+        if address_data.get("mailing"):
+            is_primary = primary_type in ("mailing", None) and not any(addresses_updated)
+            addr = _update_or_create_address("mailing", address_data.get("mailing"), is_primary)
+            if addr:
+                addresses_updated.append(addr)
+        if address_data.get("home"):
+            is_primary = primary_type == "home" and not any(a.is_primary for a in addresses_updated)
+            addr = _update_or_create_address("home", address_data.get("home"), is_primary)
+            if addr:
+                addresses_updated.append(addr)
+        if address_data.get("work"):
+            is_primary = primary_type == "work" and not any(a.is_primary for a in addresses_updated)
+            addr = _update_or_create_address("work", address_data.get("work"), is_primary)
+            if addr:
+                addresses_updated.append(addr)
+        if address_data.get("other"):
+            is_primary = primary_type == "other" and not any(a.is_primary for a in addresses_updated)
+            addr = _update_or_create_address("other", address_data.get("other"), is_primary)
+            if addr:
+                addresses_updated.append(addr)
+        
+        # Ensure only one primary address
+        if addresses_updated:
+            ContactAddress.ensure_single_primary(volunteer.id)
+        
         entry.metadata_json = metadata
         entry.last_seen_at = datetime.now(timezone.utc)
         

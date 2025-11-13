@@ -31,14 +31,51 @@ class FakeResponse:
 
 
 class FakeSession:
-    def __init__(self):
+    def __init__(self, validate_soql=False):
         self.post_calls = []
         self.get_calls = []
         self.state_calls = 0
         self.result_calls = 0
+        self.validate_soql = validate_soql
+        # Known invalid fields that would cause 400 errors in real Salesforce
+        self.invalid_fields = [
+            "npe01__Home_Street__c",
+            "npe01__Home_City__c",
+            "npe01__Home_State__c",
+            "npe01__Home_Postal_Code__c",
+            "npe01__Home_Country__c",
+            "npe01__Work_Street__c",
+            "npe01__Work_City__c",
+            "npe01__Work_State__c",
+            "npe01__Work_Postal_Code__c",
+            "npe01__Work_Country__c",
+            "npe01__Other_Street__c",
+            "npe01__Other_City__c",
+            "npe01__Other_State__c",
+            "npe01__Other_Postal_Code__c",
+            "npe01__Other_Country__c",
+            "npe01__Primary_Address_Type__c",
+            "npe01__Secondary_Address_Type__c",
+        ]
 
     def post(self, url, headers=None, json=None):
         self.post_calls.append((url, headers, json))
+        
+        # Validate SOQL query if enabled
+        if self.validate_soql and json and "query" in json:
+            soql = json["query"]
+            for invalid_field in self.invalid_fields:
+                if invalid_field in soql:
+                    # Simulate Salesforce API error for invalid fields
+                    error_response = FakeResponse(
+                        status_code=400,
+                        json_data=[{
+                            "errorCode": "API_ERROR",
+                            "message": f"\nERROR at Row:1:Column:871\nNo such column '{invalid_field}' on entity 'Contact'."
+                        }]
+                    )
+                    return error_response
+        
         return FakeResponse(json_data={"id": "JOB123", "state": "UploadComplete"})
 
     def get(self, url, headers=None, params=None):
@@ -114,3 +151,79 @@ def test_salesforce_extractor_streams_batches(monkeypatch):
     assert len(batches[0].records) == 2
     assert len(batches[1].records) == 1
 
+
+def test_build_contacts_soql_validates_field_list():
+    """Test that the SOQL query includes all fields from DEFAULT_CONTACT_FIELDS."""
+    from flask_app.importer.adapters.salesforce.extractor import DEFAULT_CONTACT_FIELDS
+    
+    soql = build_contacts_soql()
+    
+    # Verify all expected fields are in the query
+    # This is a basic sanity check - actual field validation happens at Salesforce API level
+    for field in DEFAULT_CONTACT_FIELDS:
+        # Skip fields that might be in WHERE clause or ORDER BY
+        if field in ("SystemModstamp", "LastModifiedDate", "Contact_Type__c"):
+            continue
+        assert field in soql, f"Field {field} from DEFAULT_CONTACT_FIELDS not found in SOQL query"
+
+
+def test_salesforce_extractor_validates_invalid_fields(monkeypatch):
+    """Test that extractor would fail if SOQL contains invalid fields."""
+    from flask_app.importer.adapters.salesforce.extractor import DEFAULT_CONTACT_FIELDS
+    
+    # Known invalid NPSP address fields that don't exist in this Salesforce instance
+    INVALID_FIELDS = [
+        "npe01__Home_Street__c",
+        "npe01__Home_City__c",
+        "npe01__Work_Street__c",
+        "npe01__Other_Street__c",
+        "npe01__Primary_Address_Type__c",
+    ]
+    
+    # Verify invalid fields are NOT in DEFAULT_CONTACT_FIELDS
+    for invalid_field in INVALID_FIELDS:
+        assert invalid_field not in DEFAULT_CONTACT_FIELDS, (
+            f"Invalid field {invalid_field} found in DEFAULT_CONTACT_FIELDS. "
+            f"This field doesn't exist in Salesforce and would cause a 400 error."
+        )
+    
+    # Verify the SOQL query doesn't contain invalid fields
+    soql = build_contacts_soql()
+    for invalid_field in INVALID_FIELDS:
+        assert invalid_field not in soql, (
+            f"Invalid field {invalid_field} found in SOQL query. "
+            f"This would cause a 400 error from Salesforce API."
+        )
+
+
+def test_salesforce_extractor_fails_with_invalid_fields(monkeypatch):
+    """Test that extractor raises error when SOQL contains invalid fields (simulated)."""
+    monkeypatch.setattr(
+        extractor,
+        "ensure_salesforce_adapter_ready",
+        lambda **_: None,
+    )
+    
+    # Create a session that validates SOQL and rejects invalid fields
+    fake_session = FakeSession(validate_soql=True)
+    fake_client = SimpleNamespace(
+        session=fake_session,
+        sf_instance="example.my.salesforce.com",
+        session_id="abc123",
+    )
+    extractor_instance = SalesforceExtractor(
+        client=fake_client,
+        batch_size=2,
+        poll_interval=0,
+        poll_timeout=10,
+        sleep_fn=lambda *_: None,
+    )
+    
+    # Test with invalid field - should raise HTTPError when creating job
+    invalid_soql = "SELECT Id, npe01__Home_Street__c FROM Contact"
+    with pytest.raises(requests.HTTPError, match="400"):
+        list(extractor_instance.extract_batches(invalid_soql))
+    
+    # Verify the error was caught at job creation (not later)
+    assert len(fake_session.post_calls) == 1
+    assert fake_session.post_calls[0][1] is not None  # headers were passed

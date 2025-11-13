@@ -144,3 +144,132 @@ def test_ingest_salesforce_contacts_dry_run(app):
     assert "core" not in (refreshed.counts_json or {})
     assert ExternalIdMap.query.filter_by(entity_type="salesforce_contact").count() == 0
 
+
+def test_pipeline_with_new_fields(app):
+    """Test full pipeline with new Batch 1-4 fields (skills, interests, engagement, demographics, address)."""
+    from flask_app.models import Volunteer
+    from flask_app.models.contact.volunteer import VolunteerSkill, VolunteerInterest
+    from flask_app.models.contact.info import ContactAddress
+    from flask_app.models.contact.enums import AddressType
+    
+    run = _create_run()
+    watermark = _create_watermark()
+    batches = [
+        _make_batch(
+            1,
+            [{
+                "Id": "014",
+                "FirstName": "Ada",
+                "LastName": "Lovelace",
+                "Volunteer_Skills__c": "Teaching;Tutoring",
+                "Volunteer_Skills_Text__c": "Additional skills",
+                "Volunteer_Interests__c": "Education;Technology",
+                "First_Volunteer_Date__c": "2024-01-15",
+                "Number_of_Attended_Volunteer_Sessions__c": "5",
+                "Last_Email_Message__c": "2024-01-20T10:30:00.000Z",
+                "Racial_Ethnic_Background__c": "Asian",
+                "Age_Group__c": "Adult",
+                "Highest_Level_of_Educational__c": "Bachelors",
+                "MailingStreet": "123 Main St",
+                "MailingCity": "Springfield",
+                "MailingState": "IL",
+                "MailingPostalCode": "62701",
+                "MailingCountry": "US",
+                "Volunteer_Recruitment_Notes__c": "Recruited at event",
+                "Description": "General description",
+                "SystemModstamp": "2024-01-01T00:00:00.000Z",
+            }],
+        ),
+    ]
+    extractor = DummyExtractor(batches)
+    
+    summary = ingest_salesforce_contacts(
+        import_run=run,
+        extractor=extractor,
+        watermark=watermark,
+        staging_batch_size=1,
+        dry_run=False,
+        logger=app.logger,
+        record_limit=None,
+    )
+    
+    # Verify staging has normalized data
+    staged = StagingVolunteer.query.first()
+    assert staged.normalized_json is not None
+    normalized = staged.normalized_json
+    
+    # Verify new fields are in normalized JSON
+    assert "skills" in normalized
+    assert normalized["skills"]["volunteer_skills"] == ["Teaching", "Tutoring"]
+    assert normalized["skills"]["volunteer_skills_text"] == "Additional skills"
+    
+    assert "interests" in normalized
+    assert normalized["interests"]["volunteer_interests"] == ["Education", "Technology"]
+    
+    assert "engagement" in normalized
+    assert normalized["engagement"]["first_volunteer_date"] == "2024-01-15"
+    assert normalized["engagement"]["attended_sessions_count"] == "5"
+    assert normalized["engagement"]["last_email_message_at"] == "2024-01-20T10:30:00.000Z"
+    
+    assert "demographics" in normalized
+    assert normalized["demographics"]["racial_ethnic_background"] == "Asian"
+    assert normalized["demographics"]["age_group"] == "Adult"
+    assert normalized["demographics"]["highest_education_level"] == "Bachelors"
+    
+    assert "address" in normalized
+    assert normalized["address"]["mailing"]["street"] == "123 Main St"
+    assert normalized["address"]["mailing"]["city"] == "Springfield"
+    
+    assert "notes" in normalized
+    assert normalized["notes"]["recruitment_notes"] == "Recruited at event"
+    assert normalized["notes"]["description"] == "General description"
+    
+    # Verify loader creates records
+    loader = SalesforceContactLoader(run)
+    counters = loader.execute()
+    assert counters.created == 1
+    
+    # Verify volunteer was created
+    entry = ExternalIdMap.query.filter_by(external_system="salesforce", external_id="014").first()
+    assert entry is not None
+    volunteer = db.session.get(Volunteer, entry.entity_id)
+    assert volunteer is not None
+    assert volunteer.first_name == "Ada"
+    assert volunteer.last_name == "Lovelace"
+    
+    # Verify skills were created
+    skills = VolunteerSkill.query.filter_by(volunteer_id=volunteer.id).all()
+    assert len(skills) == 2
+    skill_names = [s.skill_name for s in skills]
+    assert "Teaching" in skill_names
+    assert "Tutoring" in skill_names
+    
+    # Verify interests were created
+    interests = VolunteerInterest.query.filter_by(volunteer_id=volunteer.id).all()
+    assert len(interests) == 2
+    interest_names = [i.interest_name for i in interests]
+    assert "Education" in interest_names
+    assert "Technology" in interest_names
+    
+    # Verify addresses were created
+    addresses = ContactAddress.query.filter_by(contact_id=volunteer.id).all()
+    assert len(addresses) == 1  # Only mailing address available
+    
+    mailing = next((a for a in addresses if a.address_type == AddressType.MAILING), None)
+    assert mailing is not None
+    assert mailing.street_address_1 == "123 Main St"
+    assert mailing.city == "Springfield"
+    assert mailing.is_primary is True
+    
+    # Verify notes
+    # Note: volunteer_skills_text gets appended to notes, so we expect both
+    assert volunteer.notes == "General description\nSkills: Additional skills"
+    assert volunteer.internal_notes == "Recruited at event"
+    
+    # Verify engagement fields
+    from datetime import date
+    assert volunteer.first_volunteer_date == date(2024, 1, 15)
+    
+    # Verify metadata
+    metadata = entry.metadata_json or {}
+    assert metadata.get("attended_sessions_count") == "5"

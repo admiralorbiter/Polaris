@@ -131,3 +131,155 @@ def test_transformer_contact_preferences_mapping():
     assert result.canonical["contact_preferences"]["do_not_email"] is False
     assert result.canonical["contact_preferences"]["do_not_contact"] is False
     assert result.errors == []
+
+
+def test_split_semicolon_transform():
+    """Test that split_semicolon splits semicolon-separated values into arrays."""
+    spec = MappingSpec(
+        version=1,
+        adapter="salesforce",
+        object_name="Contact",
+        fields=(
+            MappingField(source="Id", target="external_id", required=True),
+            MappingField(source="Volunteer_Skills__c", target="skills.volunteer_skills", transform="split_semicolon"),
+            MappingField(source="Volunteer_Interests__c", target="interests.volunteer_interests", transform="split_semicolon"),
+        ),
+        transforms={"split_semicolon": MappingTransform(name="split_semicolon")},
+        checksum="fake",
+        path=None,  # type: ignore[arg-type]
+    )
+    transformer = SalesforceMappingTransformer(spec)
+    
+    # Test with semicolon-separated values
+    result = transformer.transform({
+        "Id": "001",
+        "Volunteer_Skills__c": "Teaching;Tutoring;Mentoring",
+        "Volunteer_Interests__c": "Education;Technology",
+    })
+    assert result.canonical["skills"]["volunteer_skills"] == ["Teaching", "Tutoring", "Mentoring"]
+    assert result.canonical["interests"]["volunteer_interests"] == ["Education", "Technology"]
+    assert result.errors == []
+    
+    # Test with empty string
+    result2 = transformer.transform({
+        "Id": "002",
+        "Volunteer_Skills__c": "",
+        "Volunteer_Interests__c": "",
+    })
+    assert result2.canonical["skills"]["volunteer_skills"] == []
+    assert result2.canonical["interests"]["volunteer_interests"] == []
+    
+    # Test with None
+    result3 = transformer.transform({
+        "Id": "003",
+        "Volunteer_Skills__c": None,
+        "Volunteer_Interests__c": None,
+    })
+    assert result3.canonical["skills"]["volunteer_skills"] == []
+    assert result3.canonical["interests"]["volunteer_interests"] == []
+    
+    # Test with single value (no semicolon)
+    result4 = transformer.transform({
+        "Id": "004",
+        "Volunteer_Skills__c": "Teaching",
+    })
+    assert result4.canonical["skills"]["volunteer_skills"] == ["Teaching"]
+    
+    # Test with whitespace handling
+    result5 = transformer.transform({
+        "Id": "005",
+        "Volunteer_Skills__c": "Teaching ; Tutoring ; Mentoring",
+    })
+    assert result5.canonical["skills"]["volunteer_skills"] == ["Teaching", "Tutoring", "Mentoring"]
+
+
+def test_nested_field_mappings():
+    """Test that nested fields are correctly mapped (skills, interests, engagement, demographics, address)."""
+    spec = MappingSpec(
+        version=1,
+        adapter="salesforce",
+        object_name="Contact",
+        fields=(
+            MappingField(source="Id", target="external_id", required=True),
+            MappingField(source="Volunteer_Skills__c", target="skills.volunteer_skills", transform="split_semicolon"),
+            MappingField(source="Volunteer_Skills_Text__c", target="skills.volunteer_skills_text"),
+            MappingField(source="Volunteer_Interests__c", target="interests.volunteer_interests", transform="split_semicolon"),
+            MappingField(source="First_Volunteer_Date__c", target="engagement.first_volunteer_date", transform="parse_date"),
+            MappingField(source="Number_of_Attended_Volunteer_Sessions__c", target="engagement.attended_sessions_count"),
+            MappingField(source="Last_Email_Message__c", target="engagement.last_email_message_at", transform="parse_datetime"),
+            MappingField(source="Racial_Ethnic_Background__c", target="demographics.racial_ethnic_background"),
+            MappingField(source="Age_Group__c", target="demographics.age_group"),
+            MappingField(source="Highest_Level_of_Educational__c", target="demographics.highest_education_level"),
+            MappingField(source="MailingStreet", target="address.mailing.street"),
+            MappingField(source="MailingCity", target="address.mailing.city"),
+            MappingField(source="MailingState", target="address.mailing.state"),
+            MappingField(source="MailingPostalCode", target="address.mailing.postal_code"),
+            MappingField(source="MailingCountry", target="address.mailing.country"),
+            MappingField(source="npe01__Home_Street__c", target="address.home.street"),
+            MappingField(source="npe01__Home_City__c", target="address.home.city"),
+            MappingField(source="Volunteer_Recruitment_Notes__c", target="notes.recruitment_notes"),
+            MappingField(source="Description", target="notes.description"),
+        ),
+        transforms={
+            "split_semicolon": MappingTransform(name="split_semicolon"),
+            "parse_date": MappingTransform(name="parse_date"),
+            "parse_datetime": MappingTransform(name="parse_datetime"),
+        },
+        checksum="fake",
+        path=None,  # type: ignore[arg-type]
+    )
+    transformer = SalesforceMappingTransformer(spec)
+    
+    result = transformer.transform({
+        "Id": "001",
+        "Volunteer_Skills__c": "Teaching;Tutoring",
+        "Volunteer_Skills_Text__c": "Additional skills text",
+        "Volunteer_Interests__c": "Education",
+        "First_Volunteer_Date__c": "2024-01-15",
+        "Number_of_Attended_Volunteer_Sessions__c": "5",
+        "Last_Email_Message__c": "2024-01-20T10:30:00.000Z",
+        "Racial_Ethnic_Background__c": "Asian",
+        "Age_Group__c": "Adult",
+        "Highest_Level_of_Educational__c": "Bachelors",
+        "MailingStreet": "123 Main St",
+        "MailingCity": "Springfield",
+        "MailingState": "IL",
+        "MailingPostalCode": "62701",
+        "MailingCountry": "US",
+        "npe01__Home_Street__c": "456 Oak Ave",
+        "npe01__Home_City__c": "Springfield",
+        "Volunteer_Recruitment_Notes__c": "Recruited at event",
+        "Description": "General description",
+    })
+    
+    # Verify skills
+    assert result.canonical["skills"]["volunteer_skills"] == ["Teaching", "Tutoring"]
+    assert result.canonical["skills"]["volunteer_skills_text"] == "Additional skills text"
+    
+    # Verify interests
+    assert result.canonical["interests"]["volunteer_interests"] == ["Education"]
+    
+    # Verify engagement
+    assert result.canonical["engagement"]["first_volunteer_date"] == "2024-01-15"
+    assert result.canonical["engagement"]["attended_sessions_count"] == "5"
+    assert result.canonical["engagement"]["last_email_message_at"] == "2024-01-20T10:30:00.000Z"
+    
+    # Verify demographics
+    assert result.canonical["demographics"]["racial_ethnic_background"] == "Asian"
+    assert result.canonical["demographics"]["age_group"] == "Adult"
+    assert result.canonical["demographics"]["highest_education_level"] == "Bachelors"
+    
+    # Verify address
+    assert result.canonical["address"]["mailing"]["street"] == "123 Main St"
+    assert result.canonical["address"]["mailing"]["city"] == "Springfield"
+    assert result.canonical["address"]["mailing"]["state"] == "IL"
+    assert result.canonical["address"]["mailing"]["postal_code"] == "62701"
+    assert result.canonical["address"]["mailing"]["country"] == "US"
+    assert result.canonical["address"]["home"]["street"] == "456 Oak Ave"
+    assert result.canonical["address"]["home"]["city"] == "Springfield"
+    
+    # Verify notes
+    assert result.canonical["notes"]["recruitment_notes"] == "Recruited at event"
+    assert result.canonical["notes"]["description"] == "General description"
+    
+    assert result.errors == []
