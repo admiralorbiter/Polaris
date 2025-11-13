@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+
+{% block title %}Field Configuration - Data Quality Dashboard{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/data_quality.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/data_quality_fields.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid data-quality-fields py-4" data-component="data-quality-fields">
+  <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4">
+    <div>
+      <h1 class="h3 mb-1">Field Configuration</h1>
+      <p class="text-muted mb-0">Enable or disable fields in the Data Quality Dashboard.</p>
+    </div>
+    <div class="d-flex gap-2 mt-3 mt-md-0">
+      <a href="{{ url_for('data_quality_dashboard') }}" class="btn btn-outline-secondary">
+        <i class="fas fa-arrow-left"></i> Back to Dashboard
+      </a>
+      <button class="btn btn-outline-primary" id="dq-fields-refresh-btn" data-action="refresh">
+        <i class="fas fa-sync-alt"></i> Refresh
+      </button>
+      <button class="btn btn-primary" id="dq-fields-save-btn" data-action="save" disabled>
+        <i class="fas fa-save"></i> Save Changes
+      </button>
+    </div>
+  </div>
+
+  <!-- Info Alert -->
+  <div class="alert alert-info mb-4" role="alert">
+    <i class="fas fa-info-circle"></i>
+    <strong>Note:</strong> Disabled fields will be hidden from the Data Quality Dashboard and excluded from health score calculations.
+    Changes are applied system-wide.
+  </div>
+
+  <!-- Entity Type Tabs -->
+  <div class="tabs-container mb-4">
+    <ul class="nav nav-tabs" id="dq-fields-entity-tabs" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="volunteer-tab" data-bs-toggle="tab" data-bs-target="#volunteer-pane" type="button" role="tab" data-entity-type="volunteer">
+          Volunteers
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="contact-tab" data-bs-toggle="tab" data-bs-target="#contact-pane" type="button" role="tab" data-entity-type="contact">
+          Contacts
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="student-tab" data-bs-toggle="tab" data-bs-target="#student-pane" type="button" role="tab" data-entity-type="student">
+          Students
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="teacher-tab" data-bs-toggle="tab" data-bs-target="#teacher-pane" type="button" role="tab" data-entity-type="teacher">
+          Teachers
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="event-tab" data-bs-toggle="tab" data-bs-target="#event-pane" type="button" role="tab" data-entity-type="event">
+          Events
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="organization-tab" data-bs-toggle="tab" data-bs-target="#organization-pane" type="button" role="tab" data-entity-type="organization">
+          Organizations
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="user-tab" data-bs-toggle="tab" data-bs-target="#user-pane" type="button" role="tab" data-entity-type="user">
+          Users
+        </button>
+      </li>
+    </ul>
+  </div>
+
+  <!-- Tab Content -->
+  <div class="tab-content" id="dq-fields-tab-content">
+    <!-- Loading State -->
+    <div id="dq-fields-loading" class="text-center py-5">
+      <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Loading...</span>
+      </div>
+      <p class="text-muted mt-3">Loading field configuration...</p>
+    </div>
+
+    <!-- Error State -->
+    <div id="dq-fields-error" class="alert alert-danger d-none" role="alert">
+      <i class="fas fa-exclamation-triangle"></i>
+      <span id="dq-fields-error-message">An error occurred while loading field configuration.</span>
+    </div>
+
+    <!-- Success Message -->
+    <div id="dq-fields-success" class="alert alert-success d-none" role="alert">
+      <i class="fas fa-check-circle"></i>
+      <span id="dq-fields-success-message">Field configuration updated successfully.</span>
+    </div>
+
+    <!-- Entity Type Panes -->
+    <div class="tab-pane fade show active" id="volunteer-pane" role="tabpanel" data-entity-type="volunteer">
+      <div class="card shadow-sm">
+        <div class="card-header">
+          <h2 class="h5 mb-0">Volunteer Fields</h2>
+        </div>
+        <div class="card-body">
+          <div id="volunteer-fields-list" class="fields-list">
+            <!-- Fields will be populated by JavaScript -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-pane fade" id="contact-pane" role="tabpanel" data-entity-type="contact">
+      <div class="card shadow-sm">
+        <div class="card-header">
+          <h2 class="h5 mb-0">Contact Fields</h2>
+        </div>
+        <div class="card-body">
+          <div id="contact-fields-list" class="fields-list">
+            <!-- Fields will be populated by JavaScript -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-pane fade" id="student-pane" role="tabpanel" data-entity-type="student">
+      <div class="card shadow-sm">
+        <div class="card-header">
+          <h2 class="h5 mb-0">Student Fields</h2>
+        </div>
+        <div class="card-body">
+          <div id="student-fields-list" class="fields-list">
+            <!-- Fields will be populated by JavaScript -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-pane fade" id="teacher-pane" role="tabpanel" data-entity-type="teacher">
+      <div class="card shadow-sm">
+        <div class="card-header">
+          <h2 class="h5 mb-0">Teacher Fields</h2>
+        </div>
+        <div class="card-body">
+          <div id="teacher-fields-list" class="fields-list">
+            <!-- Fields will be populated by JavaScript -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-pane fade" id="event-pane" role="tabpanel" data-entity-type="event">
+      <div class="card shadow-sm">
+        <div class="card-header">
+          <h2 class="h5 mb-0">Event Fields</h2>
+        </div>
+        <div class="card-body">
+          <div id="event-fields-list" class="fields-list">
+            <!-- Fields will be populated by JavaScript -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-pane fade" id="organization-pane" role="tabpanel" data-entity-type="organization">
+      <div class="card shadow-sm">
+        <div class="card-header">
+          <h2 class="h5 mb-0">Organization Fields</h2>
+        </div>
+        <div class="card-body">
+          <div id="organization-fields-list" class="fields-list">
+            <!-- Fields will be populated by JavaScript -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-pane fade" id="user-pane" role="tabpanel" data-entity-type="user">
+      <div class="card shadow-sm">
+        <div class="card-header">
+          <h2 class="h5 mb-0">User Fields</h2>
+        </div>
+        <div class="card-body">
+          <div id="user-fields-list" class="fields-list">
+            <!-- Fields will be populated by JavaScript -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  window.DATA_QUALITY_FIELDS_CONFIG = {
+    fieldConfigUrl: "{{ url_for('data_quality_field_config') }}",
+    fieldConfigUpdateUrl: "{{ url_for('data_quality_field_config_update') }}",
+  };
+</script>
+<script src="{{ url_for('static', filename='js/data_quality_fields.js') }}"></script>
+{% endblock %}
+

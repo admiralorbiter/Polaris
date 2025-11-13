@@ -10,6 +10,9 @@ from werkzeug.security import generate_password_hash
 from flask_app.forms import ChangePasswordForm, CreateUserForm, UpdateUserForm
 from flask_app.models import AdminLog, Organization, SystemMetrics, User, db
 from flask_app.services.data_quality_service import DataQualityService
+from flask_app.services.data_quality_field_config_service import (
+    DataQualityFieldConfigService,
+)
 from flask_app.services.data_sampling_service import DataSamplingService
 from flask_app.utils.permissions import get_current_organization, permission_required
 
@@ -734,6 +737,34 @@ def register_admin_routes(app):
             flash("An error occurred while loading the data quality dashboard.", "danger")
             return redirect(url_for("admin_dashboard"))
 
+    @app.route("/admin/data-quality/fields")
+    @login_required
+    @permission_required("view_users", org_context=False)
+    def data_quality_fields():
+        """Field configuration page for data quality dashboard"""
+        try:
+            organization = get_current_organization()
+
+            # Log page access
+            AdminLog.log_action(
+                admin_user_id=current_user.id,
+                action="DATA_QUALITY_FIELDS_VIEW",
+                details="Viewed data quality field configuration",
+                ip_address=request.remote_addr,
+                user_agent=request.headers.get("User-Agent"),
+            )
+
+            current_app.logger.info(f"Data quality field configuration accessed by {current_user.username}")
+            return render_template(
+                "admin/data_quality_fields.html",
+                organization=organization,
+                is_super_admin=current_user.is_super_admin,
+            )
+        except Exception as e:
+            current_app.logger.error(f"Error in data quality fields page: {str(e)}")
+            flash("An error occurred while loading the field configuration page.", "danger")
+            return redirect(url_for("data_quality_dashboard"))
+
     @app.route("/admin/data-quality/api/metrics")
     @login_required
     @permission_required("view_users", org_context=False)
@@ -766,6 +797,17 @@ def register_admin_routes(app):
                         "total_records": em.total_records,
                         "overall_completeness": em.overall_completeness,
                         "key_metrics": em.key_metrics,
+                        "fields": [
+                            {
+                                "field_name": f.field_name,
+                                "total_records": f.total_records,
+                                "records_with_value": f.records_with_value,
+                                "records_without_value": f.records_without_value,
+                                "completeness_percentage": f.completeness_percentage,
+                                "status": f.status,
+                            }
+                            for f in em.fields
+                        ],
                     }
                     for em in metrics.entity_metrics
                 ],
@@ -1470,3 +1512,264 @@ def register_admin_routes(app):
                 f"Error getting field edge cases for {entity_type}.{field_name}: {str(e)}", exc_info=True
             )
             return jsonify({"error": f"Failed to get edge cases for {field_name}"}), 500
+
+    # Field Configuration API Endpoints
+    @app.route("/admin/data-quality/api/field-config", methods=["GET"])
+    @login_required
+    @permission_required("view_users", org_context=False)
+    def data_quality_field_config():
+        """Get current field configuration"""
+        try:
+            organization = get_current_organization()
+            organization_id = None
+
+            # For v1, use system-wide configuration
+            # Future: support org-specific configuration
+            # if current_user.is_super_admin:
+            #     org_id_param = request.args.get("organization_id", type=int)
+            #     if org_id_param:
+            #         organization_id = org_id_param
+            # elif organization:
+            #     organization_id = organization.id
+
+            # Get field configuration for display
+            config = DataQualityFieldConfigService.get_field_config_for_display(organization_id)
+
+            # Ensure all entity types are present (debug/logging)
+            expected_entity_types = ["volunteer", "contact", "student", "teacher", "event", "organization", "user"]
+            for entity_type in expected_entity_types:
+                if entity_type not in config:
+                    current_app.logger.warning(f"Entity type {entity_type} missing from field configuration")
+                    # Add empty config for missing entity types
+                    config[entity_type] = {}
+
+            # Get field definitions
+            field_definitions = DataQualityFieldConfigService.get_field_definitions()
+
+            response = {
+                "entity_types": config,
+                "field_definitions": field_definitions,
+                "organization_id": organization_id,
+            }
+
+            current_app.logger.debug(f"Field configuration API returning {len(config)} entity types: {list(config.keys())}")
+
+            return jsonify(response)
+        except Exception as e:
+            current_app.logger.error(f"Error getting field configuration: {str(e)}", exc_info=True)
+            return jsonify({"error": "Failed to get field configuration"}), 500
+
+    @app.route("/admin/data-quality/api/field-config", methods=["POST"])
+    @login_required
+    @permission_required("view_users", org_context=False)
+    def data_quality_field_config_update():
+        """Update field configuration"""
+        try:
+            organization = get_current_organization()
+            organization_id = None
+
+            # For v1, use system-wide configuration
+            # Future: support org-specific configuration
+
+            # Get request data
+            data = request.get_json()
+            if not data:
+                return jsonify({"error": "Request body must be JSON"}), 400
+
+            # Support both single field update and batch update
+            if "changes" in data:
+                # Batch update
+                changes = data.get("changes", [])
+                if not isinstance(changes, list) or len(changes) == 0:
+                    return jsonify({"error": "Invalid changes format"}), 400
+
+                # Get current configuration
+                disabled_fields = DataQualityFieldConfigService.get_disabled_fields(organization_id)
+                field_definitions = DataQualityFieldConfigService.get_field_definitions()
+
+                # Apply all changes
+                updated_fields = []
+                for change in changes:
+                    entity_type = change.get("entity_type")
+                    field_name = change.get("field_name")
+                    is_enabled = change.get("is_enabled")
+
+                    if not entity_type or not field_name or is_enabled is None:
+                        continue
+
+                    # Validate entity type and field name
+                    if entity_type not in field_definitions:
+                        continue
+                    if field_name not in field_definitions[entity_type]:
+                        continue
+
+                    # Update configuration
+                    if entity_type not in disabled_fields:
+                        disabled_fields[entity_type] = []
+
+                    if is_enabled:
+                        # Remove from disabled list
+                        if field_name in disabled_fields[entity_type]:
+                            disabled_fields[entity_type].remove(field_name)
+                    else:
+                        # Add to disabled list
+                        if field_name not in disabled_fields[entity_type]:
+                            disabled_fields[entity_type].append(field_name)
+
+                    updated_fields.append({"entity_type": entity_type, "field_name": field_name, "is_enabled": is_enabled})
+
+                # Save configuration
+                success = DataQualityFieldConfigService.set_disabled_fields(disabled_fields, organization_id)
+
+                if not success:
+                    return jsonify({"error": "Failed to update field configuration"}), 500
+
+                # Clear cache for data quality metrics
+                DataQualityService._clear_cache()
+
+                # Log action
+                AdminLog.log_action(
+                    admin_user_id=current_user.id,
+                    action="DATA_QUALITY_FIELD_CONFIG_UPDATE",
+                    details=f"Updated field configuration: {len(updated_fields)} fields",
+                    ip_address=request.remote_addr,
+                    user_agent=request.headers.get("User-Agent"),
+                )
+
+                response = {
+                    "success": True,
+                    "message": f"Field configuration updated: {len(updated_fields)} fields",
+                    "updated_fields": updated_fields,
+                }
+
+                return jsonify(response)
+            else:
+                # Single field update (for backward compatibility)
+                entity_type = data.get("entity_type")
+                field_name = data.get("field_name")
+                is_enabled = data.get("is_enabled")
+
+                if not entity_type or not field_name or is_enabled is None:
+                    return (
+                        jsonify(
+                            {
+                                "error": "Missing required fields: entity_type, field_name, is_enabled (or 'changes' for batch update)"
+                            }
+                        ),
+                        400,
+                    )
+
+                # Validate entity type
+                field_definitions = DataQualityFieldConfigService.get_field_definitions()
+                if entity_type not in field_definitions:
+                    return jsonify({"error": f"Invalid entity type: {entity_type}"}), 400
+
+                # Validate field name
+                if field_name not in field_definitions[entity_type]:
+                    return (
+                        jsonify({"error": f"Invalid field name: {field_name} for entity type: {entity_type}"}),
+                        400,
+                    )
+
+                # Get current configuration
+                disabled_fields = DataQualityFieldConfigService.get_disabled_fields(organization_id)
+
+                # Update configuration
+                if entity_type not in disabled_fields:
+                    disabled_fields[entity_type] = []
+
+                if is_enabled:
+                    # Remove from disabled list
+                    if field_name in disabled_fields[entity_type]:
+                        disabled_fields[entity_type].remove(field_name)
+                else:
+                    # Add to disabled list
+                    if field_name not in disabled_fields[entity_type]:
+                        disabled_fields[entity_type].append(field_name)
+
+                # Save configuration
+                success = DataQualityFieldConfigService.set_disabled_fields(disabled_fields, organization_id)
+
+                if not success:
+                    return jsonify({"error": "Failed to update field configuration"}), 500
+
+                # Clear cache for data quality metrics
+                DataQualityService._clear_cache()
+
+                # Log action
+                AdminLog.log_action(
+                    admin_user_id=current_user.id,
+                    action="DATA_QUALITY_FIELD_CONFIG_UPDATE",
+                    details=f"Updated field configuration: {entity_type}.{field_name} = {is_enabled}",
+                    ip_address=request.remote_addr,
+                    user_agent=request.headers.get("User-Agent"),
+                )
+
+                response = {
+                    "success": True,
+                    "message": "Field configuration updated",
+                    "config": {
+                        "entity_type": entity_type,
+                        "field_name": field_name,
+                        "is_enabled": is_enabled,
+                    },
+                }
+
+                return jsonify(response)
+        except Exception as e:
+            current_app.logger.error(f"Error updating field configuration: {str(e)}", exc_info=True)
+            return jsonify({"error": "Failed to update field configuration"}), 500
+
+    @app.route("/admin/data-quality/api/field-config/<entity_type>", methods=["GET"])
+    @login_required
+    @permission_required("view_users", org_context=False)
+    def data_quality_field_config_entity(entity_type):
+        """Get field configuration for a specific entity type"""
+        try:
+            organization = get_current_organization()
+            organization_id = None
+
+            # For v1, use system-wide configuration
+            # Future: support org-specific configuration
+
+            # Validate entity type
+            field_definitions = DataQualityFieldConfigService.get_field_definitions()
+            if entity_type not in field_definitions:
+                return jsonify({"error": f"Invalid entity type: {entity_type}"}), 400
+
+            # Get field configuration for entity
+            config = DataQualityFieldConfigService.get_field_config_for_display(organization_id)
+            entity_config = config.get(entity_type, {})
+
+            response = {
+                "entity_type": entity_type,
+                "fields": entity_config,
+                "organization_id": organization_id,
+            }
+
+            return jsonify(response)
+        except Exception as e:
+            current_app.logger.error(
+                f"Error getting field configuration for {entity_type}: {str(e)}", exc_info=True
+            )
+            return jsonify({"error": f"Failed to get field configuration for {entity_type}"}), 500
+
+    @app.route("/admin/data-quality/api/field-definitions", methods=["GET"])
+    @login_required
+    @permission_required("view_users", org_context=False)
+    def data_quality_field_definitions():
+        """Get available field definitions"""
+        try:
+            entity_type = request.args.get("entity_type")
+
+            # Get field definitions
+            field_definitions = DataQualityFieldConfigService.get_field_definitions(entity_type)
+
+            response = {
+                "field_definitions": field_definitions,
+            }
+
+            return jsonify(response)
+        except Exception as e:
+            current_app.logger.error(f"Error getting field definitions: {str(e)}", exc_info=True)
+            return jsonify({"error": "Failed to get field definitions"}), 500

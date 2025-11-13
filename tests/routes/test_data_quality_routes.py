@@ -5,7 +5,8 @@ from unittest.mock import patch
 
 import pytest
 
-from flask_app.models import AdminLog, Contact, ContactEmail, Organization, User, db
+from flask_app.models import AdminLog, Contact, ContactEmail, Organization, SystemFeatureFlag, User, db
+from flask_app.services.data_quality_field_config_service import DataQualityFieldConfigService
 
 
 @pytest.fixture
@@ -284,3 +285,299 @@ class TestDataQualityRoutes:
             assert data["entity_type"] == entity_type
             assert "fields" in data
             assert isinstance(data["fields"], list)
+
+    def test_data_quality_field_config_page_requires_auth(self, client):
+        """Test that field configuration page requires authentication"""
+        response = client.get("/admin/data-quality/fields")
+        assert response.status_code in {302, 401, 403}
+
+    def test_data_quality_field_config_page_renders(self, logged_in_admin):
+        """Test that field configuration page renders successfully"""
+        client, admin_user = logged_in_admin
+
+        response = client.get("/admin/data-quality/fields")
+        assert response.status_code == 200
+        assert b"Field Configuration" in response.data
+        assert b"Enable or disable fields" in response.data
+
+    def test_data_quality_field_config_api_get(self, logged_in_admin):
+        """Test getting field configuration via API"""
+        client, admin_user = logged_in_admin
+
+        response = client.get("/admin/data-quality/api/field-config")
+        assert response.status_code == 200
+
+        data = json.loads(response.data)
+        assert "entity_types" in data
+        assert "field_definitions" in data
+        assert "organization_id" in data
+
+        # Verify all entity types are present
+        entity_types = data["entity_types"]
+        assert "volunteer" in entity_types
+        assert "contact" in entity_types
+        assert "student" in entity_types
+        assert "teacher" in entity_types
+        assert "event" in entity_types
+        assert "organization" in entity_types
+        assert "user" in entity_types
+
+    def test_data_quality_field_config_api_get_structure(self, logged_in_admin):
+        """Test field configuration API response structure"""
+        client, admin_user = logged_in_admin
+
+        response = client.get("/admin/data-quality/api/field-config")
+        assert response.status_code == 200
+
+        data = json.loads(response.data)
+        entity_types = data["entity_types"]
+
+        # Check volunteer fields structure
+        volunteer_fields = entity_types["volunteer"]
+        assert "clearance_status" in volunteer_fields
+        assert "enabled" in volunteer_fields["clearance_status"]
+        assert "display_name" in volunteer_fields["clearance_status"]
+        assert isinstance(volunteer_fields["clearance_status"]["enabled"], bool)
+        assert isinstance(volunteer_fields["clearance_status"]["display_name"], str)
+
+    def test_data_quality_field_config_api_update_single_field(self, logged_in_admin):
+        """Test updating field configuration for a single field"""
+        client, admin_user = logged_in_admin
+
+        # Update a field
+        response = client.post(
+            "/admin/data-quality/api/field-config",
+            json={
+                "entity_type": "volunteer",
+                "field_name": "title",
+                "is_enabled": False,
+            },
+            content_type="application/json",
+        )
+        assert response.status_code == 200
+
+        data = json.loads(response.data)
+        assert data["success"] is True
+        assert data["config"]["entity_type"] == "volunteer"
+        assert data["config"]["field_name"] == "title"
+        assert data["config"]["is_enabled"] is False
+
+        # Verify configuration was updated
+        response = client.get("/admin/data-quality/api/field-config")
+        data = json.loads(response.data)
+        volunteer_fields = data["entity_types"]["volunteer"]
+        assert volunteer_fields["title"]["enabled"] is False
+
+    def test_data_quality_field_config_api_update_batch(self, logged_in_admin):
+        """Test updating field configuration with batch update"""
+        client, admin_user = logged_in_admin
+
+        # Update multiple fields
+        response = client.post(
+            "/admin/data-quality/api/field-config",
+            json={
+                "changes": [
+                    {
+                        "entity_type": "volunteer",
+                        "field_name": "title",
+                        "is_enabled": False,
+                    },
+                    {
+                        "entity_type": "contact",
+                        "field_name": "notes",
+                        "is_enabled": False,
+                    },
+                ],
+            },
+            content_type="application/json",
+        )
+        assert response.status_code == 200
+
+        data = json.loads(response.data)
+        assert data["success"] is True
+        assert "updated_fields" in data
+        assert len(data["updated_fields"]) == 2
+
+        # Verify configuration was updated
+        response = client.get("/admin/data-quality/api/field-config")
+        data = json.loads(response.data)
+        assert data["entity_types"]["volunteer"]["title"]["enabled"] is False
+        assert data["entity_types"]["contact"]["notes"]["enabled"] is False
+
+    def test_data_quality_field_config_api_update_invalid_entity(self, logged_in_admin):
+        """Test updating field configuration with invalid entity type"""
+        client, admin_user = logged_in_admin
+
+        response = client.post(
+            "/admin/data-quality/api/field-config",
+            json={
+                "entity_type": "invalid_entity",
+                "field_name": "field1",
+                "is_enabled": False,
+            },
+            content_type="application/json",
+        )
+        assert response.status_code == 400
+
+        data = json.loads(response.data)
+        assert "error" in data
+
+    def test_data_quality_field_config_api_update_invalid_field(self, logged_in_admin):
+        """Test updating field configuration with invalid field name"""
+        client, admin_user = logged_in_admin
+
+        response = client.post(
+            "/admin/data-quality/api/field-config",
+            json={
+                "entity_type": "volunteer",
+                "field_name": "invalid_field",
+                "is_enabled": False,
+            },
+            content_type="application/json",
+        )
+        assert response.status_code == 400
+
+        data = json.loads(response.data)
+        assert "error" in data
+
+    def test_data_quality_field_config_api_get_entity_type(self, logged_in_admin):
+        """Test getting field configuration for specific entity type"""
+        client, admin_user = logged_in_admin
+
+        response = client.get("/admin/data-quality/api/field-config/volunteer")
+        assert response.status_code == 200
+
+        data = json.loads(response.data)
+        assert data["entity_type"] == "volunteer"
+        assert "fields" in data
+        assert isinstance(data["fields"], dict)
+
+        # Verify fields structure
+        fields = data["fields"]
+        assert "clearance_status" in fields
+        assert "enabled" in fields["clearance_status"]
+        assert "display_name" in fields["clearance_status"]
+
+    def test_data_quality_field_config_api_get_invalid_entity_type(self, logged_in_admin):
+        """Test getting field configuration for invalid entity type"""
+        client, admin_user = logged_in_admin
+
+        response = client.get("/admin/data-quality/api/field-config/invalid_entity")
+        assert response.status_code == 400
+
+        data = json.loads(response.data)
+        assert "error" in data
+
+    def test_data_quality_field_config_api_get_definitions(self, logged_in_admin):
+        """Test getting field definitions"""
+        client, admin_user = logged_in_admin
+
+        response = client.get("/admin/data-quality/api/field-definitions")
+        assert response.status_code == 200
+
+        data = json.loads(response.data)
+        assert "field_definitions" in data
+        assert "volunteer" in data["field_definitions"]
+        assert "contact" in data["field_definitions"]
+
+    def test_data_quality_field_config_api_get_definitions_specific_entity(self, logged_in_admin):
+        """Test getting field definitions for specific entity type"""
+        client, admin_user = logged_in_admin
+
+        response = client.get("/admin/data-quality/api/field-definitions?entity_type=volunteer")
+        assert response.status_code == 200
+
+        data = json.loads(response.data)
+        assert "field_definitions" in data
+        assert "volunteer" in data["field_definitions"]
+        assert len(data["field_definitions"]) == 1
+
+    def test_data_quality_field_config_logs_access(self, logged_in_admin):
+        """Test that field configuration access is logged"""
+        client, admin_user = logged_in_admin
+
+        # Clear existing logs
+        AdminLog.query.delete()
+        db.session.commit()
+
+        response = client.get("/admin/data-quality/fields")
+        assert response.status_code == 200
+
+        # Check that access was logged
+        logs = AdminLog.query.filter_by(action="DATA_QUALITY_FIELDS_VIEW").all()
+        assert len(logs) == 1
+        assert logs[0].admin_user_id == admin_user.id
+
+    def test_data_quality_field_config_update_logs_action(self, logged_in_admin):
+        """Test that field configuration updates are logged"""
+        client, admin_user = logged_in_admin
+
+        # Clear existing logs
+        AdminLog.query.delete()
+        db.session.commit()
+
+        response = client.post(
+            "/admin/data-quality/api/field-config",
+            json={
+                "entity_type": "volunteer",
+                "field_name": "title",
+                "is_enabled": False,
+            },
+            content_type="application/json",
+        )
+        assert response.status_code == 200
+
+        # Check that update was logged
+        logs = AdminLog.query.filter_by(action="DATA_QUALITY_FIELD_CONFIG_UPDATE").all()
+        assert len(logs) == 1
+        assert logs[0].admin_user_id == admin_user.id
+        assert "title" in logs[0].details
+
+    def test_data_quality_metrics_exclude_disabled_fields(self, logged_in_admin, sample_contacts_for_dashboard):
+        """Test that metrics API excludes disabled fields"""
+        client, admin_user = logged_in_admin
+
+        # Set disabled fields
+        config = {
+            "contact": ["notes", "photo_url"],
+        }
+        DataQualityFieldConfigService.set_disabled_fields(config)
+
+        # Get metrics
+        response = client.get("/admin/data-quality/api/entity/contact")
+        assert response.status_code == 200
+
+        data = json.loads(response.data)
+        field_names = [f["field_name"] for f in data["fields"]]
+
+        # Verify disabled fields are not in the response
+        assert "notes" not in field_names
+        assert "photo_url" not in field_names
+
+        # Verify enabled fields are still present
+        assert "first_name" in field_names
+        assert "email" in field_names
+
+    def test_data_quality_overall_metrics_exclude_disabled_fields(
+        self, logged_in_admin, sample_contacts_for_dashboard
+    ):
+        """Test that overall metrics API excludes disabled fields"""
+        client, admin_user = logged_in_admin
+
+        # Set disabled fields
+        config = {
+            "contact": ["notes"],
+        }
+        DataQualityFieldConfigService.set_disabled_fields(config)
+
+        # Get overall metrics
+        response = client.get("/admin/data-quality/api/metrics")
+        assert response.status_code == 200
+
+        data = json.loads(response.data)
+
+        # Find contact entity metrics
+        contact_metrics = next((em for em in data["entity_metrics"] if em["entity_type"] == "contact"), None)
+        if contact_metrics:
+            field_names = [f["field_name"] for f in contact_metrics["fields"]]
+            assert "notes" not in field_names

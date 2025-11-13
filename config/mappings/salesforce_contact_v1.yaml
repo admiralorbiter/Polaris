@@ -47,10 +47,12 @@ fields:
     transform: parse_date
   - source: Racial_Ethnic_Background__c
     target: demographics.racial_ethnic_background
+    transform: normalize_race_ethnicity
   - source: Age_Group__c
     target: demographics.age_group
   - source: Highest_Level_of_Educational__c
     target: demographics.highest_education_level
+    transform: normalize_education_level
   - source: Contact_Type__c
     target: type
   - source: AccountId
@@ -134,4 +136,8 @@ transforms:
     description: Parse Salesforce datetime strings into ISO-8601 (UTC).
   split_semicolon:
     description: Split semicolon-separated values (multi-select picklists) into arrays.
+  normalize_race_ethnicity:
+    description: Normalize Salesforce racial/ethnic background values to match RaceEthnicity enum values.
+  normalize_education_level:
+    description: Normalize Salesforce education level values to match EducationLevel enum values.
 

@@ -210,11 +210,11 @@ def test_pipeline_with_new_fields(app):
     assert normalized["engagement"]["first_volunteer_date"] == "2024-01-15"
     assert normalized["engagement"]["attended_sessions_count"] == "5"
     assert normalized["engagement"]["last_email_message_at"] == "2024-01-20T10:30:00.000Z"
-    
+
     assert "demographics" in normalized
-    assert normalized["demographics"]["racial_ethnic_background"] == "Asian"
+    assert normalized["demographics"]["racial_ethnic_background"] == "asian"
     assert normalized["demographics"]["age_group"] == "Adult"
-    assert normalized["demographics"]["highest_education_level"] == "Bachelors"
+    assert normalized["demographics"]["highest_education_level"] == "bachelors"
     
     assert "address" in normalized
     assert normalized["address"]["mailing"]["street"] == "123 Main St"

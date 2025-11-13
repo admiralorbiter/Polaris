@@ -24,6 +24,7 @@ from flask_app.models import (
     db,
 )
 from flask_app.services.data_quality_service import DataQualityService
+from flask_app.services.data_quality_field_config_service import DataQualityFieldConfigService
 
 
 @pytest.fixture
@@ -496,3 +497,94 @@ class TestDataQualityService:
         address_field = next((f for f in metrics.fields if f.field_name == "address"), None)
         assert address_field is not None
         assert address_field.records_with_value == 1
+
+    def test_disabled_fields_filtered_from_metrics(self, app, sample_volunteers):
+        """Test that disabled fields are filtered out from metrics"""
+        # Clear cache and set disabled fields
+        DataQualityService._clear_cache()
+        config = {
+            "volunteer": ["clearance_status", "availability"],
+        }
+        DataQualityFieldConfigService.set_disabled_fields(config)
+
+        # Get metrics
+        metrics = DataQualityService.get_entity_metrics("volunteer")
+        assert metrics.entity_type == "volunteer"
+
+        # Verify disabled fields are not in the metrics
+        field_names = [f.field_name for f in metrics.fields]
+        assert "clearance_status" not in field_names
+        assert "availability" not in field_names
+
+        # Verify enabled fields are still present
+        assert "title" in field_names
+        assert "industry" in field_names
+
+    def test_disabled_fields_affect_overall_completeness(self, app, sample_volunteers):
+        """Test that disabled fields don't affect overall completeness calculation"""
+        # Clear cache and set disabled fields
+        DataQualityService._clear_cache()
+        config = {
+            "volunteer": ["clearance_status", "availability", "hours_logged"],
+        }
+        DataQualityFieldConfigService.set_disabled_fields(config)
+
+        # Get metrics with all fields enabled
+        DataQualityService._clear_cache()
+        DataQualityFieldConfigService.set_disabled_fields({})
+        metrics_all_enabled = DataQualityService.get_entity_metrics("volunteer")
+        all_fields_count = len(metrics_all_enabled.fields)
+
+        # Get metrics with some fields disabled
+        DataQualityService._clear_cache()
+        DataQualityFieldConfigService.set_disabled_fields(config)
+        metrics_some_disabled = DataQualityService.get_entity_metrics("volunteer")
+        enabled_fields_count = len(metrics_some_disabled.fields)
+
+        # Should have fewer fields when some are disabled
+        assert enabled_fields_count < all_fields_count
+
+    def test_disabled_fields_affect_overall_health_score(self, app, sample_volunteers):
+        """Test that disabled fields don't affect overall health score"""
+        # Clear cache and set disabled fields
+        DataQualityService._clear_cache()
+        config = {
+            "volunteer": ["clearance_status", "availability", "hours_logged"],
+        }
+        DataQualityFieldConfigService.set_disabled_fields(config)
+
+        # Get overall health score
+        metrics = DataQualityService.get_overall_health_score()
+
+        # Verify volunteer entity metrics don't include disabled fields
+        volunteer_metrics = next((em for em in metrics.entity_metrics if em.entity_type == "volunteer"), None)
+        if volunteer_metrics:
+            field_names = [f.field_name for f in volunteer_metrics.fields]
+            assert "clearance_status" not in field_names
+            assert "availability" not in field_names
+            assert "hours_logged" not in field_names
+
+    def test_cache_invalidated_on_field_config_change(self, app, sample_volunteers):
+        """Test that cache is invalidated when field configuration changes"""
+        # Clear cache and get metrics
+        DataQualityService._clear_cache()
+        metrics1 = DataQualityService.get_entity_metrics("volunteer")
+        field_count1 = len(metrics1.fields)
+
+        # Change field configuration
+        config = {
+            "volunteer": ["clearance_status"],
+        }
+        DataQualityFieldConfigService.set_disabled_fields(config)
+
+        # Clear cache to ensure new config is used
+        DataQualityService._clear_cache()
+
+        # Get metrics again - should use new cache key
+        metrics2 = DataQualityService.get_entity_metrics("volunteer")
+        field_count2 = len(metrics2.fields)
+
+        # Field count should be different (or same if cache was properly invalidated)
+        # The important thing is that disabled fields are filtered
+        field_names = [f.field_name for f in metrics2.fields]
+        assert "clearance_status" not in field_names

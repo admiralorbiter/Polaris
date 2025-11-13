@@ -3,9 +3,11 @@
 Data Quality Service - Calculate field completeness metrics for all entities
 """
 
+import hashlib
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from flask import current_app
 from sqlalchemy import and_, func
@@ -27,6 +29,9 @@ from flask_app.models import (
     VolunteerInterest,
     VolunteerSkill,
     db,
+)
+from flask_app.services.data_quality_field_config_service import (
+    DataQualityFieldConfigService,
 )
 
 
@@ -85,6 +90,15 @@ class DataQualityService:
             filter_str = "_".join(f"{k}:{v}" for k, v in sorted(filters.items()) if v)
             if filter_str:
                 key_parts.append(filter_str)
+        # Include field configuration in cache key to invalidate when config changes
+        # Use hash of JSON serialization for stable, short cache key
+        disabled_fields = DataQualityFieldConfigService.get_disabled_fields()
+        # Sort for consistent serialization
+        config_str = json.dumps(
+            {k: sorted(v) for k, v in sorted(disabled_fields.items())}, sort_keys=True
+        )
+        config_hash = hashlib.md5(config_str.encode()).hexdigest()[:8]
+        key_parts.append(f"cfg:{config_hash}")
         return "_".join(key_parts)
 
     @classmethod
@@ -147,7 +161,7 @@ class DataQualityService:
             except Exception as e:
                 current_app.logger.error(f"Error calculating metrics for {entity_type}: {e}")
 
-        # Calculate overall health score
+        # Calculate overall health score (only using enabled fields, already filtered in get_entity_metrics)
         overall_health_score = (weighted_sum / total_weight) if total_weight > 0 else 0.0
 
         result = OverallMetrics(
@@ -159,6 +173,27 @@ class DataQualityService:
 
         cls._set_cache(cache_key, result)
         return result
+
+    @classmethod
+    def _filter_disabled_fields(
+        cls, fields: List[FieldMetric], entity_type: str, organization_id: Optional[int] = None
+    ) -> List[FieldMetric]:
+        """
+        Filter out disabled fields from metrics.
+
+        Args:
+            fields: List of field metrics
+            entity_type: Entity type
+            organization_id: Optional organization ID
+
+        Returns:
+            Filtered list of field metrics (only enabled fields)
+        """
+        disabled_fields = DataQualityFieldConfigService.get_disabled_fields(organization_id)
+        disabled_for_entity: Set[str] = set(disabled_fields.get(entity_type, []))
+
+        # Filter out disabled fields
+        return [field for field in fields if field.field_name not in disabled_for_entity]
 
     @classmethod
     def get_entity_metrics(cls, entity_type: str, organization_id: Optional[int] = None) -> EntityMetrics:
@@ -188,7 +223,10 @@ class DataQualityService:
         else:
             raise ValueError(f"Unknown entity type: {entity_type}")
 
-        # Calculate overall completeness
+        # Filter out disabled fields
+        fields = cls._filter_disabled_fields(fields, entity_type, organization_id)
+
+        # Calculate overall completeness (only using enabled fields)
         if fields:
             overall_completeness = sum(f.completeness_percentage for f in fields) / len(fields)
         else:

@@ -373,6 +373,13 @@ class SalesforceContactLoader:
                         break
                 if race_enum:
                     volunteer.race = race_enum
+                else:
+                    # Log when value doesn't match any enum value for debugging
+                    current_app.logger.warning(
+                        f"Racial/ethnic background value '{race_value}' from Salesforce doesn't match any RaceEthnicity enum. "
+                        f"Available enum values: {[r.value for r in RaceEthnicity]}. "
+                        f"Volunteer external_id: {external_id or 'N/A'}"
+                    )
             except Exception as e:
                 current_app.logger.warning(f"Failed to set race for volunteer: {e}")
         if demographics.get("age_group"):
@@ -399,8 +406,34 @@ class SalesforceContactLoader:
                         break
                 if education_enum:
                     volunteer.education_level = education_enum
+                else:
+                    # Log when value doesn't match any enum value for debugging
+                    current_app.logger.warning(
+                        f"Education level value '{education_value}' from Salesforce doesn't match any EducationLevel enum. "
+                        f"Available enum values: {[e.value for e in EducationLevel]}. "
+                        f"Volunteer external_id: {external_id or 'N/A'}"
+                    )
             except Exception as e:
                 current_app.logger.warning(f"Failed to set education_level for volunteer: {e}")
+        
+        # Apply employment fields
+        employment = payload.get("employment", {})
+        if employment.get("title"):
+            volunteer.title = _coerce_string(employment.get("title"))
+        if employment.get("department"):
+            # Store department in metadata or notes if there's no dedicated field
+            # For now, we'll add it to notes or create a separate field
+            # Check if volunteer model has a department field
+            if hasattr(volunteer, 'department'):
+                volunteer.department = _coerce_string(employment.get("department"))
+            else:
+                # If no department field, append to notes
+                dept_value = _coerce_string(employment.get("department"))
+                if dept_value:
+                    if volunteer.notes:
+                        volunteer.notes = f"{volunteer.notes}\nDepartment: {dept_value}"
+                    else:
+                        volunteer.notes = f"Department: {dept_value}"
         
         # Apply engagement fields
         engagement = payload.get("engagement", {})
@@ -414,6 +447,19 @@ class SalesforceContactLoader:
                     volunteer.first_volunteer_date = date_str.date()
             except Exception as e:
                 current_app.logger.warning(f"Failed to parse first_volunteer_date: {e}")
+        if engagement.get("last_volunteer_date"):
+            from datetime import datetime as dt
+            try:
+                date_str = engagement.get("last_volunteer_date")
+                if isinstance(date_str, str):
+                    volunteer.last_volunteer_date = dt.fromisoformat(date_str[:10]).date()
+                elif hasattr(date_str, 'date'):
+                    volunteer.last_volunteer_date = date_str.date()
+                elif hasattr(date_str, 'year'):
+                    # Already a date object
+                    volunteer.last_volunteer_date = date_str
+            except Exception as e:
+                current_app.logger.warning(f"Failed to parse last_volunteer_date: {e}")
         
         # Apply notes
         notes_data = payload.get("notes", {})
@@ -660,6 +706,13 @@ class SalesforceContactLoader:
                         break
                 if race_enum:
                     volunteer.race = race_enum
+                else:
+                    # Log when value doesn't match any enum value for debugging
+                    current_app.logger.warning(
+                        f"Racial/ethnic background value '{race_value}' from Salesforce doesn't match any RaceEthnicity enum. "
+                        f"Available enum values: {[r.value for r in RaceEthnicity]}. "
+                        f"Volunteer external_id: {external_id or 'N/A'}"
+                    )
             except Exception as e:
                 current_app.logger.warning(f"Failed to set race for volunteer: {e}")
         if demographics.get("age_group"):
@@ -686,8 +739,34 @@ class SalesforceContactLoader:
                         break
                 if education_enum:
                     volunteer.education_level = education_enum
+                else:
+                    # Log when value doesn't match any enum value for debugging
+                    current_app.logger.warning(
+                        f"Education level value '{education_value}' from Salesforce doesn't match any EducationLevel enum. "
+                        f"Available enum values: {[e.value for e in EducationLevel]}. "
+                        f"Volunteer external_id: {external_id or 'N/A'}"
+                    )
             except Exception as e:
                 current_app.logger.warning(f"Failed to set education_level for volunteer: {e}")
+        
+        # Apply employment fields
+        employment = payload.get("employment", {})
+        if employment.get("title"):
+            volunteer.title = _coerce_string(employment.get("title"))
+        if employment.get("department"):
+            # Store department in metadata or notes if there's no dedicated field
+            # For now, we'll add it to notes or create a separate field
+            # Check if volunteer model has a department field
+            if hasattr(volunteer, 'department'):
+                volunteer.department = _coerce_string(employment.get("department"))
+            else:
+                # If no department field, append to notes
+                dept_value = _coerce_string(employment.get("department"))
+                if dept_value:
+                    if volunteer.notes:
+                        volunteer.notes = f"{volunteer.notes}\nDepartment: {dept_value}"
+                    else:
+                        volunteer.notes = f"Department: {dept_value}"
         
         # Apply engagement fields
         engagement = payload.get("engagement", {})
@@ -701,6 +780,19 @@ class SalesforceContactLoader:
                     volunteer.first_volunteer_date = date_str.date()
             except Exception as e:
                 current_app.logger.warning(f"Failed to parse first_volunteer_date: {e}")
+        if engagement.get("last_volunteer_date"):
+            from datetime import datetime as dt
+            try:
+                date_str = engagement.get("last_volunteer_date")
+                if isinstance(date_str, str):
+                    volunteer.last_volunteer_date = dt.fromisoformat(date_str[:10]).date()
+                elif hasattr(date_str, 'date'):
+                    volunteer.last_volunteer_date = date_str.date()
+                elif hasattr(date_str, 'year'):
+                    # Already a date object
+                    volunteer.last_volunteer_date = date_str
+            except Exception as e:
+                current_app.logger.warning(f"Failed to parse last_volunteer_date: {e}")
         
         # Apply notes (update if provided)
         notes_data = payload.get("notes", {})

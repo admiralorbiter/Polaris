@@ -259,6 +259,18 @@ def create_default_feature_flags():
     print("Default system feature flags created")
 
 
+def initialize_data_quality_field_config():
+    """Initialize data quality field configuration with defaults"""
+    from flask_app.services.data_quality_field_config_service import (
+        DataQualityFieldConfigService,
+    )
+
+    if DataQualityFieldConfigService.initialize_default_config():
+        print("Data quality field configuration initialized")
+    else:
+        print("Warning: Failed to initialize data quality field configuration")
+
+
 def init_database():
     """Initialize database with all default data"""
     with app.app_context():
@@ -282,6 +294,9 @@ def init_database():
         print("Creating default feature flags...")
         create_default_feature_flags()
         print("Default feature flags created")
+
+        print("Initializing data quality field configuration...")
+        initialize_data_quality_field_config()
 
         print("Creating default organization...")
         default_org = create_default_organization()

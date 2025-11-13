@@ -334,11 +334,211 @@ def _build_transform_registry() -> Dict[str, Any]:
             return []
         return [v.strip() for v in text.split(";") if v.strip()]
 
+    def normalize_race_ethnicity(value: Any) -> str | None:
+        """Normalize Salesforce racial/ethnic background values to enum values."""
+        if not value:
+            return None
+        text = str(value).strip().lower()
+        if not text:
+            return None
+        
+        # Mapping of Salesforce values to enum values (case-insensitive)
+        # Based on actual Salesforce picklist values observed
+        mapping = {
+            # Prefer not to answer variants
+            "prefer not to answer": "prefer_not_to_say",
+            "prefer not to say": "prefer_not_to_say",
+            "prefer_not_to_say": "prefer_not_to_say",
+            "prefer not to respond": "prefer_not_to_say",
+            
+            # Black/African American variants
+            "black": "black_or_african_american",
+            "black/african american": "black_or_african_american",
+            "african american": "black_or_african_american",
+            "african-american": "black_or_african_american",
+            "black_or_african_american": "black_or_african_american",
+            
+            # White/Caucasian variants
+            "white": "white",
+            "caucasian": "white",
+            "white/caucasian": "white",
+            "white/caucasian/european american": "white",
+            "european american": "white",
+            
+            # Asian variants
+            "asian": "asian",
+            "asian american": "asian",
+            "asian/pacific islander": "asian",
+            
+            # Hispanic/Latino variants
+            "hispanic": "hispanic_or_latino",
+            "latino": "hispanic_or_latino",
+            "latina": "hispanic_or_latino",
+            "hispanic or latino": "hispanic_or_latino",
+            "hispanic/latino": "hispanic_or_latino",
+            "hispanic_or_latino": "hispanic_or_latino",
+            
+            # Native American variants
+            "native american": "native_american",
+            "american indian": "native_american",
+            "native american/american indian": "native_american",
+            "native_american": "native_american",
+            
+            # Pacific Islander variants
+            "pacific islander": "pacific_islander",
+            "pacific_islander": "pacific_islander",
+            
+            # Multi-racial/Bi-racial variants
+            "bi-racial": "two_or_more",
+            "multi-racial": "two_or_more",
+            "multiracial": "two_or_more",
+            "bi-racial/multi-racial/multicultural white/caucasian/european american": "two_or_more",
+            "bi-racial/multi-racial": "two_or_more",
+            "two or more": "two_or_more",
+            "two_or_more": "two_or_more",
+            "mixed": "two_or_more",
+            "multicultural": "two_or_more",
+            
+            # Other
+            "other": "other",
+        }
+        
+        # Direct lookup
+        normalized = mapping.get(text)
+        if normalized:
+            return normalized
+        
+        # Fuzzy matching for partial matches
+        # Check if text contains any key phrase
+        for key, enum_value in mapping.items():
+            if key in text or text in key:
+                return enum_value
+        
+        # If no match found, return None to let the loader log it
+        # This will help identify new values that need mapping
+        return None
+
+    def normalize_education_level(value: Any) -> str | None:
+        """Normalize Salesforce education level values to enum values."""
+        if not value:
+            return None
+        text = str(value).strip().lower()
+        if not text:
+            return None
+        
+        # Mapping of Salesforce values to enum values (case-insensitive)
+        # Based on common education level picklist values
+        mapping = {
+            # Less than high school variants
+            "less than high school": "less_than_high_school",
+            "less than hs": "less_than_high_school",
+            "no high school": "less_than_high_school",
+            "elementary school": "less_than_high_school",
+            "middle school": "less_than_high_school",
+            "less_than_high_school": "less_than_high_school",
+            
+            # High school variants
+            "high school": "high_school",
+            "high school diploma": "high_school",
+            "high school graduate": "high_school",
+            "hs diploma": "high_school",
+            "ged": "high_school",
+            "general equivalency diploma": "high_school",
+            "high_school": "high_school",
+            
+            # Some college variants
+            "some college": "some_college",
+            "some college credit": "some_college",
+            "college credit": "some_college",
+            "attended college": "some_college",
+            "some_college": "some_college",
+            
+            # Associate's degree variants
+            "associate's": "associates",
+            "associates": "associates",
+            "associate degree": "associates",
+            "associate's degree": "associates",
+            "aa": "associates",
+            "a.a.": "associates",
+            "as": "associates",
+            "a.s.": "associates",
+            "aas": "associates",
+            
+            # Bachelor's degree variants
+            "bachelor's": "bachelors",
+            "bachelor": "bachelors",
+            "bachelors": "bachelors",
+            "bachelor's degree": "bachelors",
+            "bachelor degree": "bachelors",
+            "ba": "bachelors",
+            "b.a.": "bachelors",
+            "bs": "bachelors",
+            "b.s.": "bachelors",
+            "bsba": "bachelors",
+            "bsc": "bachelors",
+            
+            # Master's degree variants
+            "master's": "masters",
+            "masters": "masters",
+            "master": "masters",
+            "master's degree": "masters",
+            "master degree": "masters",
+            "ma": "masters",
+            "m.a.": "masters",
+            "ms": "masters",
+            "m.s.": "masters",
+            "msc": "masters",
+            "mba": "masters",
+            
+            # Doctorate variants
+            "doctorate": "doctorate",
+            "doctorate degree": "doctorate",
+            "phd": "doctorate",
+            "ph.d.": "doctorate",
+            "ph.d": "doctorate",
+            "d.phil": "doctorate",
+            "ed.d.": "doctorate",
+            "edd": "doctorate",
+            "doctoral degree": "doctorate",
+            
+            # Professional degree variants
+            "professional": "professional",
+            "professional degree": "professional",
+            "jd": "professional",
+            "j.d.": "professional",
+            "law degree": "professional",
+            "md": "professional",
+            "m.d.": "professional",
+            "medical degree": "professional",
+            
+            # Other
+            "other": "other",
+            "not specified": "other",
+            "prefer not to answer": "other",
+        }
+        
+        # Direct lookup
+        normalized = mapping.get(text)
+        if normalized:
+            return normalized
+        
+        # Fuzzy matching for partial matches
+        # Check if text contains any key phrase
+        for key, enum_value in mapping.items():
+            if key in text or text in key:
+                return enum_value
+        
+        # If no match found, return None to let the loader log it
+        # This will help identify new values that need mapping
+        return None
+
     return {
         "normalize_phone": normalize_phone,
         "parse_date": parse_date,
         "parse_datetime": parse_datetime,
         "split_semicolon": split_semicolon,
+        "normalize_race_ethnicity": normalize_race_ethnicity,
+        "normalize_education_level": normalize_education_level,
     }
 
 

@@ -1,0 +1,232 @@
+/* Data Quality Field Configuration Styles */
+
+.data-quality-fields {
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+.data-quality-fields .container-fluid {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.fields-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.field-item {
+  background-color: #ffffff;
+  transition: all 0.2s ease-in-out;
+}
+
+.field-item:hover {
+  background-color: #f8f9fa;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.field-item .form-check-input {
+  width: 3rem;
+  height: 1.5rem;
+  cursor: pointer;
+}
+
+.field-item .form-check-label {
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.875rem;
+  color: #6c757d;
+  margin-left: 0.5rem;
+}
+
+.field-item .form-check-input:checked ~ .form-check-label {
+  color: #198754;
+  font-weight: 500;
+}
+
+.field-item .form-check-input:not(:checked) ~ .form-check-label {
+  color: #dc3545;
+  font-weight: 500;
+}
+
+.field-item label.form-label {
+  font-size: 1rem;
+  color: #212529;
+  margin-bottom: 0.25rem;
+}
+
+.field-item small.text-muted {
+  font-size: 0.75rem;
+  font-family: monospace;
+}
+
+/* Loading and Error States */
+#dq-fields-loading {
+  min-height: 400px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+#dq-fields-error,
+#dq-fields-success {
+  margin-bottom: 1.5rem;
+}
+
+/* Entity Tabs Container */
+.tabs-container {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+
+.tabs-container::-webkit-scrollbar {
+  height: 8px;
+}
+
+.tabs-container::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+.tabs-container::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 4px;
+}
+
+.tabs-container::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* Entity Tabs - Override global nav-link styles with more specific selectors */
+#dq-fields-entity-tabs {
+  border-bottom: 2px solid #dee2e6;
+  display: flex !important;
+  flex-wrap: nowrap;
+  min-width: 100%;
+  width: max-content;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background-color: transparent;
+}
+
+#dq-fields-entity-tabs .nav-item {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* Make inactive tabs clearly visible with good contrast */
+#dq-fields-entity-tabs .nav-item button.nav-link {
+  color: #495057 !important;
+  border: none !important;
+  border-bottom: 2px solid transparent !important;
+  padding: 0.75rem 1rem;
+  transition: all 0.2s ease-in-out;
+  white-space: nowrap;
+  display: block;
+  cursor: pointer;
+  background-color: transparent !important;
+  font-weight: 500;
+  position: relative;
+}
+
+/* Remove any ::after pseudo-elements from global styles */
+#dq-fields-entity-tabs .nav-item button.nav-link::after {
+  display: none !important;
+}
+
+/* Hover state - make tabs more prominent */
+#dq-fields-entity-tabs .nav-item button.nav-link:hover {
+  color: #212529 !important;
+  border-bottom-color: #adb5bd !important;
+  background-color: rgba(0, 0, 0, 0.05) !important;
+}
+
+/* Active tab - very clear and distinct */
+#dq-fields-entity-tabs .nav-item button.nav-link.active {
+  color: #0d6efd !important;
+  border-bottom-color: #0d6efd !important;
+  border-bottom-width: 3px !important;
+  font-weight: 600 !important;
+  background-color: transparent !important;
+}
+
+/* Tab Content */
+.tab-content {
+  margin-top: 1rem;
+}
+
+.tab-pane {
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .field-item {
+    padding: 1rem !important;
+  }
+
+  .field-item .d-flex {
+    flex-direction: column;
+    align-items: flex-start !important;
+  }
+
+  .field-item .form-check {
+    margin-top: 0.75rem;
+    width: 100%;
+  }
+
+  .field-item .form-check-input {
+    margin-left: 0;
+  }
+
+  /* Ensure tabs are scrollable on mobile */
+  #dq-fields-entity-tabs {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+  }
+
+  #dq-fields-entity-tabs .nav-link {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+  }
+}
+
+/* Save Button State */
+#dq-fields-save-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+#dq-fields-save-btn:not(:disabled) {
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(13, 110, 253, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(13, 110, 253, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(13, 110, 253, 0);
+  }
+}
+
