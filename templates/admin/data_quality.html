@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block title %}Data Quality Dashboard{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/data_quality.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid data-quality-dashboard py-4" data-component="data-quality-dashboard">
+  <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4">
+    <div>
+      <h1 class="h3 mb-1">Data Quality Dashboard</h1>
+      <p class="text-muted mb-0">Monitor field-level completeness across all entities in your database.</p>
+    </div>
+    <div class="d-flex gap-2 mt-3 mt-md-0">
+      <button class="btn btn-outline-primary" id="dq-refresh-btn" data-action="refresh">
+        <i class="fas fa-sync-alt"></i> Refresh
+      </button>
+      <div class="btn-group">
+        <button type="button" class="btn btn-outline-success dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+          <i class="fas fa-download"></i> Export
+        </button>
+        <ul class="dropdown-menu">
+          <li><a class="dropdown-item" href="#" id="dq-export-csv-btn">Export CSV</a></li>
+          <li><a class="dropdown-item" href="#" id="dq-export-json-btn">Export JSON</a></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="card shadow-sm mb-4">
+    <div class="card-header">
+      <h2 class="h5 mb-0">Filters</h2>
+    </div>
+    <div class="card-body">
+      <form id="dq-filter-form" class="row g-3 align-items-end" autocomplete="off">
+        {% if is_super_admin %}
+        <div class="col-sm-6 col-lg-3">
+          <label for="filter-organization" class="form-label">Organization</label>
+          <select id="filter-organization" class="form-select" name="organization_id">
+            <option value="">All Organizations</option>
+            {% for org in organizations %}
+            <option value="{{ org.id }}" {% if organization and organization.id == org.id %}selected{% endif %}>{{ org.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        {% endif %}
+        <div class="col-sm-6 col-lg-3">
+          <button type="button" class="btn btn-outline-secondary" id="dq-reset-btn">Reset Filters</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Overall Health Score -->
+  <div class="card shadow-sm mb-4" id="dq-health-score-card">
+    <div class="card-body text-center">
+      <h2 class="h4 mb-3">Overall Data Quality Health Score</h2>
+      <div class="health-score-display">
+        <div class="health-score-circle" id="dq-health-score-circle">
+          <div class="health-score-value" id="dq-health-score-value">--</div>
+          <div class="health-score-label">%</div>
+        </div>
+      </div>
+      <p class="text-muted mt-3 mb-0" id="dq-health-score-description">Calculating...</p>
+      <p class="text-muted small" id="dq-timestamp">Last updated: --</p>
+    </div>
+  </div>
+
+  <!-- Entity Summary Cards -->
+  <div class="row g-3 mb-4" id="dq-entity-cards">
+    <!-- Cards will be populated by JavaScript -->
+  </div>
+
+  <!-- Entity Details Tables -->
+  <div class="card shadow-sm mb-4" id="dq-entity-details">
+    <div class="card-header">
+      <h2 class="h5 mb-0">Field-Level Completeness</h2>
+    </div>
+    <div class="card-body">
+      <div class="mb-3">
+        <select id="dq-entity-selector" class="form-select">
+          <option value="">Select an entity to view details...</option>
+          <option value="contact">Contacts</option>
+          <option value="volunteer">Volunteers</option>
+          <option value="student">Students</option>
+          <option value="teacher">Teachers</option>
+          <option value="event">Events</option>
+          <option value="organization">Organizations</option>
+          <option value="user">Users</option>
+        </select>
+      </div>
+      <div id="dq-entity-table-container">
+        <p class="text-muted text-center">Select an entity above to view field-level completeness metrics.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Loading Overlay -->
+  <div class="loading-overlay" id="dq-loading-overlay" style="display: none;">
+    <div class="spinner-border text-primary" role="status">
+      <span class="visually-hidden">Loading...</span>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  // Configuration passed from server
+  window.DATA_QUALITY_CONFIG = {
+    metricsUrl: "{{ url_for('data_quality_metrics') }}",
+    entityMetricsUrl: "{{ url_for('data_quality_entity_metrics', entity_type='__ENTITY_TYPE__') }}",
+    exportUrl: "{{ url_for('data_quality_export') }}",
+    organizationId: {% if organization %}{{ organization.id }}{% else %}null{% endif %},
+    isSuperAdmin: {{ 'true' if is_super_admin else 'false' }},
+  };
+</script>
+<script src="{{ url_for('static', filename='js/data_quality.js') }}"></script>
+{% endblock %}
+

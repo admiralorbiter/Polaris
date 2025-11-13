@@ -29,6 +29,7 @@
                   <li><a class="dropdown-item" href="{{ url_for('admin_organizations') }}">Organizations</a></li>
                   <li><a class="dropdown-item" href="{{ url_for('admin_users') }}">Manage Users</a></li>
                   <li><a class="dropdown-item" href="{{ url_for('admin_logs') }}">View Logs</a></li>
+                  <li><a class="dropdown-item" href="{{ url_for('data_quality_dashboard') }}">Data Quality</a></li>
                   {% if importer_enabled and importer_menu_items %}
                     <li><hr class="dropdown-divider"></li>
                     {% for item in importer_menu_items %}

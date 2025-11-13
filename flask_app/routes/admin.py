@@ -8,7 +8,8 @@ from sqlalchemy import desc
 from werkzeug.security import generate_password_hash
 
 from flask_app.forms import ChangePasswordForm, CreateUserForm, UpdateUserForm
-from flask_app.models import AdminLog, SystemMetrics, User, db
+from flask_app.models import AdminLog, Organization, SystemMetrics, User, db
+from flask_app.services.data_quality_service import DataQualityService
 from flask_app.utils.permissions import get_current_organization, permission_required
 
 
@@ -763,3 +764,264 @@ def register_admin_routes(app):
         except Exception as e:
             current_app.logger.error(f"Error getting stats: {str(e)}")
             return jsonify({"error": "Failed to get statistics"}), 500
+
+    # Data Quality Dashboard Routes
+    @app.route("/admin/data-quality")
+    @login_required
+    @permission_required("view_users", org_context=False)
+    def data_quality_dashboard():
+        """Main data quality dashboard page"""
+        try:
+            organization = get_current_organization()
+            organization_id = organization.id if organization and not current_user.is_super_admin else None
+
+            # Get available organizations for filter
+            if current_user.is_super_admin:
+                organizations = Organization.query.filter_by(is_active=True).all()
+            else:
+                organizations = [organization] if organization else []
+
+            # Log dashboard access
+            AdminLog.log_action(
+                admin_user_id=current_user.id,
+                action="DATA_QUALITY_DASHBOARD_VIEW",
+                details=f"Viewed data quality dashboard",
+                ip_address=request.remote_addr,
+                user_agent=request.headers.get("User-Agent"),
+            )
+
+            current_app.logger.info(f"Data quality dashboard accessed by {current_user.username}")
+            return render_template(
+                "admin/data_quality.html",
+                organization=organization,
+                organizations=organizations,
+                is_super_admin=current_user.is_super_admin,
+            )
+        except Exception as e:
+            current_app.logger.error(f"Error in data quality dashboard: {str(e)}")
+            flash("An error occurred while loading the data quality dashboard.", "danger")
+            return redirect(url_for("admin_dashboard"))
+
+    @app.route("/admin/data-quality/api/metrics")
+    @login_required
+    @permission_required("view_users", org_context=False)
+    def data_quality_metrics():
+        """Get overall metrics as JSON"""
+        try:
+            organization = get_current_organization()
+            organization_id = None
+
+            # Get organization_id from query parameter if super admin
+            if current_user.is_super_admin:
+                org_id_param = request.args.get("organization_id", type=int)
+                if org_id_param:
+                    organization_id = org_id_param
+            elif organization:
+                # Non-super admin can only see their organization
+                organization_id = organization.id
+
+            # Get overall metrics
+            metrics = DataQualityService.get_overall_health_score(organization_id=organization_id)
+
+            # Convert to JSON-serializable format
+            response = {
+                "overall_health_score": metrics.overall_health_score,
+                "total_entities": metrics.total_entities,
+                "timestamp": metrics.timestamp.isoformat(),
+                "entity_metrics": [
+                    {
+                        "entity_type": em.entity_type,
+                        "total_records": em.total_records,
+                        "overall_completeness": em.overall_completeness,
+                        "key_metrics": em.key_metrics,
+                    }
+                    for em in metrics.entity_metrics
+                ],
+            }
+
+            return jsonify(response)
+        except Exception as e:
+            current_app.logger.error(f"Error getting data quality metrics: {str(e)}", exc_info=True)
+            return jsonify({"error": "Failed to get data quality metrics"}), 500
+
+    @app.route("/admin/data-quality/api/entity/<entity_type>")
+    @login_required
+    @permission_required("view_users", org_context=False)
+    def data_quality_entity_metrics(entity_type):
+        """Get entity-specific metrics"""
+        try:
+            organization = get_current_organization()
+            organization_id = None
+
+            # Get organization_id from query parameter if super admin
+            if current_user.is_super_admin:
+                org_id_param = request.args.get("organization_id", type=int)
+                if org_id_param:
+                    organization_id = org_id_param
+            elif organization:
+                # Non-super admin can only see their organization
+                organization_id = organization.id
+
+            # Validate entity type
+            valid_entity_types = [
+                "contact",
+                "volunteer",
+                "student",
+                "teacher",
+                "event",
+                "organization",
+                "user",
+            ]
+            if entity_type not in valid_entity_types:
+                return jsonify({"error": f"Invalid entity type: {entity_type}"}), 400
+
+            # Get entity metrics
+            metrics = DataQualityService.get_entity_metrics(
+                entity_type=entity_type, organization_id=organization_id
+            )
+
+            # Convert to JSON-serializable format
+            response = {
+                "entity_type": metrics.entity_type,
+                "total_records": metrics.total_records,
+                "overall_completeness": metrics.overall_completeness,
+                "key_metrics": metrics.key_metrics,
+                "fields": [
+                    {
+                        "field_name": field.field_name,
+                        "total_records": field.total_records,
+                        "records_with_value": field.records_with_value,
+                        "records_without_value": field.records_without_value,
+                        "completeness_percentage": field.completeness_percentage,
+                        "status": field.status,
+                    }
+                    for field in metrics.fields
+                ],
+            }
+
+            return jsonify(response)
+        except Exception as e:
+            current_app.logger.error(
+                f"Error getting entity metrics for {entity_type}: {str(e)}", exc_info=True
+            )
+            return jsonify({"error": f"Failed to get metrics for {entity_type}"}), 500
+
+    @app.route("/admin/data-quality/api/export")
+    @login_required
+    @permission_required("view_users", org_context=False)
+    def data_quality_export():
+        """Export metrics as CSV/JSON"""
+        try:
+            import csv
+            import io
+            import json
+
+            organization = get_current_organization()
+            organization_id = None
+
+            # Get organization_id from query parameter if super admin
+            if current_user.is_super_admin:
+                org_id_param = request.args.get("organization_id", type=int)
+                if org_id_param:
+                    organization_id = org_id_param
+            elif organization:
+                # Non-super admin can only see their organization
+                organization_id = organization.id
+
+            format_type = request.args.get("format", "json").lower()
+            if format_type not in ("csv", "json"):
+                return jsonify({"error": "Format must be 'csv' or 'json'"}), 400
+
+            # Get overall metrics
+            metrics = DataQualityService.get_overall_health_score(organization_id=organization_id)
+
+            # Log export
+            AdminLog.log_action(
+                admin_user_id=current_user.id,
+                action="DATA_QUALITY_EXPORT",
+                details=f"Exported data quality metrics as {format_type}",
+                ip_address=request.remote_addr,
+                user_agent=request.headers.get("User-Agent"),
+            )
+
+            if format_type == "json":
+                # Export as JSON
+                response_data = {
+                    "overall_health_score": metrics.overall_health_score,
+                    "total_entities": metrics.total_entities,
+                    "timestamp": metrics.timestamp.isoformat(),
+                    "entity_metrics": [
+                        {
+                            "entity_type": em.entity_type,
+                            "total_records": em.total_records,
+                            "overall_completeness": em.overall_completeness,
+                            "key_metrics": em.key_metrics,
+                            "fields": [
+                                {
+                                    "field_name": field.field_name,
+                                    "total_records": field.total_records,
+                                    "records_with_value": field.records_with_value,
+                                    "records_without_value": field.records_without_value,
+                                    "completeness_percentage": field.completeness_percentage,
+                                    "status": field.status,
+                                }
+                                for field in em.fields
+                            ],
+                        }
+                        for em in metrics.entity_metrics
+                    ],
+                }
+
+                from flask import make_response
+
+                response = make_response(json.dumps(response_data, indent=2))
+                response.headers["Content-Type"] = "application/json"
+                response.headers[
+                    "Content-Disposition"
+                ] = f'attachment; filename="data_quality_metrics_{metrics.timestamp.strftime("%Y%m%d_%H%M%S")}.json"'
+                return response
+            else:
+                # Export as CSV
+                output = io.StringIO()
+                writer = csv.writer(output)
+
+                # Write header
+                writer.writerow(
+                    [
+                        "Entity Type",
+                        "Field Name",
+                        "Total Records",
+                        "Records With Value",
+                        "Records Without Value",
+                        "Completeness Percentage",
+                        "Status",
+                    ]
+                )
+
+                # Write data
+                for em in metrics.entity_metrics:
+                    for field in em.fields:
+                        writer.writerow(
+                            [
+                                em.entity_type,
+                                field.field_name,
+                                field.total_records,
+                                field.records_with_value,
+                                field.records_without_value,
+                                field.completeness_percentage,
+                                field.status,
+                            ]
+                        )
+
+                from flask import make_response
+
+                response = make_response(output.getvalue())
+                response.headers["Content-Type"] = "text/csv; charset=utf-8"
+                response.headers[
+                    "Content-Disposition"
+                ] = f'attachment; filename="data_quality_metrics_{metrics.timestamp.strftime("%Y%m%d_%H%M%S")}.csv"'
+                return response
+
+        except Exception as e:
+            current_app.logger.error(f"Error exporting data quality metrics: {str(e)}", exc_info=True)
+            return jsonify({"error": "Failed to export data quality metrics"}), 500
