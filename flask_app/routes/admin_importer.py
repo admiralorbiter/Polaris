@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from pathlib import Path
 
-from flask import Blueprint, current_app, jsonify, make_response, render_template, request, send_file, url_for
+from flask import Blueprint, current_app, flash, jsonify, make_response, redirect, render_template, request, send_file, url_for
 from flask_login import current_user, login_required
 
 from config.monitoring import ImporterMonitoring
@@ -39,6 +39,8 @@ from flask_app.models.importer.schema import (
     ImporterWatermark,
     ImportRun,
     ImportRunStatus,
+    ImportSkip,
+    ImportSkipType,
 )
 from flask_app.utils.importer import is_importer_enabled
 from flask_app.utils.permissions import permission_required
@@ -1610,6 +1612,114 @@ def importer_dedupe_export():
     except Exception as exc:
         current_app.logger.exception("Failed to export dedupe summaries", exc_info=exc)
         return jsonify({"error": "Failed to export dedupe summaries."}), HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+@admin_importer_blueprint.get("/affiliations/quality")
+@login_required
+@permission_required("manage_imports", org_context=False)
+def importer_affiliation_quality():
+    """Display affiliation matching quality dashboard showing matched vs unmatched statistics."""
+    if not _ensure_importer_enabled():
+        return jsonify({"error": "Importer is disabled."}), HTTPStatus.NOT_FOUND
+
+    try:
+        from sqlalchemy import func, and_, or_
+        from sqlalchemy.orm import joinedload
+
+        # Get all affiliation import runs (runs that have staging_affiliations or clean_affiliations)
+        # We identify affiliation runs by checking staging_affiliations and clean_affiliations tables directly
+        from flask_app.models.importer.schema import StagingAffiliation, CleanAffiliation
+        staging_run_ids = db.session.query(StagingAffiliation.run_id).distinct().all()
+        clean_run_ids = db.session.query(CleanAffiliation.run_id).distinct().all()
+        all_affiliation_run_ids = set([r[0] for r in staging_run_ids] + [r[0] for r in clean_run_ids])
+        
+        affiliation_runs = []
+        if all_affiliation_run_ids:
+            affiliation_runs = (
+                db.session.query(ImportRun)
+                .filter(ImportRun.id.in_(all_affiliation_run_ids))
+                .order_by(ImportRun.started_at.desc())
+                .limit(100)
+                .all()
+            )
+
+        # Get overall statistics
+        total_attempted = 0
+        total_matched = 0
+        total_unmatched_contact = 0
+        total_unmatched_org = 0
+
+        # Get skip records for affiliation imports
+        skip_records = (
+            db.session.query(ImportSkip)
+            .filter(
+                ImportSkip.entity_type == "affiliation",
+                ImportSkip.skip_type == ImportSkipType.MISSING_REFERENCE,
+            )
+            .all()
+        )
+
+        # Process skip records to categorize by missing reference
+        for skip in skip_records:
+            details = skip.details_json or {}
+            missing_ref = details.get("missing_reference", "")
+            if missing_ref == "contact":
+                total_unmatched_contact += 1
+            elif missing_ref == "organization":
+                total_unmatched_org += 1
+
+        # Calculate totals from runs
+        run_stats = []
+        for run in affiliation_runs:
+            # Count staging records
+            staging_count = len(run.staging_affiliations) if run.staging_affiliations else 0
+            clean_count = len(run.clean_affiliations) if run.clean_affiliations else 0
+            
+            # Count skips for this run
+            run_skips = [s for s in skip_records if s.run_id == run.id]
+            run_unmatched_contact = sum(1 for s in run_skips if (s.details_json or {}).get("missing_reference") == "contact")
+            run_unmatched_org = sum(1 for s in run_skips if (s.details_json or {}).get("missing_reference") == "organization")
+            run_unmatched_total = len(run_skips)
+            
+            # Count successfully matched (clean records that were loaded)
+            run_matched = sum(1 for ca in run.clean_affiliations if ca.core_contact_organization_id is not None) if run.clean_affiliations else 0
+            
+            run_attempted = max(staging_count, clean_count)
+            total_attempted += run_attempted
+            total_matched += run_matched
+
+            run_stats.append({
+                "run_id": run.id,
+                "started_at": run.started_at.isoformat() if run.started_at else None,
+                "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+                "status": run.status.value,
+                "attempted": run_attempted,
+                "matched": run_matched,
+                "unmatched_contact": run_unmatched_contact,
+                "unmatched_org": run_unmatched_org,
+                "unmatched_total": run_unmatched_total,
+                "match_rate": (run_matched / run_attempted * 100) if run_attempted > 0 else 0,
+            })
+
+        total_unmatched = total_unmatched_contact + total_unmatched_org
+        overall_match_rate = (total_matched / total_attempted * 100) if total_attempted > 0 else 0
+
+        return render_template(
+            "admin/affiliation_quality.html",
+            total_attempted=total_attempted,
+            total_matched=total_matched,
+            total_unmatched=total_unmatched,
+            total_unmatched_contact=total_unmatched_contact,
+            total_unmatched_org=total_unmatched_org,
+            overall_match_rate=overall_match_rate,
+            run_stats=run_stats,
+            skip_records=skip_records[:100],  # Limit for display
+        )
+
+    except Exception as exc:
+        current_app.logger.exception("Failed to load affiliation quality dashboard", exc_info=exc)
+        flash("An error occurred while loading affiliation quality data.", "danger")
+        return redirect(url_for("admin_importer.importer_dashboard"))
 
 
 def register_importer_admin_routes(app):

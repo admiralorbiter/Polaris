@@ -17,6 +17,11 @@
       <a href="{{ url_for('data_quality_fields') }}" class="btn btn-outline-secondary">
         <i class="fas fa-cog"></i> Field Configuration
       </a>
+      {% if importer_enabled %}
+      <a href="{{ url_for('admin_importer.importer_affiliation_quality') }}" class="btn btn-outline-info">
+        <i class="fas fa-link"></i> Affiliation Matching Quality
+      </a>
+      {% endif %}
       <button class="btn btn-outline-primary" id="dq-refresh-btn" data-action="refresh">
         <i class="fas fa-sync-alt"></i> Refresh
       </button>

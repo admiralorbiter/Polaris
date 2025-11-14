@@ -171,6 +171,10 @@ def init_importer(app: Flask) -> None:
             "endpoint": "admin_importer.importer_dq_inbox_page",
         },
         {
+            "label": "Affiliation Matching Quality",
+            "endpoint": "admin_importer.importer_affiliation_quality",
+        },
+        {
             "label": "Importer Health",
             "endpoint": "importer.importer_healthcheck",
         },

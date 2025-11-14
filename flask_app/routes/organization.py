@@ -156,6 +156,7 @@ def register_organization_routes(app):
     def organizations_view(org_id):
         """View organization details"""
         try:
+            from flask_app.models import ContactOrganization, ExternalIdMap, Contact
             organization = (
                 db.session.query(Organization)
                 .options(
@@ -181,11 +182,34 @@ def register_organization_routes(app):
                 "total_volunteer_hours": total_hours,
             }
 
+            # Get all ContactOrganization records for this organization
+            org_links = (
+                db.session.query(ContactOrganization)
+                .options(joinedload(ContactOrganization.contact))
+                .filter_by(organization_id=org_id)
+                .order_by(ContactOrganization.start_date.desc())
+                .all()
+            )
+
+            # Get metadata for each organization link (role, status from ExternalIdMap)
+            organization_metadata = {}
+            if org_links:
+                org_link_ids = [link.id for link in org_links]
+                external_maps = db.session.query(ExternalIdMap).filter(
+                    ExternalIdMap.entity_type == "salesforce_affiliation",
+                    ExternalIdMap.entity_id.in_(org_link_ids),
+                    ExternalIdMap.external_system == "salesforce"
+                ).all()
+                for ext_map in external_maps:
+                    organization_metadata[ext_map.entity_id] = ext_map.metadata_json or {}
+
             return render_template(
                 "organizations/view.html",
                 organization=organization,
                 stats=stats,
                 primary_address=primary_address,
+                org_links=org_links,
+                organization_metadata=organization_metadata,
             )
 
         except Exception as e:

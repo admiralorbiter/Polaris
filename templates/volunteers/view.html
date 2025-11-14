@@ -356,6 +356,78 @@
                 </div>
             </div>
 
+            <!-- Organizations -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Organizations</h5>
+                </div>
+                <div class="card-body">
+                    {% if volunteer.organization_links %}
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Organization</th>
+                                    <th>Role</th>
+                                    <th>Start Date</th>
+                                    <th>End Date</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for org_link in volunteer.organization_links|sort(attribute='start_date', reverse=True) %}
+                                {% set metadata = organization_metadata.get(org_link.id, {}) %}
+                                <tr>
+                                    <td>
+                                        <a href="{{ url_for('organizations_view', org_id=org_link.organization.id) }}">
+                                            {{ org_link.organization.name }}
+                                        </a>
+                                        {% if org_link.is_primary %}
+                                            <span class="badge bg-primary ms-2">Primary</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if metadata.get('role') %}
+                                            {{ metadata.role }}
+                                        {% else %}
+                                            <span class="text-muted">—</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if org_link.start_date %}
+                                            {{ org_link.start_date.strftime('%Y-%m-%d') }}
+                                        {% else %}
+                                            <span class="text-muted">—</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if org_link.end_date %}
+                                            {{ org_link.end_date.strftime('%Y-%m-%d') }}
+                                        {% else %}
+                                            <span class="text-muted">—</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if org_link.is_current() %}
+                                            <span class="badge bg-success">Current</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">Past</span>
+                                        {% endif %}
+                                        {% if metadata.get('status') %}
+                                            <span class="badge bg-info ms-1">{{ metadata.status }}</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted mb-0">No organization affiliations on file.</p>
+                    {% endif %}
+                </div>
+            </div>
+
             <!-- Skills and Interests -->
             {% if volunteer.skills or volunteer.interests %}
             <div class="card mb-4">

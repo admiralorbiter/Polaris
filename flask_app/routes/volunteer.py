@@ -279,7 +279,7 @@ def register_volunteer_routes(app):
         """View volunteer details"""
         try:
             from sqlalchemy.orm import joinedload
-            from flask_app.models import ExternalIdMap
+            from flask_app.models import ExternalIdMap, ContactOrganization
             volunteer = db.session.query(Volunteer).options(
                 joinedload(Volunteer.emails),
                 joinedload(Volunteer.phones),
@@ -288,6 +288,7 @@ def register_volunteer_routes(app):
                 joinedload(Volunteer.interests),
                 joinedload(Volunteer.availability_slots),
                 joinedload(Volunteer.volunteer_hours),
+                joinedload(Volunteer.organization_links).joinedload(ContactOrganization.organization),
             ).filter_by(id=volunteer_id).first()
             if not volunteer:
                 from flask import abort
@@ -300,7 +301,24 @@ def register_volunteer_routes(app):
                 external_system="salesforce"
             ).first()
 
-            return render_template("volunteers/view.html", volunteer=volunteer, external_id_map=external_id_map)
+            # Get metadata for each organization link (role, status from ExternalIdMap)
+            organization_metadata = {}
+            if volunteer.organization_links:
+                org_link_ids = [link.id for link in volunteer.organization_links]
+                external_maps = db.session.query(ExternalIdMap).filter(
+                    ExternalIdMap.entity_type == "salesforce_affiliation",
+                    ExternalIdMap.entity_id.in_(org_link_ids),
+                    ExternalIdMap.external_system == "salesforce"
+                ).all()
+                for ext_map in external_maps:
+                    organization_metadata[ext_map.entity_id] = ext_map.metadata_json or {}
+
+            return render_template(
+                "volunteers/view.html",
+                volunteer=volunteer,
+                external_id_map=external_id_map,
+                organization_metadata=organization_metadata
+            )
 
         except Exception as e:
             current_app.logger.error(f"Error viewing volunteer {volunteer_id}: {str(e)}")
