@@ -23,6 +23,7 @@ The dashboard tracks completeness metrics for the following entity types:
 - **Events**: Event information (title, description, dates, location, capacity, cost)
 - **Organizations**: Organization details (name, description, contact info, addresses)
 - **Users**: User account information (username, email, name)
+- **Affiliations**: Contact-organization relationships (is_primary, start_date, end_date, role, status)
 
 ### Field-Level Completeness
 
@@ -100,7 +101,7 @@ GET /admin/data-quality/api/entity/<entity_type>?organization_id=<org_id>
 
 Returns field-level completeness metrics for a specific entity type.
 
-**Entity Types**: `contact`, `volunteer`, `student`, `teacher`, `event`, `organization`, `user`
+**Entity Types**: `contact`, `volunteer`, `student`, `teacher`, `event`, `organization`, `user`, `affiliation`
 
 **Response**:
 ```json
@@ -211,11 +212,15 @@ The dashboard is powered by `DataQualityService` in `flask_app/services/data_qua
   - `get_entity_metrics(entity_type, organization_id=None)`: Get entity-specific metrics
   - `_get_contact_metrics(organization_id=None)`: Calculate contact metrics
   - `_get_volunteer_metrics(organization_id=None)`: Calculate volunteer metrics
+  - `_get_affiliation_metrics(organization_id=None)`: Calculate affiliation (ContactOrganization) metrics
   - Similar methods for other entity types
 
 ### Relationship Handling
 
-- **ContactOrganization**: Contacts and volunteers linked via `ContactOrganization` are included in organization filtering
+- **ContactOrganization**:
+  - Contacts and volunteers linked via `ContactOrganization` are included in organization filtering
+  - The `ContactOrganization` table itself is tracked as the "Affiliations" entity type, showing relationship completeness metrics
+  - Affiliation metrics include: `is_primary`, `start_date`, `end_date`, `is_active`, and Salesforce import metadata (role, status)
 - **EventOrganization**: Events linked via `EventOrganization` are included in organization filtering
 - **UserOrganization**: Users linked via `UserOrganization` are included in organization filtering
 
@@ -281,7 +286,7 @@ GET /admin/data-quality/api/samples/<entity_type>?sample_size=<size>&organizatio
 Returns intelligent sample of records for an entity type.
 
 **Parameters**:
-- `entity_type`: Entity type (contact, volunteer, student, teacher, event, organization, user)
+- `entity_type`: Entity type (contact, volunteer, student, teacher, event, organization, user, affiliation)
 - `sample_size`: Optional sample size (10, 20, 30, 50)
 - `organization_id`: Optional organization filter (super admins only)
 

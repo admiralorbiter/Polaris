@@ -30,9 +30,8 @@ from flask_app.models import (
     VolunteerSkill,
     db,
 )
-from flask_app.services.data_quality_field_config_service import (
-    DataQualityFieldConfigService,
-)
+from flask_app.models.contact.relationships import ContactOrganization
+from flask_app.services.data_quality_field_config_service import DataQualityFieldConfigService
 
 
 @dataclass
@@ -94,9 +93,7 @@ class DataQualityService:
         # Use hash of JSON serialization for stable, short cache key
         disabled_fields = DataQualityFieldConfigService.get_disabled_fields()
         # Sort for consistent serialization
-        config_str = json.dumps(
-            {k: sorted(v) for k, v in sorted(disabled_fields.items())}, sort_keys=True
-        )
+        config_str = json.dumps({k: sorted(v) for k, v in sorted(disabled_fields.items())}, sort_keys=True)
         config_hash = hashlib.md5(config_str.encode()).hexdigest()[:8]
         key_parts.append(f"cfg:{config_hash}")
         return "_".join(key_parts)
@@ -141,7 +138,7 @@ class DataQualityService:
         if cached:
             return cached
 
-        entity_types = ["contact", "volunteer", "student", "teacher", "event", "organization", "user"]
+        entity_types = ["contact", "volunteer", "student", "teacher", "event", "organization", "user", "affiliation"]
         entity_metrics_list = []
 
         total_entities = 0
@@ -220,6 +217,8 @@ class DataQualityService:
             fields, total_records = cls._get_organization_metrics(organization_id)
         elif entity_type == "user":
             fields, total_records = cls._get_user_metrics(organization_id)
+        elif entity_type == "affiliation":
+            fields, total_records = cls._get_affiliation_metrics(organization_id)
         else:
             raise ValueError(f"Unknown entity type: {entity_type}")
 
@@ -235,7 +234,18 @@ class DataQualityService:
         # Extract key metrics
         key_metrics = {}
         for field in fields:
-            if field.field_name in ["email", "phone", "address"]:
+            # Key metrics vary by entity type
+            if entity_type == "contact" and field.field_name in ["email", "phone", "address"]:
+                key_metrics[field.field_name] = {
+                    "percentage": field.completeness_percentage,
+                    "count": field.records_with_value,
+                }
+            elif entity_type == "organization" and field.field_name in ["email", "phone", "address"]:
+                key_metrics[field.field_name] = {
+                    "percentage": field.completeness_percentage,
+                    "count": field.records_with_value,
+                }
+            elif entity_type == "affiliation" and field.field_name in ["is_primary", "is_active", "start_date"]:
                 key_metrics[field.field_name] = {
                     "percentage": field.completeness_percentage,
                     "count": field.records_with_value,
@@ -392,34 +402,31 @@ class DataQualityService:
         # Metadata fields from ExternalIdMap (Salesforce import metadata)
         # Dynamically discover and display all metadata fields
         from flask_app.models.importer import ExternalIdMap
-        
+
         # Get all contact IDs we're tracking (for filtering ExternalIdMap)
         if contact_ids:
             contact_ids_to_check = contact_ids
         else:
             # Get all contact IDs from the query
             contact_ids_to_check = [c.id for c in query.all()]
-        
+
         # Get ExternalIdMap entries for Salesforce imports
         # Query for all Salesforce ExternalIdMap entries, then filter by contact IDs
         # Note: Salesforce imports use entity_type="salesforce_contact" (not "volunteer")
         external_map_query = ExternalIdMap.query.filter(
-            ExternalIdMap.external_system == "salesforce",
-            ExternalIdMap.entity_type == "salesforce_contact"
+            ExternalIdMap.external_system == "salesforce", ExternalIdMap.entity_type == "salesforce_contact"
         )
-        
+
         if contact_ids_to_check:
-            external_map_query = external_map_query.filter(
-                ExternalIdMap.entity_id.in_(contact_ids_to_check)
-            )
-        
+            external_map_query = external_map_query.filter(ExternalIdMap.entity_id.in_(contact_ids_to_check))
+
         # Get all ExternalIdMap entries
         external_maps = external_map_query.all()
-        
+
         # Build a map of contact_id -> metadata_json for quick lookup
         metadata_by_contact_id = {}
         all_metadata_keys = set()
-        
+
         for e in external_maps:
             if e.entity_id and e.metadata_json and isinstance(e.metadata_json, dict):
                 metadata_by_contact_id[e.entity_id] = e.metadata_json
@@ -428,7 +435,7 @@ class DataQualityService:
                 for key in e.metadata_json.keys():
                     if key not in excluded_keys:
                         all_metadata_keys.add(key)
-        
+
         # Log for debugging (only in debug mode)
         if external_maps:
             current_app.logger.debug(
@@ -436,7 +443,7 @@ class DataQualityService:
                 f"{len(metadata_by_contact_id)} with metadata_json, "
                 f"{len(all_metadata_keys)} unique metadata keys: {sorted(all_metadata_keys)}"
             )
-        
+
         # Mapping from metadata keys to Salesforce field names for display
         # This ensures users see the original Salesforce field names in the dashboard
         METADATA_TO_SALESFORCE_FIELD = {
@@ -451,12 +458,12 @@ class DataQualityService:
             "source_last_modified": "LastModifiedDate",
             "attended_sessions_count": "Number_of_Attended_Volunteer_Sessions__c",
         }
-        
+
         # Expected metadata fields from Salesforce imports (always show these, even if empty)
         # This ensures users can see all tracked fields, not just ones that happen to have values
         expected_metadata_fields = {
             "account_id",
-            "primary_organization_id", 
+            "primary_organization_id",
             "last_email_message_at",
             "last_external_email_activity_at",
             "last_mailchimp_email_at",
@@ -466,29 +473,30 @@ class DataQualityService:
             "source_last_modified",
             "attended_sessions_count",
         }
-        
+
         # Combine discovered keys with expected keys (discovered takes precedence for ordering)
         all_metadata_keys_to_show = sorted(all_metadata_keys | expected_metadata_fields)
-        
+
         # Always show metadata fields (even if no ExternalIdMap entries exist yet)
         # This ensures users can see all tracked fields, not just ones that happen to have values
         for metadata_key in all_metadata_keys_to_show:
             # Count how many contacts have this metadata field
             if external_maps and metadata_by_contact_id:
                 records_with_metadata = sum(
-                    1 for contact_id in contact_ids_to_check
+                    1
+                    for contact_id in contact_ids_to_check
                     if contact_id in metadata_by_contact_id
                     and metadata_by_contact_id[contact_id].get(metadata_key) is not None
                     and metadata_by_contact_id[contact_id].get(metadata_key) != ""
                 )
             else:
                 records_with_metadata = 0
-            
+
             metadata_completeness = (records_with_metadata / total_records * 100) if total_records > 0 else 0.0
-            
+
             # Use Salesforce field name for display if available, otherwise use metadata key
             display_field_name = METADATA_TO_SALESFORCE_FIELD.get(metadata_key, metadata_key)
-            
+
             fields.append(
                 FieldMetric(
                     field_name=display_field_name,
@@ -499,7 +507,7 @@ class DataQualityService:
                     status=cls._get_status(metadata_completeness),
                 )
             )
-        
+
         # Log for debugging
         if external_maps:
             current_app.logger.debug(
@@ -507,9 +515,10 @@ class DataQualityService:
                 f"ExternalIdMap entries: {len(external_maps)}, Metadata keys: {sorted(all_metadata_keys_to_show)}"
             )
         else:
+            contact_ids_str = len(contact_ids_to_check) if contact_ids_to_check else "all"
             current_app.logger.debug(
                 f"Data Quality Dashboard: No ExternalIdMap entries found for Salesforce imports. "
-                f"Total contacts: {total_records}, Contact IDs checked: {len(contact_ids_to_check) if contact_ids_to_check else 'all'}. "
+                f"Total contacts: {total_records}, Contact IDs checked: {contact_ids_str}. "
                 f"Still showing {len(all_metadata_keys_to_show)} expected metadata fields with 0% completeness."
             )
 
@@ -903,6 +912,150 @@ class DataQualityService:
                     records_without_value=without_value,
                     completeness_percentage=round(completeness, 2),
                     status=status,
+                )
+            )
+
+        return fields, total_records
+
+    @classmethod
+    def _get_affiliation_metrics(cls, organization_id: Optional[int] = None) -> Tuple[List[FieldMetric], int]:
+        """Get metrics for ContactOrganization (Affiliation) entity"""
+        query = ContactOrganization.query
+
+        if organization_id:
+            query = query.filter(ContactOrganization.organization_id == organization_id)
+
+        total_records = query.count()
+        if total_records == 0:
+            return [], 0
+
+        fields = []
+
+        # Direct fields from ContactOrganization
+        direct_fields = [
+            ("is_primary", ContactOrganization.is_primary),
+            ("start_date", ContactOrganization.start_date),
+            ("end_date", ContactOrganization.end_date),
+        ]
+
+        for field_name, field_column in direct_fields:
+            with_value = query.filter(field_column.isnot(None)).count()
+            without_value = total_records - with_value
+            completeness = (with_value / total_records * 100) if total_records > 0 else 0.0
+            status = cls._get_status(completeness)
+
+            fields.append(
+                FieldMetric(
+                    field_name=field_name,
+                    total_records=total_records,
+                    records_with_value=with_value,
+                    records_without_value=without_value,
+                    completeness_percentage=round(completeness, 2),
+                    status=status,
+                )
+            )
+
+        # Count active affiliations (end_date is None)
+        active_affiliations = query.filter(ContactOrganization.end_date.is_(None)).count()
+        active_completeness = (active_affiliations / total_records * 100) if total_records > 0 else 0.0
+        fields.append(
+            FieldMetric(
+                field_name="is_active",
+                total_records=total_records,
+                records_with_value=active_affiliations,
+                records_without_value=total_records - active_affiliations,
+                completeness_percentage=round(active_completeness, 2),
+                status=cls._get_status(active_completeness),
+            )
+        )
+
+        # Count primary affiliations
+        primary_affiliations = query.filter(ContactOrganization.is_primary.is_(True)).count()
+        primary_completeness = (primary_affiliations / total_records * 100) if total_records > 0 else 0.0
+        fields.append(
+            FieldMetric(
+                field_name="primary_count",
+                total_records=total_records,
+                records_with_value=primary_affiliations,
+                records_without_value=total_records - primary_affiliations,
+                completeness_percentage=round(primary_completeness, 2),
+                status=cls._get_status(primary_completeness),
+            )
+        )
+
+        # Metadata from ExternalIdMap (Salesforce import metadata)
+        from flask_app.models.importer import ExternalIdMap
+
+        # Get all affiliation IDs we're tracking
+        affiliation_ids = [co.id for co in query.all()]
+
+        # Get ExternalIdMap entries for Salesforce affiliation imports
+        external_map_query = ExternalIdMap.query.filter(
+            ExternalIdMap.external_system == "salesforce", ExternalIdMap.entity_type == "salesforce_affiliation"
+        )
+
+        if affiliation_ids:
+            # Note: ExternalIdMap.entity_id stores the ContactOrganization.id
+            external_map_query = external_map_query.filter(ExternalIdMap.entity_id.in_(affiliation_ids))
+
+        external_maps = external_map_query.all()
+
+        # Build a map of affiliation_id -> metadata_json
+        metadata_by_affiliation_id = {}
+        all_metadata_keys = set()
+
+        for e in external_maps:
+            if e.entity_id and e.metadata_json and isinstance(e.metadata_json, dict):
+                metadata_by_affiliation_id[e.entity_id] = e.metadata_json
+                excluded_keys = {"payload_hash", "last_payload"}
+                for key in e.metadata_json.keys():
+                    if key not in excluded_keys:
+                        all_metadata_keys.add(key)
+
+        # Expected metadata fields from Salesforce affiliation imports
+        expected_metadata_fields = {
+            "role",
+            "status",
+            "source_modstamp",
+            "source_last_modified",
+        }
+
+        all_metadata_keys_to_show = sorted(all_metadata_keys | expected_metadata_fields)
+
+        # Mapping from metadata keys to Salesforce field names for display
+        METADATA_TO_SALESFORCE_FIELD = {
+            "role": "npe5__Role__c",
+            "status": "npe5__Status__c",
+            "source_modstamp": "SystemModstamp",
+            "source_last_modified": "LastModifiedDate",
+        }
+
+        # Add metadata fields
+        for metadata_key in all_metadata_keys_to_show:
+            if affiliation_ids and metadata_by_affiliation_id:
+                records_with_metadata = sum(
+                    1
+                    for affiliation_id in affiliation_ids
+                    if affiliation_id in metadata_by_affiliation_id
+                    and metadata_by_affiliation_id[affiliation_id].get(metadata_key) is not None
+                    and metadata_by_affiliation_id[affiliation_id].get(metadata_key) != ""
+                )
+            else:
+                records_with_metadata = 0
+
+            metadata_completeness = (records_with_metadata / total_records * 100) if total_records > 0 else 0.0
+
+            # Use Salesforce field name for display if available
+            display_field_name = METADATA_TO_SALESFORCE_FIELD.get(metadata_key, metadata_key)
+
+            fields.append(
+                FieldMetric(
+                    field_name=display_field_name,
+                    total_records=total_records,
+                    records_with_value=records_with_metadata,
+                    records_without_value=total_records - records_with_metadata,
+                    completeness_percentage=round(metadata_completeness, 2),
+                    status=cls._get_status(metadata_completeness),
                 )
             )
 

@@ -29,11 +29,7 @@ from flask_app.importer.pipeline import (
     run_minimal_dq,
     stage_volunteers_from_csv,
 )
-from flask_app.importer.pipeline.fuzzy_candidates import (
-    FuzzyCandidateSummary,
-    generate_fuzzy_candidates,
-    scan_existing_volunteers_for_duplicates,
-)
+from flask_app.importer.pipeline.fuzzy_candidates import FuzzyCandidateSummary, generate_fuzzy_candidates
 from flask_app.importer.utils import cleanup_upload, resolve_upload_directory
 from flask_app.models.base import db
 from flask_app.models.importer.schema import ImportRun, ImportRunStatus
@@ -317,7 +313,12 @@ def worker_group(ctx):
 
 
 @worker_group.command("run")
-@click.option("--loglevel", default="info", show_default=True)
+@click.option(
+    "--loglevel",
+    default="info",
+    show_default=True,
+    help="Log level: debug, info, warning, error, critical. Use 'warning' or 'error' to reduce verbosity.",
+)
 @click.option("--concurrency", type=int, help="Number of worker processes/threads.")
 @click.option(
     "--pool",
@@ -334,6 +335,10 @@ def worker_group(ctx):
 def worker_run(ctx, loglevel: str, concurrency: Optional[int], pool: Optional[str], queues: str):
     """
     Start the Celery worker in the current process.
+
+    To reduce output verbosity:
+    - Use --loglevel warning or --loglevel error
+    - Set SQLALCHEMY_ECHO=False in your .env file to disable SQL query logging
     """
     info = ctx.ensure_object(ScriptInfo)
     app = info.load_app()
@@ -539,14 +544,21 @@ def run_salesforce(ctx, run_id: int, limit: Optional[int]):
     kwargs = {"run_id": run_id}
     if limit is not None:
         kwargs["record_limit"] = limit
-    
+
     # Determine task based on entity_type in ingest_params_json
     entity_type = "contacts"  # Default for backward compatibility
     if run.ingest_params_json and isinstance(run.ingest_params_json, dict):
         entity_type = run.ingest_params_json.get("entity_type", "contacts")
-    
-    task_name = "importer.pipeline.ingest_salesforce_contacts" if entity_type == "contacts" else "importer.pipeline.ingest_salesforce_accounts"
-    
+
+    if entity_type == "contacts":
+        task_name = "importer.pipeline.ingest_salesforce_contacts"
+    elif entity_type == "organizations":
+        task_name = "importer.pipeline.ingest_salesforce_accounts"
+    elif entity_type == "affiliations":
+        task_name = "importer.pipeline.ingest_salesforce_affiliations"
+    else:
+        task_name = "importer.pipeline.ingest_salesforce_contacts"  # Default fallback
+
     async_result = celery_app.send_task(
         task_name,
         kwargs=kwargs,
@@ -910,6 +922,7 @@ def undo_merge(ctx, merge_log_id: int, force: bool):
 @click.pass_context
 def load_clean_volunteers(ctx, run_id: int):
     """Load clean volunteers/organizations from a completed import run into core database."""
+    from flask_app.importer.pipeline.salesforce_affiliation_loader import SalesforceAffiliationLoader
     from flask_app.importer.pipeline.salesforce_loader import SalesforceContactLoader
     from flask_app.importer.pipeline.salesforce_organization_loader import SalesforceOrganizationLoader
     from flask_app.models.importer.schema import ImportRun
@@ -935,14 +948,17 @@ def load_clean_volunteers(ctx, run_id: int):
     entity_type = "contacts"  # Default for backward compatibility
     if run.ingest_params_json and isinstance(run.ingest_params_json, dict):
         entity_type = run.ingest_params_json.get("entity_type", "contacts")
-    
+
     if entity_type == "organizations":
         click.echo(f"Loading clean organizations from run {run_id}...")
         loader = SalesforceOrganizationLoader(run)
+    elif entity_type == "affiliations":
+        click.echo(f"Loading clean affiliations from run {run_id}...")
+        loader = SalesforceAffiliationLoader(run)
     else:
         click.echo(f"Loading clean volunteers from run {run_id}...")
         loader = SalesforceContactLoader(run)
-    
+
     counters = loader.execute()
 
     click.echo("Completed:")
@@ -950,6 +966,8 @@ def load_clean_volunteers(ctx, run_id: int):
     click.echo(f"  Updated: {counters.updated}")
     click.echo(f"  Unchanged: {counters.unchanged}")
     click.echo(f"  Deleted: {counters.deleted}")
+    if hasattr(counters, "skipped"):
+        click.echo(f"  Skipped: {counters.skipped}")
 
 
 @importer_cli.command("stats")

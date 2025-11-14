@@ -19,6 +19,8 @@ from flask_app.models.importer.schema import (
     DataQualitySeverity,
     DataQualityStatus,
     DataQualityViolation,
+    ExternalIdMap,
+    StagingAffiliation,
     StagingOrganization,
     StagingRecordStatus,
     StagingVolunteer,
@@ -147,24 +149,24 @@ class PhoneFormatRule(DQRule):
 def get_minimal_volunteer_rules() -> Sequence[DQRule]:
     """
     Get minimal volunteer DQ rules.
-    
+
     EmailOrPhoneRule is excluded by default (uses metadata flags instead).
     Can be enabled via IMPORTER_WARN_ON_MISSING_CONTACT config.
     """
     from flask import current_app
-    
+
     rules: list[DQRule] = [
         EmailFormatRule(),
         PhoneFormatRule(),
     ]
-    
+
     # Optionally add contact requirement as warning if config enabled
     warn_on_missing_contact = current_app.config.get("IMPORTER_WARN_ON_MISSING_CONTACT", False)
     if warn_on_missing_contact:
         # Create rule with WARNING severity instead of ERROR
         contact_rule = EmailOrPhoneRule(severity=DataQualitySeverity.WARNING)
         rules.append(contact_rule)
-    
+
     return tuple(rules)
 
 
@@ -174,9 +176,7 @@ MINIMAL_VOLUNTEER_RULES: Sequence[DQRule] = (
 )
 
 
-def evaluate_rules(
-    payload: Mapping[str, object | None], rules: Sequence[DQRule] | None = None
-) -> list[DQResult]:
+def evaluate_rules(payload: Mapping[str, object | None], rules: Sequence[DQRule] | None = None) -> list[DQResult]:
     """
     Evaluate the provided payload against the configured rules.
 
@@ -274,8 +274,7 @@ def run_minimal_dq(
         violations = list(evaluate_rules(payload))
         # Separate errors (blocking) from warnings (non-blocking)
         error_violations = [v for v in violations if v.severity == DataQualitySeverity.ERROR]
-        warning_violations = [v for v in violations if v.severity != DataQualitySeverity.ERROR]
-        
+
         # Only quarantine on ERROR severity violations
         if not error_violations:
             rows_validated += 1
@@ -288,7 +287,7 @@ def run_minimal_dq(
             row.status = StagingRecordStatus.QUARANTINED
             row.last_error = error_violations[0].message
             row.processed_at = now
-        
+
         # Log all violations (both errors and warnings) for tracking
         for violation in violations:
             session.add(
@@ -321,8 +320,7 @@ def run_minimal_dq(
         violations = list(evaluate_organization_rules(payload))
         # Separate errors (blocking) from warnings (non-blocking)
         error_violations = [v for v in violations if v.severity == DataQualitySeverity.ERROR]
-        warning_violations = [v for v in violations if v.severity != DataQualitySeverity.ERROR]
-        
+
         # Only quarantine on ERROR severity violations
         if not error_violations:
             rows_validated += 1
@@ -335,7 +333,7 @@ def run_minimal_dq(
             row.status = StagingRecordStatus.QUARANTINED
             row.last_error = error_violations[0].message
             row.processed_at = now
-        
+
         # Log all violations (both errors and warnings) for tracking
         for violation in violations:
             session.add(
@@ -344,6 +342,52 @@ def run_minimal_dq(
                     staging_organization_id=row.id,
                     entity_type="organization",
                     record_key=_compose_organization_record_key(row),
+                    rule_code=violation.rule_code,
+                    severity=violation.severity,
+                    status=DataQualityStatus.OPEN,
+                    message=violation.message,
+                    details_json=dict(violation.details),
+                )
+            )
+
+    # Process affiliations
+    affiliation_rows = (
+        session.query(StagingAffiliation)
+        .filter(
+            StagingAffiliation.run_id == import_run.id,
+            StagingAffiliation.status == StagingRecordStatus.LANDED,
+        )
+        .order_by(StagingAffiliation.sequence_number)
+    )
+
+    for row in affiliation_rows:
+        rows_evaluated += 1
+        payload = _compose_affiliation_payload(row)
+        violations = list(evaluate_affiliation_rules(payload))
+        # Separate errors (blocking) from warnings (non-blocking)
+        error_violations = [v for v in violations if v.severity == DataQualitySeverity.ERROR]
+
+        # Only quarantine on ERROR severity violations
+        if not error_violations:
+            rows_validated += 1
+            row.status = StagingRecordStatus.VALIDATED
+            row.processed_at = now
+            row.last_error = None
+        else:
+            rows_quarantined += 1
+            all_violations.extend(error_violations)
+            row.status = StagingRecordStatus.QUARANTINED
+            row.last_error = error_violations[0].message
+            row.processed_at = now
+
+        # Log all violations (both errors and warnings) for tracking
+        for violation in violations:
+            session.add(
+                DataQualityViolation(
+                    run_id=import_run.id,
+                    staging_affiliation_id=row.id,
+                    entity_type="affiliation",
+                    record_key=_compose_affiliation_record_key(row),
                     rule_code=violation.rule_code,
                     severity=violation.severity,
                     status=DataQualityStatus.OPEN,
@@ -378,8 +422,8 @@ def _compose_payload(row: StagingVolunteer) -> MutableMapping[str, object | None
         if email_value:  # Only set if non-empty after stripping
             payload["email"] = email_value
             payload["email_normalized"] = email_value
-    
-    # Phone extraction - check raw FIRST before updating normalized  
+
+    # Phone extraction - check raw FIRST before updating normalized
     phone_value = None
     if raw.get("Phone"):
         phone_value = str(raw["Phone"]).strip()
@@ -393,10 +437,10 @@ def _compose_payload(row: StagingVolunteer) -> MutableMapping[str, object | None
         phone_value = str(raw["HomePhone"]).strip()
         if phone_value:
             payload["phone"] = phone_value
-    
+
     # NOW update with normalized (this may add nested structures that could overwrite our values)
     payload.update(normalized)
-    
+
     # Preserve nested email/phone structures from normalized data
     # If normalized has a dict structure, keep it (don't flatten to string)
     # The loader will process all email/phone types from the dict
@@ -417,7 +461,7 @@ def _compose_payload(row: StagingVolunteer) -> MutableMapping[str, object | None
         email_value = str(normalized["VOL_EMAIL"]).strip()
         if email_value:
             payload["email"] = email_value
-    
+
     # Preserve nested phone structures from normalized data
     if isinstance(payload.get("phone"), dict):
         # Keep the nested dict structure - don't flatten it
@@ -462,21 +506,21 @@ def _compose_organization_payload(row: StagingOrganization) -> MutableMapping[st
 
     # Start with raw payload
     payload.update(raw)
-    
+
     # Name extraction
     name_value = None
     if raw.get("Name"):
         name_value = str(raw["Name"]).strip()
         if name_value:
             payload["name"] = name_value
-    
+
     # Update with normalized
     payload.update(normalized)
-    
+
     # Ensure name is available
     if not payload.get("name") and name_value:
         payload["name"] = name_value
-    
+
     return payload
 
 
@@ -527,6 +571,193 @@ def evaluate_organization_rules(payload: Mapping[str, object | None]) -> Iterabl
     for rule in applicable_rules:
         violations.extend(rule.evaluate(payload))
     return violations
+
+
+def _compose_affiliation_payload(row: StagingAffiliation) -> MutableMapping[str, object | None]:
+    payload: MutableMapping[str, object | None] = {}
+    normalized = row.normalized_json or {}
+    raw = row.payload_json or {}
+
+    # Start with raw payload
+    payload.update(raw)
+
+    # Extract contact and organization external IDs
+    contact_external_id = None
+    if raw.get("npe5__Contact__c"):
+        contact_external_id = str(raw["npe5__Contact__c"]).strip()
+        if contact_external_id:
+            payload["contact_external_id"] = contact_external_id
+
+    organization_external_id = None
+    if raw.get("npe5__Organization__c"):
+        organization_external_id = str(raw["npe5__Organization__c"]).strip()
+        if organization_external_id:
+            payload["organization_external_id"] = organization_external_id
+
+    # Update with normalized
+    payload.update(normalized)
+
+    # Ensure external IDs are available
+    if not payload.get("contact_external_id") and contact_external_id:
+        payload["contact_external_id"] = contact_external_id
+    if not payload.get("organization_external_id") and organization_external_id:
+        payload["organization_external_id"] = organization_external_id
+
+    return payload
+
+
+def _compose_affiliation_record_key(row: StagingAffiliation) -> str:
+    if row.external_id:
+        return str(row.external_id)
+    if row.source_record_id:
+        return str(row.source_record_id)
+    if row.sequence_number is not None:
+        return f"seq-{row.sequence_number}"
+    return f"row-{row.id}"
+
+
+class AffiliationContactRequiredRule(DQRule):
+    """Ensure affiliation has a contact external ID."""
+
+    def __init__(self, severity: DataQualitySeverity = DataQualitySeverity.ERROR) -> None:
+        super().__init__(
+            code="AFF_CONTACT_REQUIRED",
+            description="Affiliation must include a contact external ID (npe5__Contact__c).",
+            severity=severity,
+        )
+
+    def evaluate(self, payload: Mapping[str, object | None]) -> Iterable[DQResult]:
+        contact_external_id = _coerce_str(payload.get("contact_external_id") or payload.get("npe5__Contact__c"))
+        if contact_external_id:
+            return []
+        return [
+            DQResult(
+                rule_code=self.code,
+                severity=self.severity,
+                message="Affiliation missing required contact external ID (npe5__Contact__c).",
+                details={"fields": ["contact_external_id", "npe5__Contact__c"]},
+            )
+        ]
+
+
+class AffiliationOrganizationRequiredRule(DQRule):
+    """Ensure affiliation has an organization external ID."""
+
+    def __init__(self, severity: DataQualitySeverity = DataQualitySeverity.ERROR) -> None:
+        super().__init__(
+            code="AFF_ORGANIZATION_REQUIRED",
+            description="Affiliation must include an organization external ID (npe5__Organization__c).",
+            severity=severity,
+        )
+
+    def evaluate(self, payload: Mapping[str, object | None]) -> Iterable[DQResult]:
+        organization_external_id = _coerce_str(
+            payload.get("organization_external_id") or payload.get("npe5__Organization__c")
+        )
+        if organization_external_id:
+            return []
+        return [
+            DQResult(
+                rule_code=self.code,
+                severity=self.severity,
+                message="Affiliation missing required organization external ID (npe5__Organization__c).",
+                details={"fields": ["organization_external_id", "npe5__Organization__c"]},
+            )
+        ]
+
+
+class AffiliationReferenceValidationRule(DQRule):
+    """Ensure both contact and organization exist in ExternalIdMap."""
+
+    def __init__(self, severity: DataQualitySeverity = DataQualitySeverity.ERROR) -> None:
+        super().__init__(
+            code="AFF_REFERENCE_VALIDATION",
+            description="Affiliation contact and organization must exist in ExternalIdMap.",
+            severity=severity,
+        )
+
+    def evaluate(self, payload: Mapping[str, object | None]) -> Iterable[DQResult]:
+        contact_external_id = _coerce_str(payload.get("contact_external_id") or payload.get("npe5__Contact__c"))
+        organization_external_id = _coerce_str(
+            payload.get("organization_external_id") or payload.get("npe5__Organization__c")
+        )
+
+        if not contact_external_id or not organization_external_id:
+            # Skip validation if required fields are missing (handled by other rules)
+            return []
+
+        # Check if contact exists in ExternalIdMap
+        contact_exists = (
+            db.session.query(ExternalIdMap)
+            .filter_by(
+                external_system="salesforce",
+                external_id=contact_external_id,
+                entity_type="salesforce_contact",
+                is_active=True,
+            )
+            .first()
+            is not None
+        )
+
+        # Check if organization exists in ExternalIdMap
+        organization_exists = (
+            db.session.query(ExternalIdMap)
+            .filter_by(
+                external_system="salesforce",
+                external_id=organization_external_id,
+                entity_type="salesforce_organization",
+                is_active=True,
+            )
+            .first()
+            is not None
+        )
+
+        violations = []
+        if not contact_exists:
+            violations.append(
+                DQResult(
+                    rule_code=self.code,
+                    severity=self.severity,
+                    message=f"Affiliation contact not found in ExternalIdMap: {contact_external_id}",
+                    details={
+                        "contact_external_id": contact_external_id,
+                        "missing_reference": "contact",
+                    },
+                )
+            )
+
+        if not organization_exists:
+            violations.append(
+                DQResult(
+                    rule_code=self.code,
+                    severity=self.severity,
+                    message=f"Affiliation organization not found in ExternalIdMap: {organization_external_id}",
+                    details={
+                        "organization_external_id": organization_external_id,
+                        "missing_reference": "organization",
+                    },
+                )
+            )
+
+        return violations
+
+
+def evaluate_affiliation_rules(payload: Mapping[str, object | None]) -> Iterable[DQResult]:
+    """
+    Evaluate all applicable affiliation DQ rules against a payload.
+
+    Returns violations found (empty if payload passes all rules).
+    """
+    applicable_rules: list[DQRule] = [
+        AffiliationContactRequiredRule(),
+        AffiliationOrganizationRequiredRule(),
+        AffiliationReferenceValidationRule(),
+    ]
+    violations: list[DQResult] = []
+    for rule in applicable_rules:
+        violations.extend(rule.evaluate(payload))
+    return violations
+
 
 def _run_minimal_dq_dry_run(
     import_run,
@@ -659,5 +890,3 @@ def _update_dq_counts(import_run, summary: DQProcessingSummary) -> None:
         }
     )
     import_run.metrics_json = metrics
-
-

@@ -8,17 +8,42 @@ for local testing.
 
 from __future__ import annotations
 
-import os
+import json
+import logging
 from pathlib import Path
 from typing import Any, Mapping
-import json
 
 from celery import Celery
-from kombu import Queue
 from flask import Flask
+from kombu import Queue
 
 DEFAULT_QUEUE_NAME = "imports"
 DEFAULT_SQLITE_FILENAME = "celery.sqlite"
+
+
+def _configure_quiet_loggers(app: Flask) -> None:
+    """
+    Configure specific loggers to be quieter during Celery task execution.
+
+    This reduces verbosity from SQLAlchemy queries and other noisy loggers
+    while keeping important application logs visible.
+    """
+    # Check if SQLAlchemy echo is disabled (user preference)
+    sqlalchemy_echo = app.config.get("SQLALCHEMY_ECHO", False)
+
+    # Suppress SQLAlchemy engine logging unless explicitly enabled
+    if not sqlalchemy_echo:
+        sqlalchemy_logger = logging.getLogger("sqlalchemy.engine")
+        sqlalchemy_logger.setLevel(logging.WARNING)
+
+    # Suppress Celery worker state messages (very verbose)
+    celery_state_logger = logging.getLogger("celery.worker.strategy")
+    celery_state_logger.setLevel(logging.WARNING)
+
+    # Optionally suppress other verbose loggers
+    # Uncomment if you want even quieter output:
+    # celery_worker_logger = logging.getLogger("celery.worker")
+    # celery_worker_logger.setLevel(logging.WARNING)
 
 
 def _normalize_sqlite_path(app: Flask) -> Path:
@@ -90,6 +115,10 @@ def create_celery_app(app: Flask) -> Celery:
         broker_connection_retry_on_startup=True,
         task_time_limit=app.config.get("IMPORTER_TASK_TIME_LIMIT", 15 * 60),
         task_soft_time_limit=app.config.get("IMPORTER_TASK_SOFT_TIME_LIMIT", 12 * 60),
+        # Reduce logging verbosity
+        worker_log_format="[%(asctime)s: %(levelname)s/%(processName)s] %(message)s",
+        worker_task_log_format="[%(asctime)s: %(levelname)s/%(processName)s][%(task_name)s(%(task_id)s)] %(message)s",
+        worker_hijack_root_logger=False,  # Don't hijack root logger
     )
 
     extra_conf: Mapping[str, Any] | str | None = app.config.get("CELERY_CONFIG")
@@ -115,6 +144,9 @@ def create_celery_app(app: Flask) -> Celery:
 
     if extra_conf:
         celery_app.conf.update(extra_conf)
+
+    # Configure quieter logging for verbose loggers
+    _configure_quiet_loggers(app)
 
     class FlaskContextTask(celery_app.Task):  # type: ignore[misc]
         """
@@ -153,4 +185,3 @@ def get_celery_app(app: Flask) -> Celery | None:
     if celery_app is None and state.get("enabled"):
         celery_app = ensure_celery_app(app, state)
     return celery_app
-

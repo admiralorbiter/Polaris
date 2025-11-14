@@ -82,6 +82,21 @@ DEFAULT_ACCOUNT_FIELDS: Sequence[str] = (
     "LastModifiedDate",
 )
 
+DEFAULT_AFFILIATION_FIELDS: Sequence[str] = (
+    "Id",
+    "Name",
+    "npe5__Organization__c",
+    "npe5__Contact__c",
+    "npe5__Role__c",
+    "npe5__Primary__c",
+    "npe5__Status__c",
+    "npe5__StartDate__c",
+    "npe5__EndDate__c",
+    "SystemModstamp",
+    "LastModifiedDate",
+    "IsDeleted",
+)
+
 SALESFORCE_API_VERSION = os.environ.get("SALESFORCE_API_VERSION", "v57.0")
 
 
@@ -105,24 +120,25 @@ def build_contacts_soql(
     field_list = tuple(dict.fromkeys(fields or DEFAULT_CONTACT_FIELDS))
     select_clause = ", ".join(field_list)
     where_clauses: List[str] = []
-    
+
     # Filter for volunteers only if enabled (default: True)
     # Can be disabled via IMPORTER_SALESFORCE_FILTER_VOLUNTEERS=false if field doesn't exist
     if filter_volunteers is None:
         try:
             from flask import current_app
+
             filter_volunteers = current_app.config.get("IMPORTER_SALESFORCE_FILTER_VOLUNTEERS", True)
         except RuntimeError:
             # No Flask app context - default to True
             filter_volunteers = True
-    
+
     if filter_volunteers:
         # Filter: Contact_Type__c = 'Volunteer' OR Contact_Type__c = '' OR Contact_Type__c = null
         # Include null values to match all records where Contact_Type__c is Volunteer, empty string, or null
         where_clauses.append("(Contact_Type__c = 'Volunteer' OR Contact_Type__c = '' OR Contact_Type__c = null)")
-    
+
     if last_modstamp is not None:
-        where_clauses.append(f"SystemModstamp > { _format_modstamp(last_modstamp) }")
+        where_clauses.append(f"SystemModstamp > {_format_modstamp(last_modstamp)}")
 
     where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
     limit_sql = f" LIMIT {int(limit)}" if limit is not None else ""
@@ -141,17 +157,68 @@ def build_accounts_soql(
     field_list = tuple(dict.fromkeys(fields or DEFAULT_ACCOUNT_FIELDS))
     select_clause = ", ".join(field_list)
     where_clauses: List[str] = []
-    
+
     # Filter out Household, School District, and School types as specified
     where_clauses.append("Type NOT IN ('Household', 'School District', 'School')")
-    
+
     if last_modstamp is not None:
-        where_clauses.append(f"SystemModstamp > { _format_modstamp(last_modstamp) }")
+        where_clauses.append(f"SystemModstamp > {_format_modstamp(last_modstamp)}")
 
     where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
     limit_sql = f" LIMIT {int(limit)}" if limit is not None else ""
     order_sql = " ORDER BY Name ASC"
     return f"SELECT {select_clause} FROM Account{where_sql}{order_sql}{limit_sql}"
+
+
+def build_affiliations_soql(
+    *,
+    fields: Sequence[str] | None = None,
+    last_modstamp: datetime | None = None,
+    limit: int | None = None,
+    filter_volunteers: bool | None = None,
+) -> str:
+    """Construct the SOQL used for incremental Affiliation (npe5__Affiliation__c) exports.
+
+    Args:
+        fields: Optional list of fields to select. Defaults to DEFAULT_AFFILIATION_FIELDS.
+        last_modstamp: Optional datetime for incremental exports (filters by SystemModstamp > value).
+        limit: Optional limit on number of records to return.
+        filter_volunteers: If True, only return affiliations for contacts with Contact_Type__c = 'Volunteer'.
+                          Defaults to True if not specified (can be disabled via config).
+    """
+
+    field_list = tuple(dict.fromkeys(fields or DEFAULT_AFFILIATION_FIELDS))
+    select_clause = ", ".join(field_list)
+    where_clauses: List[str] = []
+
+    # Filter for volunteer contacts only if enabled (default: True)
+    # Can be disabled via IMPORTER_SALESFORCE_FILTER_VOLUNTEERS=false if needed
+    if filter_volunteers is None:
+        try:
+            from flask import current_app
+
+            filter_volunteers = current_app.config.get("IMPORTER_SALESFORCE_FILTER_VOLUNTEERS", True)
+        except RuntimeError:
+            # No Flask app context - default to True
+            filter_volunteers = True
+
+    if filter_volunteers:
+        # Filter: Only affiliations where the related contact has Contact_Type__c = 'Volunteer'
+        # Using relationship syntax: npe5__Contact__r.Contact_Type__c
+        # Also include null/empty to match volunteer contact filter behavior
+        where_clauses.append(
+            "(npe5__Contact__r.Contact_Type__c = 'Volunteer' "
+            "OR npe5__Contact__r.Contact_Type__c = '' "
+            "OR npe5__Contact__r.Contact_Type__c = null)"
+        )
+
+    if last_modstamp is not None:
+        where_clauses.append(f"SystemModstamp > {_format_modstamp(last_modstamp)}")
+
+    where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+    limit_sql = f" LIMIT {int(limit)}" if limit is not None else ""
+    order_sql = " ORDER BY SystemModstamp ASC"
+    return f"SELECT {select_clause} FROM npe5__Affiliation__c{where_sql}{order_sql}{limit_sql}"
 
 
 @dataclass(frozen=True)
@@ -252,23 +319,28 @@ class SalesforceExtractor:
                     },
                 )
                 # Also print to console for immediate visibility
-                print(f"\n=== SALESFORCE ERROR ===")
+                print("\n=== SALESFORCE ERROR ===")
                 print(f"Status: {response.status_code}")
                 print(f"Error: {error_msg}")
                 print(f"Full response: {error_data}")
                 print(f"SOQL Query: {soql}")
-                print(f"======================\n")
+                print("======================\n")
             except Exception as e:
                 error_msg = response.text
                 self.logger.error(
                     f"Salesforce job creation failed: {error_msg}",
-                    extra={"status_code": response.status_code, "error": error_msg, "soql_query": soql, "parse_error": str(e)},
+                    extra={
+                        "status_code": response.status_code,
+                        "error": error_msg,
+                        "soql_query": soql,
+                        "parse_error": str(e),
+                    },
                 )
-                print(f"\n=== SALESFORCE ERROR (could not parse JSON) ===")
+                print("\n=== SALESFORCE ERROR (could not parse JSON) ===")
                 print(f"Status: {response.status_code}")
                 print(f"Response text: {error_msg}")
                 print(f"SOQL Query: {soql}")
-                print(f"======================\n")
+                print("======================\n")
         response.raise_for_status()
         data = response.json()
         self.logger.debug("Salesforce job created", extra={"job_id": data.get("id")})
@@ -311,7 +383,9 @@ class SalesforceExtractor:
                 batch_records.append(row)
                 if len(batch_records) == self.batch_size:
                     sequence += 1
-                    yield SalesforceBatch(job_id=job_id, sequence=sequence, records=list(batch_records), locator=locator)
+                    yield SalesforceBatch(
+                        job_id=job_id, sequence=sequence, records=list(batch_records), locator=locator
+                    )
                     batch_records.clear()
             if batch_records:
                 sequence += 1
@@ -359,4 +433,3 @@ def chunk_records(records: Iterable[Mapping[str, str]], chunk_size: int) -> Iter
             chunk = []
     if chunk:
         yield chunk
-

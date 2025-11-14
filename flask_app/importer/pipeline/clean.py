@@ -6,14 +6,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import MutableMapping, Sequence
+from typing import MutableMapping
 
 from flask import current_app, has_app_context
 
 from flask_app.models.base import db
 from flask_app.models.importer.schema import (
+    CleanAffiliation,
     CleanOrganization,
     CleanVolunteer,
+    StagingAffiliation,
     StagingOrganization,
     StagingRecordStatus,
     StagingVolunteer,
@@ -43,6 +45,19 @@ class CleanOrganizationPayload:
     external_system: str
     external_id: str | None
     name: str
+    checksum: str | None
+    normalized_payload: MutableMapping[str, object | None]
+
+
+@dataclass(frozen=True)
+class CleanAffiliationPayload:
+    """Normalized payload used for core affiliation inserts."""
+
+    staging_affiliation_id: int | None
+    external_system: str
+    external_id: str | None
+    contact_external_id: str | None
+    organization_external_id: str | None
     checksum: str | None
     normalized_payload: MutableMapping[str, object | None]
 
@@ -139,19 +154,13 @@ def _build_payload(row: StagingVolunteer) -> CleanVolunteerPayload | None:
     if not first_name or not last_name:
         return None
 
-    external_system = _coerce_string(normalized.get("external_system") or raw.get("external_system")) or row.external_system
+    external_system = (
+        _coerce_string(normalized.get("external_system") or raw.get("external_system")) or row.external_system
+    )
     external_id = _coerce_string(normalized.get("external_id") or raw.get("external_id") or row.external_id)
 
-    email = _normalize_email(
-        normalized.get("email")
-        or normalized.get("email_normalized")
-        or raw.get("email")
-    )
-    phone = _normalize_phone(
-        normalized.get("phone_e164")
-        or normalized.get("phone")
-        or raw.get("phone")
-    )
+    email = _normalize_email(normalized.get("email") or normalized.get("email_normalized") or raw.get("email"))
+    phone = _normalize_phone(normalized.get("phone_e164") or normalized.get("phone") or raw.get("phone"))
 
     normalized.update(
         {
@@ -307,7 +316,9 @@ def _build_organization_payload(row: StagingOrganization) -> CleanOrganizationPa
     if not name:
         return None
 
-    external_system = _coerce_string(normalized.get("external_system") or raw.get("external_system")) or row.external_system
+    external_system = (
+        _coerce_string(normalized.get("external_system") or raw.get("external_system")) or row.external_system
+    )
     external_id = _coerce_string(normalized.get("external_id") or raw.get("external_id") or row.external_id)
 
     normalized.update(
@@ -352,3 +363,132 @@ def _update_clean_organization_counts(import_run, summary: CleanPromotionSummary
     import_run.metrics_json = metrics
 
 
+def promote_clean_affiliations(import_run, *, dry_run: bool = False) -> CleanPromotionSummary:
+    """
+    Promote validated staging affiliations into the clean layer for further processing.
+    """
+
+    session = db.session
+    rows = (
+        session.query(StagingAffiliation)
+        .filter(
+            StagingAffiliation.run_id == import_run.id,
+            StagingAffiliation.status == StagingRecordStatus.VALIDATED,
+        )
+        .order_by(StagingAffiliation.sequence_number)
+    )
+
+    rows_considered = 0
+    rows_promoted = 0
+    rows_skipped = 0
+    candidates: list[CleanAffiliationPayload] = []
+
+    for row in rows:
+        rows_considered += 1
+        payload = _build_affiliation_payload(row)
+        if payload is None:
+            rows_skipped += 1
+            continue
+
+        if dry_run:
+            candidates.append(payload)
+            continue
+
+        if row.clean_record is not None:
+            rows_skipped += 1
+            continue
+
+        clean_row = CleanAffiliation(
+            run_id=import_run.id,
+            staging_affiliation_id=row.id,
+            external_system=payload.external_system,
+            external_id=payload.external_id,
+            contact_external_id=payload.contact_external_id,
+            organization_external_id=payload.organization_external_id,
+            checksum=payload.checksum,
+            payload_json=dict(payload.normalized_payload),
+            promoted_at=datetime.now(timezone.utc),
+            load_action=None,
+        )
+        clean_row.staging_row = row
+        session.add(clean_row)
+        rows_promoted += 1
+
+    summary = CleanPromotionSummary(
+        rows_considered=rows_considered,
+        rows_promoted=rows_promoted,
+        rows_skipped=rows_skipped,
+        dry_run=dry_run,
+        candidates=tuple(candidates),
+    )
+    _update_clean_affiliation_counts(import_run, summary)
+    if has_app_context():
+        current_app.logger.info(
+            "Importer run %s promoted %s clean affiliations (skipped=%s, dry_run=%s)",
+            import_run.id,
+            summary.rows_promoted,
+            summary.rows_skipped,
+            summary.dry_run,
+        )
+    return summary
+
+
+def _build_affiliation_payload(row: StagingAffiliation) -> CleanAffiliationPayload | None:
+    normalized = dict(row.normalized_json or {})
+    raw = dict(row.payload_json or {})
+
+    contact_external_id = _coerce_string(normalized.get("contact_external_id") or raw.get("npe5__Contact__c"))
+    organization_external_id = _coerce_string(
+        normalized.get("organization_external_id") or raw.get("npe5__Organization__c")
+    )
+
+    if not contact_external_id or not organization_external_id:
+        return None
+
+    external_system = (
+        _coerce_string(normalized.get("external_system") or raw.get("external_system")) or row.external_system
+    )
+    external_id = _coerce_string(normalized.get("external_id") or raw.get("external_id") or row.external_id)
+
+    normalized.update(
+        {
+            "contact_external_id": contact_external_id,
+            "organization_external_id": organization_external_id,
+        }
+    )
+
+    return CleanAffiliationPayload(
+        staging_affiliation_id=row.id,
+        external_system=external_system,
+        external_id=external_id,
+        contact_external_id=contact_external_id,
+        organization_external_id=organization_external_id,
+        checksum=row.checksum,
+        normalized_payload=normalized,
+    )
+
+
+def _update_clean_affiliation_counts(import_run, summary: CleanPromotionSummary) -> None:
+    counts = dict(import_run.counts_json or {})
+    clean_counts = counts.setdefault("clean", {}).setdefault("affiliations", {})
+    clean_counts.update(
+        {
+            "rows_considered": summary.rows_considered,
+            "rows_promoted": summary.rows_promoted if not summary.dry_run else 0,
+            "rows_skipped": summary.rows_skipped,
+            "dry_run": summary.dry_run,
+        }
+    )
+    import_run.counts_json = counts
+
+    metrics = dict(import_run.metrics_json or {})
+    clean_metrics = metrics.setdefault("clean", {}).setdefault("affiliations", {})
+    clean_metrics.update(
+        {
+            "rows_considered": summary.rows_considered,
+            "rows_promoted": summary.rows_promoted,
+            "rows_skipped": summary.rows_skipped,
+            "dry_run": summary.dry_run,
+        }
+    )
+    import_run.metrics_json = metrics

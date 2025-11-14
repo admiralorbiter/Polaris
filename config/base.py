@@ -161,9 +161,7 @@ class Config:
         IMPORTER_SALESFORCE_BATCH_SIZE = max(1000, int(os.environ.get("IMPORTER_SALESFORCE_BATCH_SIZE", "5000")))
     except ValueError:
         IMPORTER_SALESFORCE_BATCH_SIZE = 5000
-    IMPORTER_WARN_ON_MISSING_CONTACT = _coerce_bool(
-        os.environ.get("IMPORTER_WARN_ON_MISSING_CONTACT"), default=False
-    )
+    IMPORTER_WARN_ON_MISSING_CONTACT = _coerce_bool(os.environ.get("IMPORTER_WARN_ON_MISSING_CONTACT"), default=False)
     # Salesforce volunteer filtering - set to false if Contact_Type__c field doesn't exist
     IMPORTER_SALESFORCE_FILTER_VOLUNTEERS = _coerce_bool(
         os.environ.get("IMPORTER_SALESFORCE_FILTER_VOLUNTEERS"), default=True
@@ -216,7 +214,11 @@ class DevelopmentConfig(Config):
     db_uri = f"sqlite:///{db_path_normalized}"
 
     SQLALCHEMY_DATABASE_URI = os.environ.get("DATABASE_URL", db_uri)
-    SQLALCHEMY_ECHO = True  # Enable SQL query logging in development
+    SQLALCHEMY_ECHO = os.environ.get("SQLALCHEMY_ECHO", "True").lower() in (
+        "true",
+        "1",
+        "yes",
+    )  # Enable SQL query logging in development (can be disabled via env var)
     if SQLALCHEMY_DATABASE_URI.startswith("sqlite"):
         SQLALCHEMY_ENGINE_OPTIONS = {
             "connect_args": {

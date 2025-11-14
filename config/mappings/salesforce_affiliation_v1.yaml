@@ -1,0 +1,46 @@
+# Salesforce Affiliation (npe5__Affiliation__c) → Polaris ContactOrganization mapping (v1.0)
+version: 1
+adapter: salesforce
+object: npe5__Affiliation__c
+fields:
+  - source: Id
+    target: external_id
+    required: true
+  - source: Name
+    target: name
+  - source: npe5__Contact__c
+    target: contact_external_id
+    required: true
+  - source: npe5__Organization__c
+    target: organization_external_id
+    required: true
+  - source: npe5__Role__c
+    target: metadata.role
+  - source: npe5__Primary__c
+    target: is_primary
+    default: false
+  - source: npe5__Status__c
+    target: metadata.status
+  - source: npe5__StartDate__c
+    target: start_date
+    transform: parse_date
+  - source: npe5__EndDate__c
+    target: end_date
+    transform: parse_date
+  - source: SystemModstamp
+    target: metadata.source_modstamp
+    transform: parse_datetime
+  - source: LastModifiedDate
+    target: metadata.source_last_modified
+    transform: parse_datetime
+  - source: IsDeleted
+    target: metadata.core_state
+  - target: metadata.source_system
+    default: salesforce
+  - target: metadata.source_object
+    default: npe5__Affiliation__c
+transforms:
+  parse_date:
+    description: Parse date values (YYYY-MM-DD) into ISO-8601.
+  parse_datetime:
+    description: Parse Salesforce datetime strings into ISO-8601 (UTC).

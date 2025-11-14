@@ -59,7 +59,26 @@ All Salesforce Contact data flows through the import pipeline:
 | `Title` | `employment.title` | `Volunteer.title` |
 | `Department` | `employment.department` | `Volunteer.department` (if exists) or appended to `Contact.notes` |
 
-### Affiliations
+### Affiliations (Contact-Organization Relationships)
+
+**Note**: Affiliations are imported from the `npe5__Affiliation__c` object as a separate import type. This is distinct from the `AccountId` and `npsp__Primary_Affiliation__c` fields on Contact records.
+
+**Import Prerequisites**: Affiliations import requires contacts and organizations to be imported first, as it needs to resolve `contact_external_id` and `organization_external_id` via `ExternalIdMap`.
+
+**Volunteer Filtering**: By default, the affiliation import only includes affiliations for contacts where `Contact_Type__c = 'Volunteer'`. This can be disabled by setting `IMPORTER_SALESFORCE_FILTER_VOLUNTEERS=false` in your `.env` file.
+
+| Salesforce Field | Target Location | Storage |
+|-----------------|----------------|---------|
+| `Id` | `external_id` | Used for `ExternalIdMap.external_id` (entity_type="salesforce_affiliation") |
+| `npe5__Contact__c` | `contact_external_id` | Used to lookup Contact via ExternalIdMap |
+| `npe5__Organization__c` | `organization_external_id` | Used to lookup Organization via ExternalIdMap |
+| `npe5__Primary__c` | `is_primary` | `ContactOrganization.is_primary` |
+| `npe5__StartDate__c` | `start_date` | `ContactOrganization.start_date` |
+| `npe5__EndDate__c` | `end_date` | `ContactOrganization.end_date` (null if current) |
+| `npe5__Status__c` | `metadata.status` | Stored in `ExternalIdMap.metadata_json["status"]` |
+| `npe5__Role__c` | `metadata.role` | Stored in `ExternalIdMap.metadata_json["role"]` |
+
+**Contact-Level Affiliation Fields** (from Contact object):
 
 | Salesforce Field | Target Location | Storage |
 |-----------------|----------------|---------|
@@ -202,4 +221,3 @@ If you find that any Salesforce field is not being mapped correctly, or if you n
 1. Update `config/mappings/salesforce_contact_v1.yaml` to add the field mapping
 2. If needed, add a transform function in `flask_app/importer/mapping/__init__.py`
 3. Update the loader in `flask_app/importer/pipeline/salesforce_loader.py` to store the field in the appropriate location
-

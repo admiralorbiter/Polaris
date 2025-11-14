@@ -6,10 +6,9 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, Mapping, Sequence
+from typing import Any, Dict, Mapping, Sequence
 
 import yaml
-
 from flask import current_app
 
 
@@ -132,7 +131,7 @@ def get_active_salesforce_mapping() -> MappingSpec:
     cache_key = "_importer_sf_mapping_cache"
     cache: dict[str, tuple[MappingSpec, float, str]] = current_app.extensions.setdefault(cache_key, {})
     cache_key_lookup = str(config_path)
-    
+
     # Check if we have a cached spec and if the file has changed
     cached_entry = cache.get(cache_key_lookup)
     if cached_entry:
@@ -147,7 +146,52 @@ def get_active_salesforce_mapping() -> MappingSpec:
             return spec
         # File hasn't changed, use cached spec
         return cached_spec
-    
+
+    # No cache entry, load and cache
+    spec = load_mapping(config_path)
+    mtime = config_path.stat().st_mtime
+    cache[cache_key_lookup] = (spec, mtime, spec.checksum)
+    return spec
+
+
+def get_active_salesforce_affiliation_mapping() -> MappingSpec:
+    """
+    Load the configured Salesforce Affiliation mapping spec (cached per app context).
+    Cache is invalidated if the file modification time or checksum changes.
+    """
+
+    config_path = current_app.config.get("IMPORTER_SALESFORCE_AFFILIATION_MAPPING_PATH")
+    if not config_path:
+        # Default to salesforce_affiliation_v1.yaml in config/mappings
+        # Use instance_path to find project root (go up from instance/ to project root)
+        instance_path = Path(current_app.instance_path)
+        # instance_path is typically <project_root>/instance, so parent is project root
+        config_path = (instance_path.parent / "config" / "mappings" / "salesforce_affiliation_v1.yaml").resolve()
+    else:
+        config_path = Path(config_path)
+
+    if not config_path.exists():
+        raise MappingLoadError(f"Salesforce Affiliation mapping file not found at {config_path}")
+
+    cache_key = "_importer_sf_affiliation_mapping_cache"
+    cache: dict[str, tuple[MappingSpec, float, str]] = current_app.extensions.setdefault(cache_key, {})
+    cache_key_lookup = str(config_path)
+
+    # Check if we have a cached spec and if the file has changed
+    cached_entry = cache.get(cache_key_lookup)
+    if cached_entry:
+        cached_spec, cached_mtime, cached_checksum = cached_entry
+        current_mtime = config_path.stat().st_mtime
+        # Reload if file modification time changed
+        if current_mtime != cached_mtime:
+            # File changed, reload
+            current_app.logger.debug(f"Mapping file changed, reloading: {config_path}")
+            spec = load_mapping(config_path)
+            cache[cache_key_lookup] = (spec, current_mtime, spec.checksum)
+            return spec
+        # File hasn't changed, use cached spec
+        return cached_spec
+
     # No cache entry, load and cache
     spec = load_mapping(config_path)
     mtime = config_path.stat().st_mtime
@@ -170,14 +214,14 @@ def get_active_salesforce_account_mapping() -> MappingSpec:
         config_path = (instance_path.parent / "config" / "mappings" / "salesforce_account_v1.yaml").resolve()
     else:
         config_path = Path(config_path)
-    
+
     if not config_path.exists():
         raise MappingLoadError(f"Salesforce Account mapping file not found at {config_path}")
-    
+
     cache_key = "_importer_sf_account_mapping_cache"
     cache: dict[str, tuple[MappingSpec, float, str]] = current_app.extensions.setdefault(cache_key, {})
     cache_key_lookup = str(config_path)
-    
+
     # Check if we have a cached spec and if the file has changed
     cached_entry = cache.get(cache_key_lookup)
     if cached_entry:
@@ -192,7 +236,7 @@ def get_active_salesforce_account_mapping() -> MappingSpec:
             return spec
         # File hasn't changed, use cached spec
         return cached_spec
-    
+
     # No cache entry, load and cache
     spec = load_mapping(config_path)
     mtime = config_path.stat().st_mtime
@@ -211,6 +255,7 @@ def _compute_checksum(payload: Mapping[str, Any]) -> str:
 @dataclass
 class FieldImportStats:
     """Statistics for a single field during transformation."""
+
     source_field: str
     target_field: str | None
     records_with_value: int = 0
@@ -219,7 +264,7 @@ class FieldImportStats:
     records_failed_transform: int = 0
     records_used_default: int = 0
     total_records_processed: int = 0
-    
+
     @property
     def population_rate(self) -> float:
         if self.total_records_processed == 0:
@@ -248,54 +293,50 @@ class SalesforceMappingTransformer:
         errors: list[str] = []
         field_stats: dict[str, FieldImportStats] = {}
 
-        for field in self.spec.fields:
+        for field_spec in self.spec.fields:
             # Only track stats for fields with a source (not default-only fields)
-            source_field_name = field.source
+            source_field_name = field_spec.source
             if source_field_name:
                 if source_field_name not in field_stats:
                     field_stats[source_field_name] = FieldImportStats(
                         source_field=source_field_name,
-                        target_field=field.target,
+                        target_field=field_spec.target,
                     )
                 stats = field_stats[source_field_name]
                 stats.total_records_processed += 1
-            
+
             value = None
             had_value = False
             used_default = False
-            transform_applied = False
-            transform_failed = False
-            
-            if field.source:
-                value = payload.get(field.source)
-                unmapped.pop(field.source, None)
+
+            if field_spec.source:
+                value = payload.get(field_spec.source)
+                unmapped.pop(field_spec.source, None)
                 if value is not None and value != "":
                     had_value = True
                     if source_field_name and source_field_name in field_stats:
                         field_stats[source_field_name].records_with_value += 1
-            
-            if (value is None or value == "") and field.default is not None:
-                value = field.default
+
+            if (value is None or value == "") and field_spec.default is not None:
+                value = field_spec.default
                 used_default = True
                 if source_field_name and source_field_name in field_stats:
                     field_stats[source_field_name].records_used_default += 1
-            
-            if field.required and (value is None or value == ""):
-                errors.append(f"Required field '{field.target}' missing (source: {field.source})")
+
+            if field_spec.required and (value is None or value == ""):
+                errors.append(f"Required field '{field_spec.target}' missing (source: {field_spec.source})")
                 continue
-            
-            if field.transform:
-                transform_fn = self.transform_registry.get(field.transform)
+
+            if field_spec.transform:
+                transform_fn = self.transform_registry.get(field_spec.transform)
                 if transform_fn is None:
-                    errors.append(f"Unknown transform '{field.transform}' for field '{field.target}'")
-                    transform_failed = True
+                    errors.append(f"Unknown transform '{field_spec.transform}' for field '{field_spec.target}'")
                     if source_field_name and source_field_name in field_stats:
                         field_stats[source_field_name].records_failed_transform += 1
                 else:
                     try:
                         original_value = value
                         transformed_value = transform_fn(value)
-                        transform_applied = True
                         if source_field_name and source_field_name in field_stats:
                             field_stats[source_field_name].records_transformed += 1
                         # For phone/email transforms, if the original value exists but transform returns None,
@@ -307,34 +348,33 @@ class SalesforceMappingTransformer:
                         else:
                             value = transformed_value
                     except Exception as exc:  # pragma: no cover - defensive path
-                        errors.append(f"Transform '{field.transform}' failed for {field.target}: {exc}")
-                        transform_failed = True
+                        errors.append(f"Transform '{field_spec.transform}' failed for {field_spec.target}: {exc}")
                         if source_field_name and source_field_name in field_stats:
                             field_stats[source_field_name].records_failed_transform += 1
-            
+
             # Update mapped count if field was successfully processed
             if source_field_name and source_field_name in field_stats:
                 if had_value or used_default:
                     field_stats[source_field_name].records_mapped += 1
-            
+
             # Skip only None and empty strings, but include False (boolean) values
             # Note: False is not None and False != "", so it will pass through
             # However, if we have a boolean default and the value is None/empty, we should use the default
             if value is None or value == "":
                 # If we have a boolean default, use it (don't skip)
-                if isinstance(field.default, bool):
-                    value = field.default
+                if isinstance(field_spec.default, bool):
+                    value = field_spec.default
                 else:
                     continue
             # Normalize boolean values from Salesforce (handles both bool and string "true"/"false")
-            if isinstance(field.default, bool) or isinstance(value, bool):
+            if isinstance(field_spec.default, bool) or isinstance(value, bool):
                 if isinstance(value, str):
                     # Convert string representations to bool
                     value = value.lower() in ("true", "1", "yes", "y", "on")
                 elif not isinstance(value, bool) and value is not None:
                     # Convert other types to bool if default is bool
                     value = bool(value)
-            _set_nested_value(canonical, field.target, value)
+            _set_nested_value(canonical, field_spec.target, value)
 
         return TransformResult(
             canonical=canonical,
@@ -386,7 +426,7 @@ def _build_transform_registry() -> Dict[str, Any]:
         text = str(value).strip().lower()
         if not text:
             return None
-        
+
         # Mapping of Salesforce values to enum values (case-insensitive)
         # Based on actual Salesforce picklist values observed
         mapping = {
@@ -395,26 +435,22 @@ def _build_transform_registry() -> Dict[str, Any]:
             "prefer not to say": "prefer_not_to_say",
             "prefer_not_to_say": "prefer_not_to_say",
             "prefer not to respond": "prefer_not_to_say",
-            
             # Black/African American variants
             "black": "black_or_african_american",
             "black/african american": "black_or_african_american",
             "african american": "black_or_african_american",
             "african-american": "black_or_african_american",
             "black_or_african_american": "black_or_african_american",
-            
             # White/Caucasian variants
             "white": "white",
             "caucasian": "white",
             "white/caucasian": "white",
             "white/caucasian/european american": "white",
             "european american": "white",
-            
             # Asian variants
             "asian": "asian",
             "asian american": "asian",
             "asian/pacific islander": "asian",
-            
             # Hispanic/Latino variants
             "hispanic": "hispanic_or_latino",
             "latino": "hispanic_or_latino",
@@ -422,17 +458,14 @@ def _build_transform_registry() -> Dict[str, Any]:
             "hispanic or latino": "hispanic_or_latino",
             "hispanic/latino": "hispanic_or_latino",
             "hispanic_or_latino": "hispanic_or_latino",
-            
             # Native American variants
             "native american": "native_american",
             "american indian": "native_american",
             "native american/american indian": "native_american",
             "native_american": "native_american",
-            
             # Pacific Islander variants
             "pacific islander": "pacific_islander",
             "pacific_islander": "pacific_islander",
-            
             # Multi-racial/Bi-racial variants
             "bi-racial": "two_or_more",
             "multi-racial": "two_or_more",
@@ -443,22 +476,21 @@ def _build_transform_registry() -> Dict[str, Any]:
             "two_or_more": "two_or_more",
             "mixed": "two_or_more",
             "multicultural": "two_or_more",
-            
             # Other
             "other": "other",
         }
-        
+
         # Direct lookup
         normalized = mapping.get(text)
         if normalized:
             return normalized
-        
+
         # Fuzzy matching for partial matches
         # Check if text contains any key phrase
         for key, enum_value in mapping.items():
             if key in text or text in key:
                 return enum_value
-        
+
         # If no match found, return None to let the loader log it
         # This will help identify new values that need mapping
         return None
@@ -470,7 +502,7 @@ def _build_transform_registry() -> Dict[str, Any]:
         text = str(value).strip().lower()
         if not text:
             return None
-        
+
         # Mapping of Salesforce values to enum values (case-insensitive)
         # Based on common education level picklist values
         mapping = {
@@ -481,7 +513,6 @@ def _build_transform_registry() -> Dict[str, Any]:
             "elementary school": "less_than_high_school",
             "middle school": "less_than_high_school",
             "less_than_high_school": "less_than_high_school",
-            
             # High school variants
             "high school": "high_school",
             "high school diploma": "high_school",
@@ -490,14 +521,12 @@ def _build_transform_registry() -> Dict[str, Any]:
             "ged": "high_school",
             "general equivalency diploma": "high_school",
             "high_school": "high_school",
-            
             # Some college variants
             "some college": "some_college",
             "some college credit": "some_college",
             "college credit": "some_college",
             "attended college": "some_college",
             "some_college": "some_college",
-            
             # Associate's degree variants
             "associate's": "associates",
             "associates": "associates",
@@ -508,7 +537,6 @@ def _build_transform_registry() -> Dict[str, Any]:
             "as": "associates",
             "a.s.": "associates",
             "aas": "associates",
-            
             # Bachelor's degree variants
             "bachelor's": "bachelors",
             "bachelor": "bachelors",
@@ -521,7 +549,6 @@ def _build_transform_registry() -> Dict[str, Any]:
             "b.s.": "bachelors",
             "bsba": "bachelors",
             "bsc": "bachelors",
-            
             # Master's degree variants
             "master's": "masters",
             "masters": "masters",
@@ -534,7 +561,6 @@ def _build_transform_registry() -> Dict[str, Any]:
             "m.s.": "masters",
             "msc": "masters",
             "mba": "masters",
-            
             # Doctorate variants
             "doctorate": "doctorate",
             "doctorate degree": "doctorate",
@@ -545,7 +571,6 @@ def _build_transform_registry() -> Dict[str, Any]:
             "ed.d.": "doctorate",
             "edd": "doctorate",
             "doctoral degree": "doctorate",
-            
             # Professional degree variants
             "professional": "professional",
             "professional degree": "professional",
@@ -555,24 +580,23 @@ def _build_transform_registry() -> Dict[str, Any]:
             "md": "professional",
             "m.d.": "professional",
             "medical degree": "professional",
-            
             # Other
             "other": "other",
             "not specified": "other",
             "prefer not to answer": "other",
         }
-        
+
         # Direct lookup
         normalized = mapping.get(text)
         if normalized:
             return normalized
-        
+
         # Fuzzy matching for partial matches
         # Check if text contains any key phrase
         for key, enum_value in mapping.items():
             if key in text or text in key:
                 return enum_value
-        
+
         # If no match found, return None to let the loader log it
         # This will help identify new values that need mapping
         return None
@@ -584,7 +608,7 @@ def _build_transform_registry() -> Dict[str, Any]:
         text = str(value).strip().lower()
         if not text:
             return None
-        
+
         # Mapping of Salesforce values to enum values (case-insensitive)
         # AgeGroup enum values: child (0-12), teen (13-17), adult (18-64), senior (65+)
         mapping = {
@@ -593,23 +617,19 @@ def _build_transform_registry() -> Dict[str, Any]:
             "teen": "teen",
             "adult": "adult",
             "senior": "senior",
-            
             # Age range formats (e.g., "60-69", "60-69 years", etc.)
             "0-12": "child",
             "0-12 years": "child",
             "under 13": "child",
             "12 and under": "child",
-            
             "13-17": "teen",
             "13-17 years": "teen",
             "teenager": "teen",
             "teens": "teen",
-            
             "18-64": "adult",
             "18-64 years": "adult",
             "adult": "adult",
             "adults": "adult",
-            
             "65+": "senior",
             "65 and over": "senior",
             "65 and older": "senior",
@@ -617,7 +637,6 @@ def _build_transform_registry() -> Dict[str, Any]:
             "senior": "senior",
             "seniors": "senior",
             "elderly": "senior",
-            
             # Specific age ranges that map to senior
             "60-69": "senior",
             "60-69 years": "senior",
@@ -626,16 +645,17 @@ def _build_transform_registry() -> Dict[str, Any]:
             "80+": "senior",
             "80 and over": "senior",
         }
-        
+
         # Direct lookup
         normalized = mapping.get(text)
         if normalized:
             return normalized
-        
+
         # Try to extract numeric age ranges from text
         import re
+
         # Match patterns like "60-69", "18-64", "65+", etc.
-        range_match = re.search(r'(\d+)\s*-\s*(\d+)', text)
+        range_match = re.search(r"(\d+)\s*-\s*(\d+)", text)
         if range_match:
             start_age = int(range_match.group(1))
             end_age = int(range_match.group(2))
@@ -658,9 +678,9 @@ def _build_transform_registry() -> Dict[str, Any]:
             elif start_age < 65:
                 # Spans adult and senior, default to senior
                 return "senior"
-        
+
         # Match patterns like "65+", "80+", etc.
-        plus_match = re.search(r'(\d+)\s*\+', text)
+        plus_match = re.search(r"(\d+)\s*\+", text)
         if plus_match:
             age = int(plus_match.group(1))
             if age >= 65:
@@ -671,12 +691,12 @@ def _build_transform_registry() -> Dict[str, Any]:
                 return "teen"
             else:
                 return "child"
-        
+
         # Fuzzy matching for partial matches
         for key, enum_value in mapping.items():
             if key in text or text in key:
                 return enum_value
-        
+
         # If no match found, return None to let the loader log it
         # This will help identify new values that need mapping
         return None
@@ -688,7 +708,7 @@ def _build_transform_registry() -> Dict[str, Any]:
         text = str(value).strip().lower()
         if not text:
             return None
-        
+
         # Mapping of Salesforce Account Type values to OrganizationType enum values
         # OrganizationType enum: SCHOOL, BUSINESS, NON_PROFIT, GOVERNMENT, OTHER
         mapping = {
@@ -701,7 +721,6 @@ def _build_transform_registry() -> Dict[str, Any]:
             "educational institution": "school",
             "university": "school",
             "college": "school",
-            
             # Business variants
             "business": "business",
             "company": "business",
@@ -712,7 +731,6 @@ def _build_transform_registry() -> Dict[str, Any]:
             "for-profit": "business",
             "for profit": "business",
             "commercial": "business",
-            
             # Non-profit variants
             "non-profit": "non_profit",
             "nonprofit": "non_profit",
@@ -723,7 +741,6 @@ def _build_transform_registry() -> Dict[str, Any]:
             "charity": "non_profit",
             "foundation": "non_profit",
             "ngo": "non_profit",
-            
             # Government variants
             "government": "government",
             "federal": "government",
@@ -733,22 +750,21 @@ def _build_transform_registry() -> Dict[str, Any]:
             "city": "government",
             "county": "government",
             "public sector": "government",
-            
             # Other (default)
             "other": "other",
             "unknown": "other",
         }
-        
+
         # Direct lookup
         normalized = mapping.get(text)
         if normalized:
             return normalized
-        
+
         # Fuzzy matching for partial matches
         for key, enum_value in mapping.items():
             if key in text or text in key:
                 return enum_value
-        
+
         # Default to OTHER for unmapped types
         return "other"
 
@@ -770,4 +786,3 @@ def _set_nested_value(target: dict[str, Any], dotted_path: str, value: Any) -> N
     for part in parts[:-1]:
         current = current.setdefault(part, {})
     current[parts[-1]] = value
-

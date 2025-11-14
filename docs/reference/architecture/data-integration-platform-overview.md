@@ -243,7 +243,7 @@ Each rule has: `rule_code`, `severity` (error/warn/info), remediation hints, and
 
 ### 8.4 Data Quality Dashboard
 
-- **Field-Level Completeness**: Monitor data completeness across all entities (Contacts, Volunteers, Students, Teachers, Events, Organizations, Users)
+- **Field-Level Completeness**: Monitor data completeness across all entities (Contacts, Volunteers, Students, Teachers, Events, Organizations, Users, Affiliations)
 - **Overall Health Score**: Weighted health score (0-100%) based on field completeness
 - **Entity Cards**: Visual cards showing completeness per entity type with key metrics
 - **Field Tables**: Detailed field-level completeness metrics with status indicators
@@ -517,9 +517,9 @@ Each rule has: **severity**, **remediation hint**, **auto-fix? (y/n)**, **owner*
 - `IMPORTER_ENABLED=false` hides all importer routes/menus/CLI.
 - `IMPORTER_ADAPTERS` is parsed (e.g., `csv`, `salesforce`), but nothing loads unless enabled.
 - App boots with or without the importer installed.
-    
+
     **Tasks**: App factory guard; conditional blueprint registration; config docs.
-    
+
 
 **IMP‑2 — Base DB schema for imports (8 pts)**
 
@@ -530,11 +530,11 @@ Each rule has: **severity**, **remediation hint**, **auto-fix? (y/n)**, **owner*
 - Tables exist: `import_runs`, `staging_volunteers`, `dq_violations`, `dedupe_suggestions`, `external_id_map`, `merge_log`, `change_log`.
 - Foreign keys & indexes for `run_id`, `(external_system, external_id)`.
 - Migrations run cleanly on empty DB and existing app DB.
-    
+
     **Tasks**: Migration scripts; index plan; roll‑back tested.
-    
+
     **Edge cases**: schema idempotency; null‑safe columns.
-    
+
 
 **IMP‑3 — Worker process + queues (5 pts)**
 
@@ -545,9 +545,9 @@ Each rule has: **severity**, **remediation hint**, **auto-fix? (y/n)**, **owner*
 - Celery (or RQ) worker connects to Redis, consumes from `imports` queue.
 - Health check endpoint shows worker connectivity.
 - Graceful shutdown of tasks (SIGTERM).
-    
+
     **Tasks**: Worker procfile/compose; env docs; sample “no‑op” task.
-    
+
 
 **IMP‑4 — “Definition of Ready/Done” & QA harness (3 pts)**
 
@@ -579,11 +579,11 @@ Each rule has: **severity**, **remediation hint**, **auto-fix? (y/n)**, **owner*
 - Canonical fields accepted (first/last/email/phone/etc.).
 - Bad headers are rejected with actionable error.
 - Extract writes to `staging_volunteers` with `run_id`.
-    
+
     **Tasks**: Contract validation; header/row counters; error surfacing.
-    
+
     **Dependencies**: IMP‑2.
-    
+
 
 **IMP‑11 — Minimal DQ: required & format (5 pts)**
 
@@ -594,9 +594,9 @@ Each rule has: **severity**, **remediation hint**, **auto-fix? (y/n)**, **owner*
 - Rules: at least one of `{email, phone}`; email format; phone E.164.
 - Violations logged to `dq_violations` with rule codes.
 - Clean rows flow to next step.
-    
+
     **Tasks**: Validator functions; violation writer.
-    
+
 
 **IMP‑12 — Upsert (create‑only) into core volunteers (8 pts)**
 
@@ -607,11 +607,11 @@ Each rule has: **severity**, **remediation hint**, **auto-fix? (y/n)**, **owner*
 - New rows insert; existing (exact email match) skipped with metric.
 - Run shows counts: read/cleaned/loaded/skipped.
 - No deadlocks; transaction per batch.
-    
+
     **Tasks**: Upsert service; counters in `import_runs.counts_json`.
-    
+
     **Edge cases**: empty email/phone.
-    
+
 
 **IMP‑13 — CLI & admin action: start a run (3 pts)**
 
@@ -622,9 +622,9 @@ Each rule has: **severity**, **remediation hint**, **auto-fix? (y/n)**, **owner*
 - `flask importer run --source csv --file …` queues a run and prints a JSON payload (`{"run_id":…, "task_id":…, "status":"queued"}`); operators can pass `--inline` for the legacy synchronous path.
 - Admin Importer page (flagged) accepts CSV upload, enqueues the Celery task, and polls `/admin/imports/<run_id>/status` for live updates.
 - Run status visible (pending/running/done/failed) with error summary surfaced on failure.
-    
+
     **Dependencies**: IMP‑3.
-    
+
 
 **Sprint 1 demo success**
 
@@ -646,9 +646,9 @@ Each rule has: **severity**, **remediation hint**, **auto-fix? (y/n)**, **owner*
 - Columns: `run_id`, source, started/ended, status, rows in/out, rejects.
 - Drill‑down shows `counts_json`, latest anomalies (placeholder).
 - Pagination & filter by source/status/date.
-    
+
     **Dependencies**: IMP‑13.
-    
+
 
 **IMP‑21 — DQ inbox (basic) with CSV export (8 pts)**
 
@@ -659,9 +659,9 @@ Each rule has: **severity**, **remediation hint**, **auto-fix? (y/n)**, **owner*
 - Filter by rule code/severity/run.
 - Row detail shows staging payload & normalized preview.
 - Export button produces CSV of violations.
-    
+
     **Tasks**: Read models; secure download.
-    
+
 
 **IMP‑22 — Remediate: edit & requeue (8 pts)**
 
@@ -671,9 +671,9 @@ Each rule has: **severity**, **remediation hint**, **auto-fix? (y/n)**, **owner*
 
 - Edit form with validation; upon save, row is revalidated and (if clean) proceeds to upsert.
 - Violation status transitions to `fixed`; audit trail records who/when/what.
-    
+
     **Edge cases**: partial edits; multi‑violation rows.
-    
+
 
 **IMP‑23 — Dry‑run mode (3 pts)**
 
@@ -683,9 +683,9 @@ Each rule has: **severity**, **remediation hint**, **auto-fix? (y/n)**, **owner*
 
 - Flag `-dry-run` or UI toggle; everything executes except final upsert.
 - Run result shows “no writes performed”.
-    
+
     **Dependencies**: IMP‑12, IMP‑20.
-    
+
 
 # Sprint 3 — Deterministic dedupe + idempotent upsert (EPIC‑3)
 
@@ -702,9 +702,9 @@ Each rule has: **severity**, **remediation hint**, **auto-fix? (y/n)**, **owner*
 - `external_id_map` populated for CSV (use `csv:<row-id>` or provided `external_id`).
 - Upsert keyed by `(external_system, external_id)`; safe retries.
 - `last_seen_at` updated; `first_seen_at` preserved.
-    
+
     **Dependencies**: IMP‑2, IMP‑12.
-    
+
 
 **IMP‑31 — Deterministic dedupe (email/phone) (8 pts)**
 
@@ -715,9 +715,9 @@ Each rule has: **severity**, **remediation hint**, **auto-fix? (y/n)**, **owner*
 - Blocking: normalized email; phone E.164.
 - When match found, update existing core person rather than insert.
 - Counters for “resolved vs inserted” visible on run.
-    
+
     **Edge cases**: shared emails; empty fields.
-    
+
 
 **IMP‑32 — Survivorship v1 (field‑level) (5 pts)**
 
@@ -727,9 +727,9 @@ Each rule has: **severity**, **remediation hint**, **auto-fix? (y/n)**, **owner*
 
 - Prefer non‑null over null; prefer manual edits over imports; prefer most recent verified timestamp.
 - Rules documented and visible in UI tooltip.
-    
+
     **Tasks**: Policy file/config; change log writes.
-    
+
 
 **IMP‑33 — Regression tests on idempotency (3 pts)**
 
@@ -764,9 +764,9 @@ Each rule has: **severity**, **remediation hint**, **auto-fix? (y/n)**, **owner*
 - `since` watermark stored per entity/source and respected.
 - Extract records `run_id`, `source_updated_at`, raw payload.
 - Rate limit/backoff handling; partial failures logged to run.
-    
+
     **Tasks**: SOQL/Bulk or replica SQL; creds config; retries.
-    
+
 
 **IMP‑42 — Salesforce→canonical mapping v1 (8 pts)**
 
@@ -776,9 +776,9 @@ Each rule has: **severity**, **remediation hint**, **auto-fix? (y/n)**, **owner*
 
 - Declarative mapping file; unmapped fields listed in run summary.
 - Required & format DQ applied; violations recorded.
-    
+
     **Edge cases**: SF field nulls; picklist values; time zones.
-    
+
 
 **IMP‑43 — Incremental upsert & reconciliation counters (5 pts)**
 
@@ -804,9 +804,9 @@ Each rule has: **severity**, **remediation hint**, **auto-fix? (y/n)**, **owner*
 - Blocking keys (email/phone/name+zip); features (name similarity, DOB, address).
 - Scores persisted to `dedupe_suggestions` with features JSON.
 - Thresholds configurable: auto‑merge ≥0.95; review band 0.80–0.95.
-    
+
     **Edge cases**: missing DOB; international addresses.
-    
+
 
 **IMP‑51 — Merge UI (13 pts)**
 
@@ -817,9 +817,9 @@ Each rule has: **severity**, **remediation hint**, **auto-fix? (y/n)**, **owner*
 - Side‑by‑side view; field highlights; survivorship controls.
 - On merge: `merge_log` entry; `external_id_map` unified; `change_log` diffs written.
 - “Not a duplicate” and “Defer” actions available.
-    
+
     **Security**: action requires admin role.
-    
+
 
 **IMP‑52 — Auto‑merge + undo merge (8 pts)**
 
@@ -829,9 +829,9 @@ Each rule has: **severity**, **remediation hint**, **auto-fix? (y/n)**, **owner*
 
 - Auto‑merge obeys thresholds; safe for deterministic matches.
 - Undo reverses merges with full state restoration.
-    
+
     **Dependencies**: IMP‑50, IMP‑51.
-    
+
 
 **IMP‑53 — Dedupe metrics on runs dashboard (3 pts)**
 

@@ -21,15 +21,21 @@ from flask_app.importer.pipeline import (
     CoreLoadSummary,
     StagingSummary,
     load_core_volunteers,
+    promote_clean_affiliations,
     promote_clean_organizations,
     promote_clean_volunteers,
     run_minimal_dq,
     stage_volunteers_from_csv,
 )
 from flask_app.importer.pipeline.fuzzy_candidates import generate_fuzzy_candidates
-from flask_app.importer.pipeline.salesforce import ingest_salesforce_accounts as run_salesforce_accounts_ingest, ingest_salesforce_contacts as run_salesforce_ingest
+from flask_app.importer.pipeline.salesforce import ingest_salesforce_accounts as run_salesforce_accounts_ingest
+from flask_app.importer.pipeline.salesforce import ingest_salesforce_affiliations as run_salesforce_affiliations_ingest
+from flask_app.importer.pipeline.salesforce import ingest_salesforce_contacts as run_salesforce_ingest
+from flask_app.importer.pipeline.salesforce_affiliation_loader import LoaderCounters as AffiliationLoaderCounters
+from flask_app.importer.pipeline.salesforce_affiliation_loader import SalesforceAffiliationLoader
 from flask_app.importer.pipeline.salesforce_loader import LoaderCounters, SalesforceContactLoader
-from flask_app.importer.pipeline.salesforce_organization_loader import LoaderCounters as OrgLoaderCounters, SalesforceOrganizationLoader
+from flask_app.importer.pipeline.salesforce_organization_loader import LoaderCounters as OrgLoaderCounters
+from flask_app.importer.pipeline.salesforce_organization_loader import SalesforceOrganizationLoader
 from flask_app.importer.utils import cleanup_upload
 from flask_app.models import ImporterWatermark
 from flask_app.models.base import db
@@ -386,6 +392,156 @@ def ingest_salesforce_contacts(
             db.session.commit()
         current_app.logger.exception(
             "Salesforce import run failed",
+            extra={
+                "importer_run_id": run_id,
+                "importer_error": str(exc),
+            },
+        )
+        raise
+
+
+@shared_task(name="importer.pipeline.ingest_salesforce_affiliations", bind=True)
+def ingest_salesforce_affiliations(
+    self,
+    *,
+    run_id: int,
+    dry_run: bool = False,
+    record_limit: int | None = None,
+) -> dict[str, object]:
+    """
+    Execute the Salesforce Affiliation (npe5__Affiliation__c) ingest pipeline via the importer worker.
+    """
+
+    run = db.session.get(ImportRun, run_id)
+    if run is None:
+        raise ValueError(f"Import run {run_id} not found.")
+
+    run.status = ImportRunStatus.RUNNING
+    run.started_at = datetime.now(timezone.utc)
+    db.session.commit()
+
+    object_name = "affiliations"
+    batch_size = current_app.config.get("IMPORTER_SALESFORCE_BATCH_SIZE", 5000)
+
+    watermark = (
+        db.session.query(ImporterWatermark)
+        .filter_by(adapter="salesforce", object_name=object_name)
+        .with_for_update(of=ImporterWatermark)
+        .first()
+    )
+    if watermark is None:
+        watermark = ImporterWatermark(adapter="salesforce", object_name=object_name)
+        db.session.add(watermark)
+        db.session.flush()
+
+    try:
+        client = create_salesforce_client()
+        extractor = SalesforceExtractor(
+            client=client,
+            batch_size=batch_size,
+            poll_interval=5.0,
+            poll_timeout=900.0,
+            logger=current_app.logger,
+        )
+        summary = run_salesforce_affiliations_ingest(
+            import_run=run,
+            extractor=extractor,
+            watermark=watermark,
+            staging_batch_size=500,
+            dry_run=dry_run,
+            logger=current_app.logger,
+            record_limit=record_limit,
+        )
+
+        # Run DQ validation and clean promotion
+        dq_summary = run_minimal_dq(run, dry_run=dry_run, csv_rows=None)
+        clean_summary = promote_clean_affiliations(run, dry_run=dry_run)
+
+        if dry_run:
+            counters = AffiliationLoaderCounters()
+            run.status = ImportRunStatus.SUCCEEDED
+            run.finished_at = datetime.now(timezone.utc)
+            run.metrics_json = run.metrics_json or {}
+            run.metrics_json.setdefault("salesforce", {})["max_source_updated_at"] = (
+                summary.max_modstamp.isoformat() if summary.max_modstamp else None
+            )
+            db.session.commit()
+        else:
+            loader = SalesforceAffiliationLoader(run)
+            counters = loader.execute()
+
+        # Create CoreLoadSummary from Salesforce loader counters for idempotency summary
+        core_summary = CoreLoadSummary(
+            rows_processed=counters.created
+            + counters.updated
+            + counters.unchanged
+            + counters.deleted
+            + counters.skipped,
+            rows_created=counters.created,
+            rows_updated=counters.updated,
+            rows_reactivated=0,
+            rows_deduped_auto=0,
+            rows_skipped_duplicates=0,
+            rows_skipped_duplicate_name=0,
+            rows_skipped_no_change=counters.unchanged,
+            rows_missing_external_id=0,
+            rows_soft_deleted=counters.deleted,
+            duplicate_emails=(),
+            dry_run=dry_run,
+        )
+
+        # Persist idempotency summary (includes DQ and clean summaries)
+        persist_idempotency_summary(
+            run,
+            staging_summary=StagingSummary(
+                rows_processed=summary.records_received,
+                rows_staged=summary.records_staged,
+                rows_skipped_blank=0,
+                header=summary.header,
+                dry_run=summary.dry_run,
+                dry_run_rows=(),
+            ),
+            dq_summary=dq_summary,
+            clean_summary=clean_summary,
+            core_summary=core_summary,
+            fuzzy_summary=None,  # Affiliations don't use fuzzy matching
+        )
+        current_app.logger.info(
+            "Salesforce Affiliation import run completed",
+            extra={
+                "importer_run_id": run_id,
+                "salesforce_job_id": summary.job_id,
+                "salesforce_batches_processed": summary.batches_processed,
+                "salesforce_records_received": summary.records_received,
+                "salesforce_records_staged": summary.records_staged,
+                "salesforce_rows_created": counters.created if not dry_run else 0,
+                "salesforce_rows_updated": counters.updated if not dry_run else 0,
+                "salesforce_rows_deleted": counters.deleted if not dry_run else 0,
+                "salesforce_rows_unchanged": counters.unchanged if not dry_run else 0,
+                "salesforce_rows_skipped": counters.skipped if not dry_run else 0,
+                "importer_dry_run": dry_run,
+            },
+        )
+        return {
+            "run_id": run_id,
+            "job_id": summary.job_id,
+            "batches_processed": summary.batches_processed,
+            "records_received": summary.records_received,
+            "records_staged": summary.records_staged,
+            "dry_run": dry_run,
+            "max_system_modstamp": summary.max_modstamp.isoformat() if summary.max_modstamp else None,
+            "counters": counters.to_dict(),
+        }
+    except Exception as exc:  # pragma: no cover - defensive logging path
+        db.session.rollback()
+        recovery_run = db.session.get(ImportRun, run_id)
+        if recovery_run is not None:
+            recovery_run.status = ImportRunStatus.FAILED
+            recovery_run.error_summary = str(exc)
+            recovery_run.finished_at = datetime.now(timezone.utc)
+            db.session.commit()
+        current_app.logger.exception(
+            "Salesforce Affiliation import run failed",
             extra={
                 "importer_run_id": run_id,
                 "importer_error": str(exc),

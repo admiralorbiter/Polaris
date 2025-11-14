@@ -378,8 +378,11 @@ def importer_salesforce_trigger():
     run_notes = _CONTROL_CHAR_PATTERN.sub(" ", run_notes)
 
     # Validate entity_type
-    if entity_type not in ("contacts", "organizations"):
-        return jsonify({"error": "entity_type must be 'contacts' or 'organizations'."}), HTTPStatus.BAD_REQUEST
+    if entity_type not in ("contacts", "organizations", "affiliations"):
+        return (
+            jsonify({"error": "entity_type must be 'contacts', 'organizations', or 'affiliations'."}),
+            HTTPStatus.BAD_REQUEST,
+        )
 
     ingest_params: dict[str, object] = {
         "source_system": "salesforce",
@@ -423,7 +426,14 @@ def importer_salesforce_trigger():
         task_kwargs["record_limit"] = record_limit
 
     # Select task based on entity_type
-    task_name = "importer.pipeline.ingest_salesforce_contacts" if entity_type == "contacts" else "importer.pipeline.ingest_salesforce_accounts"
+    if entity_type == "contacts":
+        task_name = "importer.pipeline.ingest_salesforce_contacts"
+    elif entity_type == "organizations":
+        task_name = "importer.pipeline.ingest_salesforce_accounts"
+    elif entity_type == "affiliations":
+        task_name = "importer.pipeline.ingest_salesforce_affiliations"
+    else:
+        task_name = "importer.pipeline.ingest_salesforce_contacts"  # Default fallback
 
     try:
         async_result = celery_app.send_task(
@@ -1427,25 +1437,28 @@ def importer_scan_existing_duplicates():
         current_app.logger.info(
             f"User {current_user.id} triggered duplicate scan (dry_run={dry_run}, threshold={threshold})"
         )
-        
+
         summary = scan_existing_volunteers_for_duplicates(
             dry_run=dry_run,
             similarity_threshold=threshold,
         )
-        
+
         # Log admin action
         import json
+
         AdminLog.log_action(
             admin_user_id=current_user.id,
             action="IMPORTER_SCAN_DUPLICATES",
-            details=json.dumps({
-                "dry_run": dry_run,
-                "threshold": threshold,
-                "rows_considered": summary.rows_considered,
-                "suggestions_created": summary.suggestions_created,
-                "high_confidence": summary.high_confidence,
-                "review_band": summary.review_band,
-            }),
+            details=json.dumps(
+                {
+                    "dry_run": dry_run,
+                    "threshold": threshold,
+                    "rows_considered": summary.rows_considered,
+                    "suggestions_created": summary.suggestions_created,
+                    "high_confidence": summary.high_confidence,
+                    "review_band": summary.review_band,
+                }
+            ),
         )
         db.session.commit()
 

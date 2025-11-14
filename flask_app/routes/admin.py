@@ -9,10 +9,8 @@ from werkzeug.security import generate_password_hash
 
 from flask_app.forms import ChangePasswordForm, CreateUserForm, UpdateUserForm
 from flask_app.models import AdminLog, Organization, SystemMetrics, User, db
+from flask_app.services.data_quality_field_config_service import DataQualityFieldConfigService
 from flask_app.services.data_quality_service import DataQualityService
-from flask_app.services.data_quality_field_config_service import (
-    DataQualityFieldConfigService,
-)
 from flask_app.services.data_sampling_service import DataSamplingService
 from flask_app.utils.permissions import get_current_organization, permission_required
 
@@ -787,7 +785,7 @@ def register_admin_routes(app):
             clear_cache = request.args.get("clear_cache", "false").lower() == "true"
             if clear_cache:
                 DataQualityService._clear_cache()
-            
+
             organization = get_current_organization()
             organization_id = None
 
@@ -845,7 +843,7 @@ def register_admin_routes(app):
             clear_cache = request.args.get("clear_cache", "false").lower() == "true"
             if clear_cache:
                 DataQualityService._clear_cache()
-            
+
             organization = get_current_organization()
             organization_id = None
 
@@ -867,6 +865,7 @@ def register_admin_routes(app):
                 "event",
                 "organization",
                 "user",
+                "affiliation",
             ]
             if entity_type not in valid_entity_types:
                 return jsonify({"error": f"Invalid entity type: {entity_type}"}), 400
@@ -1049,6 +1048,7 @@ def register_admin_routes(app):
                 "event",
                 "organization",
                 "user",
+                "affiliation",
             ]
             if entity_type not in valid_entity_types:
                 return jsonify({"error": f"Invalid entity type: {entity_type}"}), 400
@@ -1120,6 +1120,7 @@ def register_admin_routes(app):
                 "event",
                 "organization",
                 "user",
+                "affiliation",
             ]
             if entity_type not in valid_entity_types:
                 return jsonify({"error": f"Invalid entity type: {entity_type}"}), 400
@@ -1183,6 +1184,7 @@ def register_admin_routes(app):
                 "event",
                 "organization",
                 "user",
+                "affiliation",
             ]
             if entity_type not in valid_entity_types:
                 return jsonify({"error": f"Invalid entity type: {entity_type}"}), 400
@@ -1250,6 +1252,7 @@ def register_admin_routes(app):
                 "event",
                 "organization",
                 "user",
+                "affiliation",
             ]
             if entity_type not in valid_entity_types:
                 return jsonify({"error": f"Invalid entity type: {entity_type}"}), 400
@@ -1368,6 +1371,7 @@ def register_admin_routes(app):
                 "event",
                 "organization",
                 "user",
+                "affiliation",
             ]
             if entity_type not in valid_entity_types:
                 return jsonify({"error": f"Invalid entity type: {entity_type}"}), 400
@@ -1438,6 +1442,7 @@ def register_admin_routes(app):
                 "event",
                 "organization",
                 "user",
+                "affiliation",
             ]
             if entity_type not in valid_entity_types:
                 return jsonify({"error": f"Invalid entity type: {entity_type}"}), 400
@@ -1510,6 +1515,7 @@ def register_admin_routes(app):
                 "event",
                 "organization",
                 "user",
+                "affiliation",
             ]
             if entity_type not in valid_entity_types:
                 return jsonify({"error": f"Invalid entity type: {entity_type}"}), 400
@@ -1554,7 +1560,7 @@ def register_admin_routes(app):
     def data_quality_field_config():
         """Get current field configuration"""
         try:
-            organization = get_current_organization()
+            # organization = get_current_organization()  # Reserved for future org-specific config
             organization_id = None
 
             # For v1, use system-wide configuration
@@ -1570,7 +1576,16 @@ def register_admin_routes(app):
             config = DataQualityFieldConfigService.get_field_config_for_display(organization_id)
 
             # Ensure all entity types are present (debug/logging)
-            expected_entity_types = ["volunteer", "contact", "student", "teacher", "event", "organization", "user"]
+            expected_entity_types = [
+                "volunteer",
+                "contact",
+                "student",
+                "teacher",
+                "event",
+                "organization",
+                "user",
+                "affiliation",
+            ]
             for entity_type in expected_entity_types:
                 if entity_type not in config:
                     current_app.logger.warning(f"Entity type {entity_type} missing from field configuration")
@@ -1586,7 +1601,9 @@ def register_admin_routes(app):
                 "organization_id": organization_id,
             }
 
-            current_app.logger.debug(f"Field configuration API returning {len(config)} entity types: {list(config.keys())}")
+            current_app.logger.debug(
+                f"Field configuration API returning {len(config)} entity types: {list(config.keys())}"
+            )
 
             return jsonify(response)
         except Exception as e:
@@ -1599,7 +1616,7 @@ def register_admin_routes(app):
     def data_quality_field_config_update():
         """Update field configuration"""
         try:
-            organization = get_current_organization()
+            # organization = get_current_organization()  # Reserved for future org-specific config
             organization_id = None
 
             # For v1, use system-wide configuration
@@ -1650,7 +1667,9 @@ def register_admin_routes(app):
                         if field_name not in disabled_fields[entity_type]:
                             disabled_fields[entity_type].append(field_name)
 
-                    updated_fields.append({"entity_type": entity_type, "field_name": field_name, "is_enabled": is_enabled})
+                    updated_fields.append(
+                        {"entity_type": entity_type, "field_name": field_name, "is_enabled": is_enabled}
+                    )
 
                 # Save configuration
                 success = DataQualityFieldConfigService.set_disabled_fields(disabled_fields, organization_id)
@@ -1687,7 +1706,10 @@ def register_admin_routes(app):
                     return (
                         jsonify(
                             {
-                                "error": "Missing required fields: entity_type, field_name, is_enabled (or 'changes' for batch update)"
+                                "error": (
+                                    "Missing required fields: entity_type, field_name, is_enabled "
+                                    "(or 'changes' for batch update)"
+                                )
                             }
                         ),
                         400,
@@ -1760,7 +1782,7 @@ def register_admin_routes(app):
     def data_quality_field_config_entity(entity_type):
         """Get field configuration for a specific entity type"""
         try:
-            organization = get_current_organization()
+            # organization = get_current_organization()  # Reserved for future org-specific config
             organization_id = None
 
             # For v1, use system-wide configuration
@@ -1783,9 +1805,7 @@ def register_admin_routes(app):
 
             return jsonify(response)
         except Exception as e:
-            current_app.logger.error(
-                f"Error getting field configuration for {entity_type}: {str(e)}", exc_info=True
-            )
+            current_app.logger.error(f"Error getting field configuration for {entity_type}: {str(e)}", exc_info=True)
             return jsonify({"error": f"Failed to get field configuration for {entity_type}"}), 500
 
     @app.route("/admin/data-quality/api/field-definitions", methods=["GET"])
