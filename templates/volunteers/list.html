@@ -96,21 +96,6 @@
                         </a>
                     </th>
                     <th>
-                        <a href="{{ url_for('volunteers_list', search=search_term, sort='do_not_call', order='asc' if sort_column != 'do_not_call' or sort_order == 'desc' else 'desc') }}" 
-                           class="text-decoration-none text-white sortable-header">
-                            Contact Preferences
-                            {% if sort_column == 'do_not_call' %}
-                                {% if sort_order == 'asc' %}
-                                    <i class="fas fa-sort-up ms-1"></i>
-                                {% else %}
-                                    <i class="fas fa-sort-down ms-1"></i>
-                                {% endif %}
-                            {% else %}
-                                <i class="fas fa-sort ms-1" style="opacity: 0.5;"></i>
-                            {% endif %}
-                        </a>
-                    </th>
-                    <th>
                         <a href="{{ url_for('volunteers_list', search=search_term, sort='last_date', order='asc' if sort_column != 'last_date' or sort_order == 'desc' else 'desc') }}" 
                            class="text-decoration-none text-white sortable-header">
                             Last Volunteer Date
@@ -132,20 +117,10 @@
                 {% for volunteer in volunteers.items %}
                 <tr>
                     <td>
-                        <a href="{{ url_for('volunteers_view', volunteer_id=volunteer.id) }}" class="user-link">
-                            {{ volunteer.get_full_name() }}
-                        </a>
-                    </td>
-                    <td>
-                        {% set primary_email = volunteer.get_primary_email() %}
-                        {% if primary_email %}
-                            {{ primary_email }}
-                        {% else %}
-                            <span class="text-muted">—</span>
-                        {% endif %}
-                    </td>
-                    <td>
                         <div class="d-flex gap-2 align-items-center">
+                            <a href="{{ url_for('volunteers_view', volunteer_id=volunteer.id) }}" class="user-link">
+                                {{ volunteer.get_full_name() }}
+                            </a>
                             {% if volunteer.do_not_call %}
                                 <i class="fas fa-phone-slash text-warning" title="Do Not Call"></i>
                             {% endif %}
@@ -155,10 +130,15 @@
                             {% if volunteer.do_not_contact %}
                                 <i class="fas fa-ban text-danger" title="Do Not Contact"></i>
                             {% endif %}
-                            {% if not volunteer.do_not_call and not volunteer.do_not_email and not volunteer.do_not_contact %}
-                                <span class="text-muted">—</span>
-                            {% endif %}
                         </div>
+                    </td>
+                    <td>
+                        {% set primary_email = volunteer.get_primary_email() %}
+                        {% if primary_email %}
+                            {{ primary_email }}
+                        {% else %}
+                            <span class="text-muted">—</span>
+                        {% endif %}
                     </td>
                     <td>
                         {% if volunteer.last_volunteer_date %}
