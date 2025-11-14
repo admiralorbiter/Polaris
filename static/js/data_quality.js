@@ -13,6 +13,7 @@
   let currentEntityType = null;
   let currentFieldName = null;
   let fieldStatisticsLoaded = false;
+  let fieldEdgeCasesLoaded = false;
 
   const elements = {
     refreshButton: document.getElementById("dq-refresh-btn"),
@@ -91,6 +92,10 @@
     if (elements.entitySelector) {
       elements.entitySelector.addEventListener("change", (e) => {
         const entityType = e.target.value;
+        // Reset loaded flags when switching entities
+        fieldStatisticsLoaded = false;
+        fieldEdgeCasesLoaded = false;
+        currentEntityType = entityType;
         if (entityType) {
           loadEntityDetails(entityType);
         } else {
@@ -111,6 +116,7 @@
     // Tab change handlers for field exploration tabs
     const fieldSamplesTab = document.getElementById("field-samples-tab");
     const fieldStatisticsTab = document.getElementById("field-statistics-tab");
+    const fieldEdgeCasesTab = document.getElementById("field-edge-cases-tab");
 
     // Lazy load statistics when tab is clicked
     if (fieldStatisticsTab) {
@@ -122,18 +128,20 @@
       });
     }
 
-    if (fieldSamplesTab) {
-      fieldSamplesTab.addEventListener("shown.bs.tab", () => {
-        if (currentEntityType && currentFieldName) {
-          loadFieldSamples(currentEntityType, currentFieldName);
+    // Lazy load edge cases when tab is clicked
+    if (fieldEdgeCasesTab) {
+      fieldEdgeCasesTab.addEventListener("shown.bs.tab", (e) => {
+        if (currentEntityType && currentFieldName && !fieldEdgeCasesLoaded) {
+          loadFieldEdgeCases(currentEntityType, currentFieldName);
+          fieldEdgeCasesLoaded = true;
         }
       });
     }
 
-    if (fieldStatisticsTab) {
-      fieldStatisticsTab.addEventListener("shown.bs.tab", () => {
+    if (fieldSamplesTab) {
+      fieldSamplesTab.addEventListener("shown.bs.tab", () => {
         if (currentEntityType && currentFieldName) {
-          loadFieldStatistics(currentEntityType, currentFieldName);
+          loadFieldSamples(currentEntityType, currentFieldName);
         }
       });
     }
@@ -496,6 +504,7 @@
     currentFieldName = fieldName;
     // Reset loaded flags when switching fields
     fieldStatisticsLoaded = false;
+    fieldEdgeCasesLoaded = false;
 
     // Hide metrics table, show field exploration
     const metricsCard = document.getElementById("dq-entity-details");
@@ -536,6 +545,13 @@
 
     // Clear field state
     currentFieldName = null;
+    fieldStatisticsLoaded = false;
+    fieldEdgeCasesLoaded = false;
+
+    // Reload entity details if entity selector has a value
+    if (elements.entitySelector && elements.entitySelector.value && currentEntityType) {
+      loadEntityDetails(currentEntityType);
+    }
   }
 
   async function loadFieldSamples(entityType, fieldName) {
@@ -596,6 +612,104 @@
       console.error("Error loading field statistics:", error);
       container.innerHTML = `<div class="alert alert-danger">Error loading statistics: ${error.message}</div>`;
     }
+  }
+
+  async function loadFieldEdgeCases(entityType, fieldName) {
+    const container = document.getElementById("dq-field-edge-cases-container");
+    if (!container) return;
+
+    container.innerHTML = '<p class="text-muted text-center">Loading edge cases...</p>';
+    showLoading();
+
+    try {
+      const orgId = getOrganizationId();
+      let url = config.fieldEdgeCasesUrl
+        .replace("__ENTITY_TYPE__", entityType)
+        .replace("__FIELD_NAME__", encodeURIComponent(fieldName));
+      url += "?limit=20";
+      if (orgId) {
+        url += `&organization_id=${orgId}`;
+      }
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      renderFieldEdgeCases(data, fieldName);
+    } catch (error) {
+      console.error("Error loading field edge cases:", error);
+      container.innerHTML = `<div class="alert alert-danger">Error loading edge cases: ${error.message}</div>`;
+    } finally {
+      hideLoading();
+    }
+  }
+
+  function renderFieldEdgeCases(data, fieldName) {
+    const container = document.getElementById("dq-field-edge-cases-container");
+    if (!container) return;
+
+    if (!data.edge_cases || data.edge_cases.length === 0) {
+      container.innerHTML = '<p class="text-muted text-center">No edge cases found for this field. Records missing this field may need attention.</p>';
+      return;
+    }
+
+    let html = `
+      <div class="mb-3">
+        <p class="text-muted">
+          Found <strong>${data.edge_cases.length}</strong> edge cases (records missing the <strong>${formatFieldName(fieldName)}</strong> field or with data quality issues).
+        </p>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-hover table-striped">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Data</th>
+              <th>Completeness</th>
+              <th>Issues</th>
+            </tr>
+          </thead>
+          <tbody>
+    `;
+
+    data.edge_cases.forEach((edgeCase) => {
+      const completenessBadge = getCompletenessBadge(edgeCase.completeness_score || 0, edgeCase.completeness_level || "low");
+
+      // Get preview of other fields
+      const previewFields = Object.entries(edgeCase.data)
+        .slice(0, 3)
+        .map(([key, val]) => `<strong>${formatFieldName(key)}:</strong> ${val !== null && val !== undefined ? String(val).substring(0, 30) : '<em>null</em>'}`)
+        .join(", ");
+
+      html += `
+        <tr class="table-warning">
+          <td>${edgeCase.id}</td>
+          <td>
+            <small class="text-muted">${previewFields || '<em>No data</em>'}</small>
+          </td>
+          <td>
+            <div class="completeness-score">${(edgeCase.completeness_score || 0).toFixed(1)}%</div>
+            ${completenessBadge}
+          </td>
+          <td>
+            <ul class="list-unstyled mb-0">
+              ${(edgeCase.edge_case_reasons || []).map((reason) => `<li><span class="badge bg-warning text-dark">${reason}</span></li>`).join("")}
+              ${edgeCase.data[fieldName] === null || edgeCase.data[fieldName] === undefined || edgeCase.data[fieldName] === "" ? `<li><span class="badge bg-danger">Missing ${formatFieldName(fieldName)}</span></li>` : ''}
+            </ul>
+          </td>
+        </tr>
+      `;
+    });
+
+    html += `
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    container.innerHTML = html;
   }
 
 

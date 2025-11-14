@@ -4,7 +4,6 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/data_quality.css') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/data_quality_samples.css') }}">
 {% endblock %}
 
 {% block content %}
@@ -86,11 +85,6 @@
       </button>
     </li>
     <li class="nav-item" role="presentation">
-      <button class="nav-link" id="samples-tab" data-bs-toggle="tab" data-bs-target="#samples-pane" type="button" role="tab">
-        <i class="fas fa-database"></i> Data Samples
-      </button>
-    </li>
-    <li class="nav-item" role="presentation">
       <button class="nav-link" id="skipped-records-tab" data-bs-toggle="tab" data-bs-target="#skipped-records-pane" type="button" role="tab">
         <i class="fas fa-exclamation-triangle"></i> Skipped Records
       </button>
@@ -156,6 +150,11 @@
                 Statistics
               </button>
             </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="field-edge-cases-tab" data-bs-toggle="tab" data-bs-target="#field-edge-cases-pane" type="button" role="tab">
+                Edge Cases
+              </button>
+            </li>
           </ul>
 
           <div class="tab-content" id="field-exploration-tab-content">
@@ -172,86 +171,11 @@
                 <p class="text-muted text-center">Loading statistics...</p>
               </div>
             </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Samples Tab -->
-    <div class="tab-pane fade" id="samples-pane" role="tabpanel">
-      <div class="card shadow-sm mb-4">
-        <div class="card-header d-flex justify-content-between align-items-center">
-          <h2 class="h5 mb-0">Data Samples & Exploration</h2>
-          <div class="d-flex gap-2">
-            <select id="dq-sample-size-selector" class="form-select form-select-sm" style="width: auto;">
-              <option value="10">10 records</option>
-              <option value="20" selected>20 records</option>
-              <option value="30">30 records</option>
-              <option value="50">50 records</option>
-            </select>
-            <div class="btn-group">
-              <button type="button" class="btn btn-sm btn-outline-success dropdown-toggle" data-bs-toggle="dropdown">
-                <i class="fas fa-download"></i> Export Samples
-              </button>
-              <ul class="dropdown-menu">
-                <li><a class="dropdown-item" href="#" id="dq-export-samples-csv-btn">Export CSV</a></li>
-                <li><a class="dropdown-item" href="#" id="dq-export-samples-json-btn">Export JSON</a></li>
-              </ul>
-            </div>
-          </div>
-        </div>
-        <div class="card-body">
-          <div class="mb-3">
-            <select id="dq-samples-entity-selector" class="form-select">
-              <option value="">Select an entity to view samples...</option>
-              <option value="contact">Contacts</option>
-              <option value="volunteer">Volunteers</option>
-              <option value="student">Students</option>
-              <option value="teacher">Teachers</option>
-              <option value="event">Events</option>
-              <option value="organization">Organizations</option>
-              <option value="user">Users</option>
-            </select>
-          </div>
-
-          <!-- Sub-tabs for Samples -->
-          <ul class="nav nav-pills mb-3" id="samples-sub-tabs" role="tablist">
-            <li class="nav-item" role="presentation">
-              <button class="nav-link active" id="sample-records-tab" data-bs-toggle="tab" data-bs-target="#sample-records-pane" type="button" role="tab">
-                Sample Records
-              </button>
-            </li>
-            <li class="nav-item" role="presentation">
-              <button class="nav-link" id="statistics-tab" data-bs-toggle="tab" data-bs-target="#statistics-pane" type="button" role="tab">
-                Statistics
-              </button>
-            </li>
-            <li class="nav-item" role="presentation">
-              <button class="nav-link" id="edge-cases-tab" data-bs-toggle="tab" data-bs-target="#edge-cases-pane" type="button" role="tab">
-                Edge Cases
-              </button>
-            </li>
-          </ul>
-
-          <div class="tab-content" id="samples-sub-tab-content">
-            <!-- Sample Records Pane -->
-            <div class="tab-pane fade show active" id="sample-records-pane" role="tabpanel">
-              <div id="dq-samples-container">
-                <p class="text-muted text-center">Select an entity above to view sample records.</p>
-              </div>
-            </div>
-
-            <!-- Statistics Pane -->
-            <div class="tab-pane fade" id="statistics-pane" role="tabpanel">
-              <div id="dq-statistics-container">
-                <p class="text-muted text-center">Select an entity above to view statistical summaries.</p>
-              </div>
-            </div>
 
             <!-- Edge Cases Pane -->
-            <div class="tab-pane fade" id="edge-cases-pane" role="tabpanel">
-              <div id="dq-edge-cases-container">
-                <p class="text-muted text-center">Select an entity above to view edge cases.</p>
+            <div class="tab-pane fade" id="field-edge-cases-pane" role="tabpanel">
+              <div id="dq-field-edge-cases-container">
+                <p class="text-muted text-center">Loading edge cases...</p>
               </div>
             </div>
           </div>
@@ -360,5 +284,4 @@
   };
 </script>
 <script src="{{ url_for('static', filename='js/data_quality.js') }}"></script>
-<script src="{{ url_for('static', filename='js/data_quality_samples.js') }}"></script>
 {% endblock %}
