@@ -81,7 +81,9 @@
 
     const salesforceMetrics = payload.metrics?.salesforce || null;
     const salesforceCounts =
-      (((payload.counts || {}).core || {}).volunteers || {}).salesforce || null;
+      (((payload.counts || {}).core || {}).volunteers || {}).salesforce ||
+      (((payload.counts || {}).core || {}).organizations || {}).salesforce ||
+      null;
 
     const salesforceMetricsItems = [];
     if (salesforceMetrics) {
@@ -408,9 +410,11 @@
         }
       }
 
+      const entityTypeValue = formData.get("entity_type");
       const payload = {
         dry_run: formData.has("dry_run"),
         reset_watermark: wantsReset,
+        entity_type: entityTypeValue || "contacts",  // Default to contacts for backward compatibility
       };
 
       const recordLimitValue = formData.get("record_limit");

@@ -12,7 +12,9 @@ from flask import current_app, has_app_context
 
 from flask_app.models.base import db
 from flask_app.models.importer.schema import (
+    CleanOrganization,
     CleanVolunteer,
+    StagingOrganization,
     StagingRecordStatus,
     StagingVolunteer,
 )
@@ -29,6 +31,18 @@ class CleanVolunteerPayload:
     last_name: str
     email: str | None
     phone_e164: str | None
+    checksum: str | None
+    normalized_payload: MutableMapping[str, object | None]
+
+
+@dataclass(frozen=True)
+class CleanOrganizationPayload:
+    """Normalized payload used for core organization inserts."""
+
+    staging_organization_id: int | None
+    external_system: str
+    external_id: str | None
+    name: str
     checksum: str | None
     normalized_payload: MutableMapping[str, object | None]
 
@@ -214,5 +228,127 @@ def _normalize_phone(value: object | None) -> str | None:
         return None
     token = _coerce_string(value)
     return token or None
+
+
+def promote_clean_organizations(import_run, *, dry_run: bool = False) -> CleanPromotionSummary:
+    """
+    Promote validated staging organizations into the clean layer for further processing.
+    """
+
+    session = db.session
+    rows = (
+        session.query(StagingOrganization)
+        .filter(
+            StagingOrganization.run_id == import_run.id,
+            StagingOrganization.status == StagingRecordStatus.VALIDATED,
+        )
+        .order_by(StagingOrganization.sequence_number)
+    )
+
+    rows_considered = 0
+    rows_promoted = 0
+    rows_skipped = 0
+    candidates: list[CleanOrganizationPayload] = []
+
+    for row in rows:
+        rows_considered += 1
+        payload = _build_organization_payload(row)
+        if payload is None:
+            rows_skipped += 1
+            continue
+
+        if dry_run:
+            candidates.append(payload)
+            continue
+
+        if row.clean_record is not None:
+            rows_skipped += 1
+            continue
+
+        clean_row = CleanOrganization(
+            run_id=import_run.id,
+            staging_organization_id=row.id,
+            external_system=payload.external_system,
+            external_id=payload.external_id,
+            name=payload.name,
+            checksum=payload.checksum,
+            payload_json=dict(payload.normalized_payload),
+            promoted_at=datetime.now(timezone.utc),
+            load_action=None,
+        )
+        clean_row.staging_row = row
+        session.add(clean_row)
+        rows_promoted += 1
+
+    summary = CleanPromotionSummary(
+        rows_considered=rows_considered,
+        rows_promoted=rows_promoted,
+        rows_skipped=rows_skipped,
+        dry_run=dry_run,
+        candidates=tuple(candidates),
+    )
+    _update_clean_organization_counts(import_run, summary)
+    if has_app_context():
+        current_app.logger.info(
+            "Importer run %s promoted %s clean organizations (skipped=%s, dry_run=%s)",
+            import_run.id,
+            summary.rows_promoted,
+            summary.rows_skipped,
+            summary.dry_run,
+        )
+    return summary
+
+
+def _build_organization_payload(row: StagingOrganization) -> CleanOrganizationPayload | None:
+    normalized = dict(row.normalized_json or {})
+    raw = dict(row.payload_json or {})
+
+    name = _coerce_string(normalized.get("name") or raw.get("Name"))
+    if not name:
+        return None
+
+    external_system = _coerce_string(normalized.get("external_system") or raw.get("external_system")) or row.external_system
+    external_id = _coerce_string(normalized.get("external_id") or raw.get("external_id") or row.external_id)
+
+    normalized.update(
+        {
+            "name": name,
+        }
+    )
+
+    return CleanOrganizationPayload(
+        staging_organization_id=row.id,
+        external_system=external_system,
+        external_id=external_id,
+        name=name,
+        checksum=row.checksum,
+        normalized_payload=normalized,
+    )
+
+
+def _update_clean_organization_counts(import_run, summary: CleanPromotionSummary) -> None:
+    counts = dict(import_run.counts_json or {})
+    clean_counts = counts.setdefault("clean", {}).setdefault("organizations", {})
+    clean_counts.update(
+        {
+            "rows_considered": summary.rows_considered,
+            "rows_promoted": summary.rows_promoted if not summary.dry_run else 0,
+            "rows_skipped": summary.rows_skipped,
+            "dry_run": summary.dry_run,
+        }
+    )
+    import_run.counts_json = counts
+
+    metrics = dict(import_run.metrics_json or {})
+    clean_metrics = metrics.setdefault("clean", {}).setdefault("organizations", {})
+    clean_metrics.update(
+        {
+            "rows_considered": summary.rows_considered,
+            "rows_promoted": summary.rows_promoted,
+            "rows_skipped": summary.rows_skipped,
+            "dry_run": summary.dry_run,
+        }
+    )
+    import_run.metrics_json = metrics
 
 

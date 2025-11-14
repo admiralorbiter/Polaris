@@ -324,6 +324,7 @@ def importer_salesforce_trigger():
     record_limit_raw = payload.get("record_limit")
     reset_watermark = bool(payload.get("reset_watermark", False))
     notes = payload.get("notes")
+    entity_type = payload.get("entity_type", "contacts")  # Default to contacts for backward compatibility
 
     record_limit: int | None = None
     if record_limit_raw is not None:
@@ -376,10 +377,15 @@ def importer_salesforce_trigger():
         run_notes = f"Salesforce import triggered by user {current_user.id}"
     run_notes = _CONTROL_CHAR_PATTERN.sub(" ", run_notes)
 
+    # Validate entity_type
+    if entity_type not in ("contacts", "organizations"):
+        return jsonify({"error": "entity_type must be 'contacts' or 'organizations'."}), HTTPStatus.BAD_REQUEST
+
     ingest_params: dict[str, object] = {
         "source_system": "salesforce",
         "dry_run": dry_run,
         "reset_watermark": reset_watermark,
+        "entity_type": entity_type,
     }
     if record_limit is not None:
         ingest_params["record_limit"] = record_limit
@@ -416,9 +422,12 @@ def importer_salesforce_trigger():
     if record_limit is not None:
         task_kwargs["record_limit"] = record_limit
 
+    # Select task based on entity_type
+    task_name = "importer.pipeline.ingest_salesforce_contacts" if entity_type == "contacts" else "importer.pipeline.ingest_salesforce_accounts"
+
     try:
         async_result = celery_app.send_task(
-            "importer.pipeline.ingest_salesforce_contacts",
+            task_name,
             kwargs=task_kwargs,
         )
     except Exception as exc:  # pragma: no cover - defensive
@@ -444,6 +453,7 @@ def importer_salesforce_trigger():
                 "run_id": run.id,
                 "task_id": async_result.id,
                 "source": "salesforce",
+                "entity_type": entity_type,
                 "dry_run": dry_run,
                 "record_limit": record_limit,
                 "reset_watermark": reset_watermark,
@@ -461,6 +471,7 @@ def importer_salesforce_trigger():
             "importer_source": "salesforce",
             "triggered_by_user_id": current_user.id,
             "importer_dry_run": dry_run,
+            "salesforce_entity_type": entity_type,
             "salesforce_record_limit": record_limit,
             "salesforce_reset_watermark": reset_watermark,
         },

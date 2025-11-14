@@ -539,12 +539,20 @@ def run_salesforce(ctx, run_id: int, limit: Optional[int]):
     kwargs = {"run_id": run_id}
     if limit is not None:
         kwargs["record_limit"] = limit
+    
+    # Determine task based on entity_type in ingest_params_json
+    entity_type = "contacts"  # Default for backward compatibility
+    if run.ingest_params_json and isinstance(run.ingest_params_json, dict):
+        entity_type = run.ingest_params_json.get("entity_type", "contacts")
+    
+    task_name = "importer.pipeline.ingest_salesforce_contacts" if entity_type == "contacts" else "importer.pipeline.ingest_salesforce_accounts"
+    
     async_result = celery_app.send_task(
-        "importer.pipeline.ingest_salesforce_contacts",
+        task_name,
         kwargs=kwargs,
     )
     task_id = getattr(async_result, "id", async_result)
-    click.echo(f"Queued Salesforce ingest for run {run_id} (task_id={task_id})")
+    click.echo(f"Queued Salesforce {entity_type} ingest for run {run_id} (task_id={task_id})")
 
 
 @importer_cli.command("run")
@@ -901,8 +909,9 @@ def undo_merge(ctx, merge_log_id: int, force: bool):
 @click.option("--run-id", required=True, type=int, help="ID of the import run to load clean volunteers from.")
 @click.pass_context
 def load_clean_volunteers(ctx, run_id: int):
-    """Load clean volunteers from a completed import run into core database."""
+    """Load clean volunteers/organizations from a completed import run into core database."""
     from flask_app.importer.pipeline.salesforce_loader import SalesforceContactLoader
+    from flask_app.importer.pipeline.salesforce_organization_loader import SalesforceOrganizationLoader
     from flask_app.models.importer.schema import ImportRun
 
     info = ctx.ensure_object(ScriptInfo)
@@ -922,8 +931,18 @@ def load_clean_volunteers(ctx, run_id: int):
     if run.status == ImportRunStatus.RUNNING:
         raise click.ClickException(f"Import run {run_id} is still running. Wait for it to complete.")
 
-    click.echo(f"Loading clean volunteers from run {run_id}...")
-    loader = SalesforceContactLoader(run)
+    # Determine entity type from ingest_params_json
+    entity_type = "contacts"  # Default for backward compatibility
+    if run.ingest_params_json and isinstance(run.ingest_params_json, dict):
+        entity_type = run.ingest_params_json.get("entity_type", "contacts")
+    
+    if entity_type == "organizations":
+        click.echo(f"Loading clean organizations from run {run_id}...")
+        loader = SalesforceOrganizationLoader(run)
+    else:
+        click.echo(f"Loading clean volunteers from run {run_id}...")
+        loader = SalesforceContactLoader(run)
+    
     counters = loader.execute()
 
     click.echo("Completed:")

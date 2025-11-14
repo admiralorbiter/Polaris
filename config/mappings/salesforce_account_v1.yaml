@@ -1,0 +1,39 @@
+# Salesforce Account → Polaris Organization mapping (v1.0)
+version: 1
+adapter: salesforce
+object: Account
+fields:
+  - source: Id
+    target: external_id
+    required: true
+  - source: Name
+    target: name
+    required: true
+  - source: Type
+    target: organization_type
+    transform: normalize_organization_type
+  - source: Description
+    target: description
+  - source: LastActivityDate
+    target: metadata.last_activity_date
+    transform: parse_date
+  - source: SystemModstamp
+    target: metadata.source_modstamp
+    transform: parse_datetime
+  - source: LastModifiedDate
+    target: metadata.source_last_modified
+    transform: parse_datetime
+  - source: IsDeleted
+    target: metadata.core_state
+  - target: metadata.source_system
+    default: salesforce
+  - target: metadata.source_object
+    default: Account
+transforms:
+  normalize_organization_type:
+    description: Normalize Salesforce Account Type values to match OrganizationType enum values (school, business, non_profit, government, other).
+  parse_date:
+    description: Parse date values (YYYY-MM-DD) into ISO-8601.
+  parse_datetime:
+    description: Parse Salesforce datetime strings into ISO-8601 (UTC).
+

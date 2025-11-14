@@ -72,6 +72,16 @@ DEFAULT_CONTACT_FIELDS: Sequence[str] = (
     "LastModifiedDate",
 )
 
+DEFAULT_ACCOUNT_FIELDS: Sequence[str] = (
+    "Id",
+    "Name",
+    "Type",
+    "Description",
+    "LastActivityDate",
+    "SystemModstamp",
+    "LastModifiedDate",
+)
+
 SALESFORCE_API_VERSION = os.environ.get("SALESFORCE_API_VERSION", "v57.0")
 
 
@@ -118,6 +128,30 @@ def build_contacts_soql(
     limit_sql = f" LIMIT {int(limit)}" if limit is not None else ""
     order_sql = " ORDER BY SystemModstamp ASC"
     return f"SELECT {select_clause} FROM Contact{where_sql}{order_sql}{limit_sql}"
+
+
+def build_accounts_soql(
+    *,
+    fields: Sequence[str] | None = None,
+    last_modstamp: datetime | None = None,
+    limit: int | None = None,
+) -> str:
+    """Construct the SOQL used for incremental Account exports."""
+
+    field_list = tuple(dict.fromkeys(fields or DEFAULT_ACCOUNT_FIELDS))
+    select_clause = ", ".join(field_list)
+    where_clauses: List[str] = []
+    
+    # Filter out Household, School District, and School types as specified
+    where_clauses.append("Type NOT IN ('Household', 'School District', 'School')")
+    
+    if last_modstamp is not None:
+        where_clauses.append(f"SystemModstamp > { _format_modstamp(last_modstamp) }")
+
+    where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+    limit_sql = f" LIMIT {int(limit)}" if limit is not None else ""
+    order_sql = " ORDER BY Name ASC"
+    return f"SELECT {select_clause} FROM Account{where_sql}{order_sql}{limit_sql}"
 
 
 @dataclass(frozen=True)

@@ -19,6 +19,7 @@ from flask_app.models.importer.schema import (
     DataQualitySeverity,
     DataQualityStatus,
     DataQualityViolation,
+    StagingOrganization,
     StagingRecordStatus,
     StagingVolunteer,
 )
@@ -238,7 +239,7 @@ def run_minimal_dq(
     csv_rows: Sequence[VolunteerCSVRow] | None = None,
 ) -> DQProcessingSummary:
     """
-    Evaluate staged volunteer rows for a given import run and persist violations.
+    Evaluate staged volunteer/organization rows for a given import run and persist violations.
 
     Args:
         import_run: `ImportRun` instance whose staged rows should be evaluated.
@@ -251,7 +252,14 @@ def run_minimal_dq(
         return _run_minimal_dq_from_staging(import_run)
 
     session = db.session
-    rows = (
+    now = datetime.now(timezone.utc)
+    rows_evaluated = 0
+    rows_validated = 0
+    rows_quarantined = 0
+    all_violations: list[DQResult] = []
+
+    # Process volunteers
+    volunteer_rows = (
         session.query(StagingVolunteer)
         .filter(
             StagingVolunteer.run_id == import_run.id,
@@ -260,13 +268,7 @@ def run_minimal_dq(
         .order_by(StagingVolunteer.sequence_number)
     )
 
-    now = datetime.now(timezone.utc)
-    rows_evaluated = 0
-    rows_validated = 0
-    rows_quarantined = 0
-    all_violations: list[DQResult] = []
-
-    for row in rows:
+    for row in volunteer_rows:
         rows_evaluated += 1
         payload = _compose_payload(row)
         violations = list(evaluate_rules(payload))
@@ -295,6 +297,53 @@ def run_minimal_dq(
                     staging_volunteer_id=row.id,
                     entity_type="volunteer",
                     record_key=_compose_record_key(row),
+                    rule_code=violation.rule_code,
+                    severity=violation.severity,
+                    status=DataQualityStatus.OPEN,
+                    message=violation.message,
+                    details_json=dict(violation.details),
+                )
+            )
+
+    # Process organizations
+    org_rows = (
+        session.query(StagingOrganization)
+        .filter(
+            StagingOrganization.run_id == import_run.id,
+            StagingOrganization.status == StagingRecordStatus.LANDED,
+        )
+        .order_by(StagingOrganization.sequence_number)
+    )
+
+    for row in org_rows:
+        rows_evaluated += 1
+        payload = _compose_organization_payload(row)
+        violations = list(evaluate_organization_rules(payload))
+        # Separate errors (blocking) from warnings (non-blocking)
+        error_violations = [v for v in violations if v.severity == DataQualitySeverity.ERROR]
+        warning_violations = [v for v in violations if v.severity != DataQualitySeverity.ERROR]
+        
+        # Only quarantine on ERROR severity violations
+        if not error_violations:
+            rows_validated += 1
+            row.status = StagingRecordStatus.VALIDATED
+            row.processed_at = now
+            row.last_error = None
+        else:
+            rows_quarantined += 1
+            all_violations.extend(error_violations)
+            row.status = StagingRecordStatus.QUARANTINED
+            row.last_error = error_violations[0].message
+            row.processed_at = now
+        
+        # Log all violations (both errors and warnings) for tracking
+        for violation in violations:
+            session.add(
+                DataQualityViolation(
+                    run_id=import_run.id,
+                    staging_organization_id=row.id,
+                    entity_type="organization",
+                    record_key=_compose_organization_record_key(row),
                     rule_code=violation.rule_code,
                     severity=violation.severity,
                     status=DataQualityStatus.OPEN,
@@ -405,6 +454,80 @@ def _compose_record_key(row: StagingVolunteer) -> str:
         return f"seq-{row.sequence_number}"
     return f"row-{row.id}"
 
+
+def _compose_organization_payload(row: StagingOrganization) -> MutableMapping[str, object | None]:
+    payload: MutableMapping[str, object | None] = {}
+    normalized = row.normalized_json or {}
+    raw = row.payload_json or {}
+
+    # Start with raw payload
+    payload.update(raw)
+    
+    # Name extraction
+    name_value = None
+    if raw.get("Name"):
+        name_value = str(raw["Name"]).strip()
+        if name_value:
+            payload["name"] = name_value
+    
+    # Update with normalized
+    payload.update(normalized)
+    
+    # Ensure name is available
+    if not payload.get("name") and name_value:
+        payload["name"] = name_value
+    
+    return payload
+
+
+def _compose_organization_record_key(row: StagingOrganization) -> str:
+    if row.external_id:
+        return str(row.external_id)
+    if row.source_record_id:
+        return str(row.source_record_id)
+    if row.sequence_number is not None:
+        return f"seq-{row.sequence_number}"
+    return f"row-{row.id}"
+
+
+class OrganizationNameRequiredRule(DQRule):
+    """Ensure organization name is present."""
+
+    def __init__(self, severity: DataQualitySeverity = DataQualitySeverity.ERROR) -> None:
+        super().__init__(
+            code="ORG_NAME_REQUIRED",
+            description="Organization must include a name.",
+            severity=severity,
+        )
+
+    def evaluate(self, payload: Mapping[str, object | None]) -> Iterable[DQResult]:
+        name = _coerce_str(payload.get("name") or payload.get("Name"))
+        if name:
+            return []
+        return [
+            DQResult(
+                rule_code=self.code,
+                severity=self.severity,
+                message="Organization missing required name field.",
+                details={"fields": ["name"]},
+            )
+        ]
+
+
+def evaluate_organization_rules(payload: Mapping[str, object | None]) -> Iterable[DQResult]:
+    """
+    Evaluate all applicable organization DQ rules against a payload.
+
+    Returns violations found (empty if payload passes all rules).
+    """
+    applicable_rules: list[DQRule] = [
+        OrganizationNameRequiredRule(),
+    ]
+    violations: list[DQResult] = []
+    for rule in applicable_rules:
+        violations.extend(rule.evaluate(payload))
+    return violations
+
 def _run_minimal_dq_dry_run(
     import_run,
     csv_rows: Sequence[VolunteerCSVRow],
@@ -437,7 +560,13 @@ def _run_minimal_dq_dry_run(
 
 def _run_minimal_dq_from_staging(import_run) -> DQProcessingSummary:
     session = db.session
-    rows = (
+    rows_evaluated = 0
+    rows_validated = 0
+    rows_quarantined = 0
+    all_violations: list[DQResult] = []
+
+    # Process volunteers
+    volunteer_rows = (
         session.query(StagingVolunteer)
         .filter(
             StagingVolunteer.run_id == import_run.id,
@@ -446,15 +575,30 @@ def _run_minimal_dq_from_staging(import_run) -> DQProcessingSummary:
         .order_by(StagingVolunteer.sequence_number)
     )
 
-    rows_evaluated = 0
-    rows_validated = 0
-    rows_quarantined = 0
-    all_violations: list[DQResult] = []
-
-    for row in rows:
+    for row in volunteer_rows:
         rows_evaluated += 1
         payload = _compose_payload(row)
         violations = list(evaluate_rules(payload))
+        if violations:
+            rows_quarantined += 1
+            all_violations.extend(violations)
+        else:
+            rows_validated += 1
+
+    # Process organizations
+    org_rows = (
+        session.query(StagingOrganization)
+        .filter(
+            StagingOrganization.run_id == import_run.id,
+            StagingOrganization.status == StagingRecordStatus.LANDED,
+        )
+        .order_by(StagingOrganization.sequence_number)
+    )
+
+    for row in org_rows:
+        rows_evaluated += 1
+        payload = _compose_organization_payload(row)
+        violations = list(evaluate_organization_rules(payload))
         if violations:
             rows_quarantined += 1
             all_violations.extend(violations)

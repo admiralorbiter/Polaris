@@ -155,6 +155,51 @@ def get_active_salesforce_mapping() -> MappingSpec:
     return spec
 
 
+def get_active_salesforce_account_mapping() -> MappingSpec:
+    """
+    Load the configured Salesforce Account mapping spec (cached per app context).
+    Cache is invalidated if the file modification time or checksum changes.
+    """
+
+    config_path = current_app.config.get("IMPORTER_SALESFORCE_ACCOUNT_MAPPING_PATH")
+    if not config_path:
+        # Default to salesforce_account_v1.yaml in config/mappings
+        # Use instance_path to find project root (go up from instance/ to project root)
+        instance_path = Path(current_app.instance_path)
+        # instance_path is typically <project_root>/instance, so parent is project root
+        config_path = (instance_path.parent / "config" / "mappings" / "salesforce_account_v1.yaml").resolve()
+    else:
+        config_path = Path(config_path)
+    
+    if not config_path.exists():
+        raise MappingLoadError(f"Salesforce Account mapping file not found at {config_path}")
+    
+    cache_key = "_importer_sf_account_mapping_cache"
+    cache: dict[str, tuple[MappingSpec, float, str]] = current_app.extensions.setdefault(cache_key, {})
+    cache_key_lookup = str(config_path)
+    
+    # Check if we have a cached spec and if the file has changed
+    cached_entry = cache.get(cache_key_lookup)
+    if cached_entry:
+        cached_spec, cached_mtime, cached_checksum = cached_entry
+        current_mtime = config_path.stat().st_mtime
+        # Reload if file modification time changed
+        if current_mtime != cached_mtime:
+            # File changed, reload
+            current_app.logger.debug(f"Mapping file changed, reloading: {config_path}")
+            spec = load_mapping(config_path)
+            cache[cache_key_lookup] = (spec, current_mtime, spec.checksum)
+            return spec
+        # File hasn't changed, use cached spec
+        return cached_spec
+    
+    # No cache entry, load and cache
+    spec = load_mapping(config_path)
+    mtime = config_path.stat().st_mtime
+    cache[cache_key_lookup] = (spec, mtime, spec.checksum)
+    return spec
+
+
 def _compute_checksum(payload: Mapping[str, Any]) -> str:
     serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
@@ -636,6 +681,77 @@ def _build_transform_registry() -> Dict[str, Any]:
         # This will help identify new values that need mapping
         return None
 
+    def normalize_organization_type(value: Any) -> str | None:
+        """Normalize Salesforce Account Type values to OrganizationType enum values."""
+        if not value:
+            return None
+        text = str(value).strip().lower()
+        if not text:
+            return None
+        
+        # Mapping of Salesforce Account Type values to OrganizationType enum values
+        # OrganizationType enum: SCHOOL, BUSINESS, NON_PROFIT, GOVERNMENT, OTHER
+        mapping = {
+            # School variants (but note: we filter out 'School' in the query)
+            "school": "school",
+            "elementary school": "school",
+            "middle school": "school",
+            "high school": "school",
+            "school district": "school",  # Note: filtered in query but handle if present
+            "educational institution": "school",
+            "university": "school",
+            "college": "school",
+            
+            # Business variants
+            "business": "business",
+            "company": "business",
+            "corporation": "business",
+            "corp": "business",
+            "llc": "business",
+            "partnership": "business",
+            "for-profit": "business",
+            "for profit": "business",
+            "commercial": "business",
+            
+            # Non-profit variants
+            "non-profit": "non_profit",
+            "nonprofit": "non_profit",
+            "non profit": "non_profit",
+            "non_profit": "non_profit",
+            "501(c)(3)": "non_profit",
+            "501c3": "non_profit",
+            "charity": "non_profit",
+            "foundation": "non_profit",
+            "ngo": "non_profit",
+            
+            # Government variants
+            "government": "government",
+            "federal": "government",
+            "state": "government",
+            "local government": "government",
+            "municipal": "government",
+            "city": "government",
+            "county": "government",
+            "public sector": "government",
+            
+            # Other (default)
+            "other": "other",
+            "unknown": "other",
+        }
+        
+        # Direct lookup
+        normalized = mapping.get(text)
+        if normalized:
+            return normalized
+        
+        # Fuzzy matching for partial matches
+        for key, enum_value in mapping.items():
+            if key in text or text in key:
+                return enum_value
+        
+        # Default to OTHER for unmapped types
+        return "other"
+
     return {
         "normalize_phone": normalize_phone,
         "parse_date": parse_date,
@@ -644,6 +760,7 @@ def _build_transform_registry() -> Dict[str, Any]:
         "normalize_race_ethnicity": normalize_race_ethnicity,
         "normalize_education_level": normalize_education_level,
         "normalize_age_group": normalize_age_group,
+        "normalize_organization_type": normalize_organization_type,
     }
 
 

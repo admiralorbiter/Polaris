@@ -161,6 +161,38 @@
                         </div>
                     </div>
 
+                    <div class="mt-3">
+                        <label class="form-label">Import Type</label>
+                        <div class="form-check">
+                            <input
+                                class="form-check-input"
+                                type="radio"
+                                name="entity_type"
+                                id="salesforce-entity-contacts"
+                                value="contacts"
+                                checked
+                            >
+                            <label class="form-check-label" for="salesforce-entity-contacts">
+                                Contacts (Volunteers)
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input
+                                class="form-check-input"
+                                type="radio"
+                                name="entity_type"
+                                id="salesforce-entity-organizations"
+                                value="organizations"
+                            >
+                            <label class="form-check-label" for="salesforce-entity-organizations">
+                                Organizations (Accounts)
+                            </label>
+                        </div>
+                        <div class="form-text">
+                            Select whether to import Contacts or Organizations from Salesforce.
+                        </div>
+                    </div>
+
                     <div class="form-check form-switch mt-3">
                         <input
                             class="form-check-input"
