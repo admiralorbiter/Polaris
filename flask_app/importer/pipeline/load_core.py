@@ -96,6 +96,8 @@ def _record_import_skip(
     clean_volunteer_id: int | None = None,
     staging_organization_id: int | None = None,
     clean_organization_id: int | None = None,
+    staging_affiliation_id: int | None = None,
+    clean_affiliation_id: int | None = None,
     entity_type: str = "volunteer",
     record_key: str | None = None,
     details_json: dict | None = None,
@@ -112,6 +114,8 @@ def _record_import_skip(
         clean_volunteer_id: Optional clean volunteer ID
         staging_organization_id: Optional staging organization ID
         clean_organization_id: Optional clean organization ID
+        staging_affiliation_id: Optional staging affiliation ID
+        clean_affiliation_id: Optional clean affiliation ID
         entity_type: Entity type (default: "volunteer")
         record_key: Optional record key for lookup
         details_json: Optional additional details (matched email, volunteer IDs, etc.)
@@ -125,6 +129,8 @@ def _record_import_skip(
         clean_volunteer_id=clean_volunteer_id,
         staging_organization_id=staging_organization_id,
         clean_organization_id=clean_organization_id,
+        staging_affiliation_id=staging_affiliation_id,
+        clean_affiliation_id=clean_affiliation_id,
         entity_type=entity_type,
         skip_type=skip_type,
         skip_reason=skip_reason,

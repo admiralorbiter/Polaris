@@ -39,13 +39,24 @@ def _ensure_watermark():
 
 def _create_contact_and_map(contact_external_id: str) -> tuple[Contact, ExternalIdMap]:
     """Create a Contact and ExternalIdMap entry for testing."""
+    from flask_app.models import ContactEmail
+    from flask_app.models.contact.enums import EmailType
+    
     contact = Contact(
         first_name="Test",
         last_name="Contact",
-        email=f"test{contact_external_id}@example.com",
     )
     db.session.add(contact)
     db.session.flush()
+    
+    # Create email via ContactEmail relationship
+    email = ContactEmail(
+        contact_id=contact.id,
+        email=f"test{contact_external_id}@example.com",
+        email_type=EmailType.PERSONAL,
+        is_primary=True,
+    )
+    db.session.add(email)
 
     map_entry = ExternalIdMap(
         entity_type="salesforce_contact",
@@ -409,14 +420,18 @@ def test_loader_handles_status_change(app):
     db.session.add(map_entry)
     db.session.commit()
 
-    # Update with Past status
+    # Update with Past status (without end_date so loader sets it to today)
     payload = _make_payload(
         "a0H5f000006S0G4EAK",
         "0035f00000HYEfOAAX",
         "0015f00000JUL8sAAH",
         status="Past",
     )
+    # Remove end_date from payload to test that loader sets it automatically
+    payload["end_date"] = None
+    # Also update the normalized_json in staging row
     staging_row = _add_staging_row(run, 1, payload)
+    staging_row.normalized_json = payload
     staging_row.status = StagingRecordStatus.VALIDATED
     db.session.commit()
 

@@ -207,7 +207,7 @@ class TestDataQualityService:
         metrics = DataQualityService.get_overall_health_score()
         assert metrics.overall_health_score == 0.0
         assert metrics.total_entities == 0
-        assert len(metrics.entity_metrics) == 7  # All entity types
+        assert len(metrics.entity_metrics) == 8  # All entity types (contact, volunteer, student, teacher, event, organization, user, affiliation)
 
     def test_get_overall_health_score_with_data(self, app, sample_contacts_with_emails):
         """Test overall health score with data"""
