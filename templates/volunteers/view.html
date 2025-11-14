@@ -28,20 +28,24 @@
                     <h5 class="card-title mb-0">Basic Information</h5>
                 </div>
                 <div class="card-body">
-                    <div class="row">
-                        <div class="col-md-6">
+                    <div class="row g-3">
+                        <div class="col-md-3 col-sm-6">
                             <div class="info-item">
-                                <label>Full Name:</label>
+                                <label><i class="fas fa-user me-1"></i> Full Name:</label>
                                 <span>{{ volunteer.get_full_name() }}</span>
                             </div>
-                            {% if volunteer.preferred_name %}
+                        </div>
+                        {% if volunteer.preferred_name %}
+                        <div class="col-md-3 col-sm-6">
                             <div class="info-item">
-                                <label>Preferred Name:</label>
+                                <label><i class="fas fa-star me-1"></i> Preferred Name:</label>
                                 <span>{{ volunteer.preferred_name }}</span>
                             </div>
-                            {% endif %}
+                        </div>
+                        {% endif %}
+                        <div class="col-md-3 col-sm-6">
                             <div class="info-item">
-                                <label>Volunteer Status:</label>
+                                <label><i class="fas {% if volunteer.volunteer_status.value == 'active' %}fa-check-circle{% elif volunteer.volunteer_status.value == 'hold' %}fa-pause-circle{% else %}fa-times-circle{% endif %} me-1"></i> Status:</label>
                                 {% if volunteer.volunteer_status.value == 'active' %}
                                     <span class="badge bg-success">Active</span>
                                 {% elif volunteer.volunteer_status.value == 'hold' %}
@@ -50,34 +54,42 @@
                                     <span class="badge bg-secondary">Inactive</span>
                                 {% endif %}
                             </div>
-                            {% if volunteer.organization %}
+                        </div>
+                        {% if volunteer.organization %}
+                        <div class="col-md-3 col-sm-6">
                             <div class="info-item">
-                                <label>Organization:</label>
+                                <label><i class="fas fa-building me-1"></i> Organization:</label>
                                 <span>{{ volunteer.organization.name }}</span>
                             </div>
-                            {% endif %}
                         </div>
-                        <div class="col-md-6">
-                            {% if volunteer.title %}
+                        {% endif %}
+                        {% if volunteer.title %}
+                        <div class="col-md-3 col-sm-6">
                             <div class="info-item">
-                                <label>Title/Position:</label>
+                                <label><i class="fas fa-briefcase me-1"></i> Title/Position:</label>
                                 <span>{{ volunteer.title }}</span>
                             </div>
-                            {% endif %}
-                            {% if volunteer.industry %}
+                        </div>
+                        {% endif %}
+                        {% if volunteer.industry %}
+                        <div class="col-md-3 col-sm-6">
                             <div class="info-item">
-                                <label>Industry:</label>
+                                <label><i class="fas fa-industry me-1"></i> Industry:</label>
                                 <span>{{ volunteer.industry }}</span>
                             </div>
-                            {% endif %}
-                            {% if volunteer.clearance_status %}
+                        </div>
+                        {% endif %}
+                        {% if volunteer.clearance_status %}
+                        <div class="col-md-3 col-sm-6">
                             <div class="info-item">
-                                <label>Clearance Status:</label>
+                                <label><i class="fas fa-shield-alt me-1"></i> Clearance Status:</label>
                                 <span>{{ volunteer.clearance_status }}</span>
                             </div>
-                            {% endif %}
+                        </div>
+                        {% endif %}
+                        <div class="col-md-3 col-sm-6">
                             <div class="info-item">
-                                <label>Is Local:</label>
+                                <label><i class="fas fa-map-pin me-1"></i> Is Local:</label>
                                 <span>
                                     {% if volunteer.is_local %}
                                         {% if volunteer.is_local.value == 'local' %}
@@ -91,6 +103,25 @@
                                         <span class="badge bg-secondary">Unknown</span>
                                     {% endif %}
                                 </span>
+                            </div>
+                        </div>
+                        <div class="col-md-12">
+                            <div class="info-item">
+                                <label><i class="fas fa-user-slash me-1"></i> Contact Preferences:</label>
+                                <div>
+                                    {% if volunteer.do_not_call %}
+                                        <span class="badge bg-warning"><i class="fas fa-phone-slash me-1"></i> Do Not Call</span>
+                                    {% endif %}
+                                    {% if volunteer.do_not_email %}
+                                        <span class="badge bg-warning"><i class="fas fa-envelope-slash me-1"></i> Do Not Email</span>
+                                    {% endif %}
+                                    {% if volunteer.do_not_contact %}
+                                        <span class="badge bg-danger"><i class="fas fa-ban me-1"></i> Do Not Contact</span>
+                                    {% endif %}
+                                    {% if not volunteer.do_not_call and not volunteer.do_not_email and not volunteer.do_not_contact %}
+                                        <span class="text-muted">No restrictions</span>
+                                    {% endif %}
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -109,67 +140,127 @@
                         <strong>Warning:</strong> This volunteer has no email address or phone number on file.
                     </div>
                     {% endif %}
-                    <div class="row">
-                        <div class="col-md-6">
-                            <h6>Email Addresses</h6>
-                            {% if volunteer.emails %}
-                                <ul class="list-unstyled">
-                                    {% for email in volunteer.emails %}
-                                    <li>
-                                        {{ email.email }}
-                                        {% if email.is_primary %}
-                                            <span class="badge bg-primary">Primary</span>
-                                        {% endif %}
-                                        {% if email.is_verified %}
-                                            <span class="badge bg-success">Verified</span>
-                                        {% endif %}
-                                        <span class="text-muted">({{ email.email_type.value }})</span>
-                                    </li>
-                                    {% endfor %}
-                                </ul>
-                            {% else %}
-                                <p class="text-muted">No email addresses on file.</p>
-                            {% endif %}
-                        </div>
-                        <div class="col-md-6">
-                            <h6>Phone Numbers</h6>
-                            {% if volunteer.phones %}
-                                <ul class="list-unstyled">
-                                    {% for phone in volunteer.phones %}
-                                    <li>
-                                        {{ phone.phone_number }}
-                                        {% if phone.is_primary %}
-                                            <span class="badge bg-primary">Primary</span>
-                                        {% endif %}
-                                        {% if phone.can_text %}
-                                            <span class="badge bg-info">Can Text</span>
-                                        {% endif %}
-                                        <span class="text-muted">({{ phone.phone_type.value }})</span>
-                                    </li>
-                                    {% endfor %}
-                                </ul>
-                            {% else %}
-                                <p class="text-muted">No phone numbers on file.</p>
-                            {% endif %}
-                        </div>
-                    </div>
-                    {% if volunteer.addresses %}
-                    <div class="row mt-3">
-                        <div class="col-12">
-                            <h6>Addresses</h6>
-                            <ul class="list-unstyled">
-                                {% for address in volunteer.addresses %}
-                                <li>
-                                    {{ address.get_full_address() }}
-                                    {% if address.is_primary %}
-                                        <span class="badge bg-primary">Primary</span>
+                    
+                    <!-- Primary Contact Methods -->
+                    <div class="row g-3 mb-3">
+                        {% set primary_email = volunteer.emails|selectattr("is_primary")|first if volunteer.emails else none %}
+                        {% set primary_phone = volunteer.phones|selectattr("is_primary")|first if volunteer.phones else none %}
+                        {% set primary_address = volunteer.addresses|selectattr("is_primary")|first if volunteer.addresses else none %}
+                        
+                        {% if primary_email %}
+                        <div class="col-md-4">
+                            <div class="border rounded p-3 bg-light">
+                                <h6 class="mb-2"><i class="fas fa-envelope text-primary me-2"></i> Primary Email</h6>
+                                <div class="mb-1">
+                                    <strong>{{ primary_email.email }}</strong>
+                                    {% if primary_email.is_verified %}
+                                        <span class="badge bg-success ms-2"><i class="fas fa-check-circle me-1"></i> Verified</span>
                                     {% endif %}
-                                    <span class="text-muted">({{ address.address_type.value }})</span>
-                                </li>
-                                {% endfor %}
-                            </ul>
+                                </div>
+                                <small class="text-muted">{{ primary_email.email_type.value }}</small>
+                                {% if external_id_map and external_id_map.metadata_json and external_id_map.metadata_json.get("email_bounced_date") %}
+                                <div class="mt-2">
+                                    <span class="badge bg-danger"><i class="fas fa-exclamation-triangle me-1"></i> Email Bounced</span>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% endif %}
+                        
+                        {% if primary_phone %}
+                        <div class="col-md-4">
+                            <div class="border rounded p-3 bg-light">
+                                <h6 class="mb-2"><i class="fas fa-phone text-primary me-2"></i> Primary Phone</h6>
+                                <div class="mb-1">
+                                    <strong>{{ primary_phone.phone_number }}</strong>
+                                    {% if primary_phone.can_text %}
+                                        <span class="badge bg-info ms-2"><i class="fas fa-sms me-1"></i> Can Text</span>
+                                    {% endif %}
+                                </div>
+                                <small class="text-muted">{{ primary_phone.phone_type.value }}</small>
+                            </div>
+                        </div>
+                        {% endif %}
+                        
+                        {% if primary_address %}
+                        <div class="col-md-4">
+                            <div class="border rounded p-3 bg-light">
+                                <h6 class="mb-2"><i class="fas fa-map-marker-alt text-primary me-2"></i> Primary Address</h6>
+                                <div class="mb-1">
+                                    <strong>{{ primary_address.get_full_address() }}</strong>
+                                </div>
+                                <small class="text-muted">{{ primary_address.address_type.value }}</small>
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                    
+                    <!-- Secondary Contact Methods (Collapsible) -->
+                    {% set secondary_emails = volunteer.emails|rejectattr("is_primary")|list if volunteer.emails else [] %}
+                    {% set secondary_phones = volunteer.phones|rejectattr("is_primary")|list if volunteer.phones else [] %}
+                    {% set secondary_addresses = volunteer.addresses|rejectattr("is_primary")|list if volunteer.addresses else [] %}
+                    
+                    {% if secondary_emails or secondary_phones or secondary_addresses %}
+                    <div class="mt-3">
+                        <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#secondaryContactMethods" aria-expanded="false" aria-controls="secondaryContactMethods">
+                            <i class="fas fa-chevron-down me-1"></i> View Additional Contact Methods
+                        </button>
+                        <div class="collapse mt-3" id="secondaryContactMethods">
+                            <div class="row g-3">
+                                {% if secondary_emails %}
+                                <div class="col-md-4">
+                                    <h6><i class="fas fa-envelope me-2"></i> Additional Emails</h6>
+                                    <ul class="list-unstyled">
+                                        {% for email in secondary_emails %}
+                                        <li class="mb-2">
+                                            {{ email.email }}
+                                            {% if email.is_verified %}
+                                                <span class="badge bg-success">Verified</span>
+                                            {% endif %}
+                                            <br><small class="text-muted">({{ email.email_type.value }})</small>
+                                        </li>
+                                        {% endfor %}
+                                    </ul>
+                                </div>
+                                {% endif %}
+                                
+                                {% if secondary_phones %}
+                                <div class="col-md-4">
+                                    <h6><i class="fas fa-phone me-2"></i> Additional Phones</h6>
+                                    <ul class="list-unstyled">
+                                        {% for phone in secondary_phones %}
+                                        <li class="mb-2">
+                                            {{ phone.phone_number }}
+                                            {% if phone.can_text %}
+                                                <span class="badge bg-info">Can Text</span>
+                                            {% endif %}
+                                            <br><small class="text-muted">({{ phone.phone_type.value }})</small>
+                                        </li>
+                                        {% endfor %}
+                                    </ul>
+                                </div>
+                                {% endif %}
+                                
+                                {% if secondary_addresses %}
+                                <div class="col-md-4">
+                                    <h6><i class="fas fa-map-marker-alt me-2"></i> Additional Addresses</h6>
+                                    <ul class="list-unstyled">
+                                        {% for address in secondary_addresses %}
+                                        <li class="mb-2">
+                                            {{ address.get_full_address() }}
+                                            <br><small class="text-muted">({{ address.address_type.value }})</small>
+                                        </li>
+                                        {% endfor %}
+                                    </ul>
+                                </div>
+                                {% endif %}
+                            </div>
                         </div>
                     </div>
+                    {% endif %}
+                    
+                    {% if not primary_email and not primary_phone and not primary_address and not secondary_emails and not secondary_phones and not secondary_addresses %}
+                    <p class="text-muted mb-0">No contact information on file.</p>
                     {% endif %}
                 </div>
             </div>
@@ -180,71 +271,84 @@
                     <h5 class="card-title mb-0">Volunteer Details</h5>
                 </div>
                 <div class="card-body">
-                    <div class="row">
+                    <div class="row g-3">
                         <div class="col-md-6">
                             {% if volunteer.first_volunteer_date %}
                             <div class="info-item">
-                                <label>First Volunteer Date:</label>
+                                <label><i class="fas fa-calendar-plus me-1"></i> First Volunteer Date:</label>
                                 <span>{{ volunteer.first_volunteer_date.strftime('%Y-%m-%d') }}</span>
                             </div>
                             {% endif %}
                             {% if volunteer.last_volunteer_date %}
                             <div class="info-item">
-                                <label>Last Volunteer Date:</label>
+                                <label><i class="fas fa-calendar-check me-1"></i> Last Volunteer Date:</label>
                                 <span>{{ volunteer.last_volunteer_date.strftime('%Y-%m-%d') }}</span>
                             </div>
                             {% endif %}
                             <div class="info-item">
-                                <label>Total Volunteer Hours:</label>
+                                <label><i class="fas fa-clock me-1"></i> Total Volunteer Hours:</label>
                                 <span>{{ "%.2f"|format(volunteer.total_volunteer_hours) }}</span>
                             </div>
                             {% if external_id_map and external_id_map.metadata_json %}
                                 {% set metadata = external_id_map.metadata_json %}
                                 {% if metadata.get("attended_sessions_count") %}
                                 <div class="info-item">
-                                    <label>Attended Sessions:</label>
+                                    <label><i class="fas fa-chart-line me-1"></i> Attended Sessions:</label>
                                     <span>{{ metadata.attended_sessions_count }}</span>
                                 </div>
                                 {% endif %}
                             {% endif %}
                         </div>
                         <div class="col-md-6">
-                            <div class="info-item">
-                                <label>Contact Preferences:</label>
-                                <div>
-                                    {% if volunteer.do_not_call %}
-                                        <span class="badge bg-warning">Do Not Call</span>
-                                    {% endif %}
-                                    {% if volunteer.do_not_email %}
-                                        <span class="badge bg-warning">Do Not Email</span>
-                                    {% endif %}
-                                    {% if volunteer.do_not_contact %}
-                                        <span class="badge bg-danger">Do Not Contact</span>
-                                    {% endif %}
-                                    {% if not volunteer.do_not_call and not volunteer.do_not_email and not volunteer.do_not_contact %}
-                                        <span class="text-muted">No restrictions</span>
-                                    {% endif %}
-                                </div>
-                            </div>
                             {% if external_id_map and external_id_map.metadata_json %}
                                 {% set metadata = external_id_map.metadata_json %}
-                                {% if metadata.get("last_payload") %}
-                                    {% set payload = metadata.last_payload %}
-                                    {% if payload.get("engagement") %}
-                                        {% set engagement = payload.engagement %}
-                                        {% if engagement.get("last_email_message_at") %}
-                                        <div class="info-item mt-2">
-                                            <label>Last Email Message:</label>
-                                            <span class="text-muted small">{{ engagement.last_email_message_at }}</span>
-                                        </div>
+                                {% if metadata.get("last_email_message_at") %}
+                                <div class="info-item">
+                                    <label><i class="fas fa-envelope-open me-1"></i> Last Email Message:</label>
+                                    <span>
+                                        {% if metadata.last_email_message_at is string %}
+                                            {{ metadata.last_email_message_at[:10] if metadata.last_email_message_at|length > 10 else metadata.last_email_message_at }}
+                                        {% else %}
+                                            {{ metadata.last_email_message_at }}
                                         {% endif %}
-                                        {% if engagement.get("last_activity_date") %}
-                                        <div class="info-item">
-                                            <label>Last Activity Date:</label>
-                                            <span class="text-muted small">{{ engagement.last_activity_date }}</span>
-                                        </div>
+                                    </span>
+                                </div>
+                                {% endif %}
+                                {% if metadata.get("last_external_email_activity_at") %}
+                                <div class="info-item">
+                                    <label><i class="fas fa-envelope-open-text me-1"></i> Last External Email Activity:</label>
+                                    <span>
+                                        {% if metadata.last_external_email_activity_at is string %}
+                                            {{ metadata.last_external_email_activity_at[:10] if metadata.last_external_email_activity_at|length > 10 else metadata.last_external_email_activity_at }}
+                                        {% else %}
+                                            {{ metadata.last_external_email_activity_at }}
                                         {% endif %}
-                                    {% endif %}
+                                    </span>
+                                </div>
+                                {% endif %}
+                                {% if metadata.get("last_mailchimp_email_at") %}
+                                <div class="info-item">
+                                    <label><i class="fas fa-mail-bulk me-1"></i> Last Mailchimp Email:</label>
+                                    <span>
+                                        {% if metadata.last_mailchimp_email_at is string %}
+                                            {{ metadata.last_mailchimp_email_at[:10] if metadata.last_mailchimp_email_at|length > 10 else metadata.last_mailchimp_email_at }}
+                                        {% else %}
+                                            {{ metadata.last_mailchimp_email_at }}
+                                        {% endif %}
+                                    </span>
+                                </div>
+                                {% endif %}
+                                {% if metadata.get("last_activity_date") %}
+                                <div class="info-item">
+                                    <label><i class="fas fa-calendar-alt me-1"></i> Last Activity Date:</label>
+                                    <span>
+                                        {% if metadata.last_activity_date is string %}
+                                            {{ metadata.last_activity_date[:10] if metadata.last_activity_date|length > 10 else metadata.last_activity_date }}
+                                        {% else %}
+                                            {{ metadata.last_activity_date }}
+                                        {% endif %}
+                                    </span>
+                                </div>
                                 {% endif %}
                             {% endif %}
                         </div>
@@ -390,44 +494,59 @@
                     <h5 class="card-title mb-0">Demographics</h5>
                 </div>
                 <div class="card-body">
-                    {% if volunteer.birthdate %}
-                    <div class="info-item">
-                        <label>Birthdate:</label>
-                        <span>{{ volunteer.birthdate.strftime('%Y-%m-%d') }}</span>
+                    {% if volunteer.birthdate or volunteer.gender or volunteer.race or volunteer.age_group or volunteer.education_level or volunteer.preferred_language %}
+                    <div class="row g-3">
+                        {% if volunteer.birthdate %}
+                        <div class="col-md-6 col-sm-6">
+                            <div class="info-item">
+                                <label><i class="fas fa-birthday-cake me-1"></i> Birthdate:</label>
+                                <span>{{ volunteer.birthdate.strftime('%Y-%m-%d') }}</span>
+                            </div>
+                        </div>
+                        {% endif %}
+                        {% if volunteer.gender %}
+                        <div class="col-md-6 col-sm-6">
+                            <div class="info-item">
+                                <label><i class="fas fa-venus-mars me-1"></i> Gender:</label>
+                                <span>{{ volunteer.gender.value if volunteer.gender.value else volunteer.gender }}</span>
+                            </div>
+                        </div>
+                        {% endif %}
+                        {% if volunteer.race %}
+                        <div class="col-md-6 col-sm-6">
+                            <div class="info-item">
+                                <label><i class="fas fa-globe me-1"></i> Race/Ethnicity:</label>
+                                <span>{{ volunteer.race.value if volunteer.race.value else volunteer.race }}</span>
+                            </div>
+                        </div>
+                        {% endif %}
+                        {% if volunteer.age_group %}
+                        <div class="col-md-6 col-sm-6">
+                            <div class="info-item">
+                                <label><i class="fas fa-users me-1"></i> Age Group:</label>
+                                <span>{{ volunteer.age_group.value if volunteer.age_group.value else volunteer.age_group }}</span>
+                            </div>
+                        </div>
+                        {% endif %}
+                        {% if volunteer.education_level %}
+                        <div class="col-md-6 col-sm-6">
+                            <div class="info-item">
+                                <label><i class="fas fa-graduation-cap me-1"></i> Education Level:</label>
+                                <span>{{ volunteer.education_level.value if volunteer.education_level.value else volunteer.education_level }}</span>
+                            </div>
+                        </div>
+                        {% endif %}
+                        {% if volunteer.preferred_language %}
+                        <div class="col-md-6 col-sm-6">
+                            <div class="info-item">
+                                <label><i class="fas fa-language me-1"></i> Preferred Language:</label>
+                                <span>{{ volunteer.preferred_language.value if volunteer.preferred_language.value else volunteer.preferred_language }}</span>
+                            </div>
+                        </div>
+                        {% endif %}
                     </div>
-                    {% endif %}
-                    {% if volunteer.gender %}
-                    <div class="info-item">
-                        <label>Gender:</label>
-                        <span>{{ volunteer.gender.value if volunteer.gender.value else volunteer.gender }}</span>
-                    </div>
-                    {% endif %}
-                    {% if volunteer.race %}
-                    <div class="info-item">
-                        <label>Race/Ethnicity:</label>
-                        <span>{{ volunteer.race.value if volunteer.race.value else volunteer.race }}</span>
-                    </div>
-                    {% endif %}
-                    {% if volunteer.age_group %}
-                    <div class="info-item">
-                        <label>Age Group:</label>
-                        <span>{{ volunteer.age_group.value if volunteer.age_group.value else volunteer.age_group }}</span>
-                    </div>
-                    {% endif %}
-                    {% if volunteer.education_level %}
-                    <div class="info-item">
-                        <label>Education Level:</label>
-                        <span>{{ volunteer.education_level.value if volunteer.education_level.value else volunteer.education_level }}</span>
-                    </div>
-                    {% endif %}
-                    {% if volunteer.preferred_language %}
-                    <div class="info-item">
-                        <label>Preferred Language:</label>
-                        <span>{{ volunteer.preferred_language.value if volunteer.preferred_language.value else volunteer.preferred_language }}</span>
-                    </div>
-                    {% endif %}
-                    {% if not volunteer.birthdate and not volunteer.gender and not volunteer.race and not volunteer.age_group and not volunteer.education_level and not volunteer.preferred_language %}
-                        <p class="text-muted">No demographic information on file.</p>
+                    {% else %}
+                        <p class="text-muted mb-0">No demographic information on file.</p>
                     {% endif %}
                 </div>
             </div>
@@ -439,53 +558,79 @@
                 </div>
                 <div class="card-body">
                     <div class="info-item">
-                        <label>Created:</label>
+                        <label><i class="fas fa-calendar-plus me-1"></i> Created:</label>
                         <span>{{ volunteer.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</span>
                     </div>
                     {% if volunteer.updated_at %}
                     <div class="info-item">
-                        <label>Last Updated:</label>
+                        <label><i class="fas fa-edit me-1"></i> Last Updated:</label>
                         <span>{{ volunteer.updated_at.strftime('%Y-%m-%d %H:%M:%S') }}</span>
                     </div>
                     {% endif %}
                     {% if volunteer.source %}
                     <div class="info-item">
-                        <label>Source:</label>
+                        <label><i class="fas fa-database me-1"></i> Source:</label>
                         <span>{{ volunteer.source }}</span>
                     </div>
                     {% endif %}
                     {% if external_id_map %}
-                    <div class="info-item mt-3">
-                        <label>Salesforce Import Info:</label>
-                        <div class="small text-muted">
-                            <div>External ID: <code>{{ external_id_map.external_id }}</code></div>
-                            {% if external_id_map.metadata_json %}
-                                {% set metadata = external_id_map.metadata_json %}
-                                {% if metadata.get("email_bounced_date") %}
-                                <div class="mt-1">Email Bounced: <code>{{ metadata.email_bounced_date }}</code></div>
-                                {% endif %}
-                                {% if metadata.get("last_payload") %}
-                                {% set payload = metadata.last_payload %}
-                                {% if payload.get("contact_preferences") %}
-                                {% set prefs = payload.contact_preferences %}
-                                <details class="mt-2">
-                                    <summary class="text-primary" style="cursor: pointer;">View Contact Preferences from Salesforce</summary>
-                                    <div class="mt-2 p-2 bg-light rounded">
-                                        <div class="small">
-                                            <div><strong>Do Not Call:</strong> {{ prefs.get("do_not_call", false) | string | title }}</div>
-                                            <div><strong>Do Not Email:</strong> {{ prefs.get("do_not_email", false) | string | title }}</div>
-                                            <div><strong>Do Not Contact:</strong> {{ prefs.get("do_not_contact", false) | string | title }}</div>
-                                        </div>
-                                        <details class="mt-2">
-                                            <summary class="text-muted" style="cursor: pointer; font-size: 0.85em;">Raw JSON</summary>
-                                            <pre class="mb-0 small mt-1">{{ payload.contact_preferences | tojson if payload.contact_preferences else '{}' }}</pre>
-                                        </details>
-                                    </div>
-                                </details>
-                                {% endif %}
-                                {% endif %}
-                            {% endif %}
+                    <div class="border-top pt-3 mt-3">
+                        <h6 class="mb-3"><i class="fas fa-cloud me-1"></i> Salesforce Import Information</h6>
+                        <div class="info-item mb-2">
+                            <label><i class="fas fa-id-card me-1"></i> External ID:</label>
+                            <div><code class="small">{{ external_id_map.external_id }}</code></div>
                         </div>
+                        {% if external_id_map.metadata_json %}
+                            {% set metadata = external_id_map.metadata_json %}
+                            {% if metadata.get("account_id") %}
+                            <div class="info-item mb-2">
+                                <label><i class="fas fa-id-card me-1"></i> Account ID:</label>
+                                <div><code class="small">{{ metadata.account_id }}</code></div>
+                            </div>
+                            {% endif %}
+                            {% if metadata.get("primary_organization_id") %}
+                            <div class="info-item mb-2">
+                                <label><i class="fas fa-id-card me-1"></i> Primary Affiliation ID:</label>
+                                <div><code class="small">{{ metadata.primary_organization_id }}</code></div>
+                            </div>
+                            {% endif %}
+                            {% if metadata.get("email_bounced_date") %}
+                            <div class="info-item mb-2">
+                                <label><i class="fas fa-exclamation-triangle text-danger me-1"></i> Email Bounced Date:</label>
+                                <div>
+                                    {% if metadata.email_bounced_date is string %}
+                                        <code class="small">{{ metadata.email_bounced_date[:10] if metadata.email_bounced_date|length > 10 else metadata.email_bounced_date }}</code>
+                                    {% else %}
+                                        <code class="small">{{ metadata.email_bounced_date }}</code>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endif %}
+                            {% if metadata.get("source_modstamp") %}
+                            <div class="info-item mb-2">
+                                <label><i class="fas fa-clock me-1"></i> System Modstamp:</label>
+                                <div>
+                                    {% if metadata.source_modstamp is string %}
+                                        <code class="small">{{ metadata.source_modstamp[:19] if metadata.source_modstamp|length > 19 else metadata.source_modstamp }}</code>
+                                    {% else %}
+                                        <code class="small">{{ metadata.source_modstamp }}</code>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endif %}
+                            {% if metadata.get("source_last_modified") %}
+                            <div class="info-item mb-2">
+                                <label><i class="fas fa-clock me-1"></i> Last Modified (SF):</label>
+                                <div>
+                                    {% if metadata.source_last_modified is string %}
+                                        <code class="small">{{ metadata.source_last_modified[:19] if metadata.source_last_modified|length > 19 else metadata.source_last_modified }}</code>
+                                    {% else %}
+                                        <code class="small">{{ metadata.source_last_modified }}</code>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endif %}
+                        {% endif %}
                     </div>
                     {% endif %}
                 </div>
