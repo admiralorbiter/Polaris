@@ -1,6 +1,6 @@
 # Salesforce Transform Reference
 
-This reference lists the transform functions available to Salesforce mappings, outlines how to add new transforms, and captures patterns for common data normalization tasks. Use it alongside `docs/salesforce-mapping-guide.md` when extending the importer.
+This reference lists the transform functions available to Salesforce mappings, outlines how to add new transforms, and captures patterns for common data normalization tasks. Use it alongside `docs/reference/salesforce/salesforce-mapping-guide.md` when extending the importer.
 
 ## 1. Built-in Transforms
 
@@ -159,6 +159,6 @@ Transforms can emit dictionaries; `_set_nested_value()` handles nested structure
 ## 5. References
 
 - `flask_app/importer/mapping/__init__.py`
-- `docs/salesforce-mapping-guide.md`
-- `docs/salesforce-mapping-examples.md`
+- `docs/reference/salesforce/salesforce-mapping-guide.md`
+- `docs/reference/salesforce/salesforce-mapping-examples.md`
 - `tests/test_salesforce_mapping_transformer.py`

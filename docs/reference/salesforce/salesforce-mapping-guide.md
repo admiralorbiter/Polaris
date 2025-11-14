@@ -763,7 +763,7 @@ flask importer debug-staging --run-id <id> --record <sequence>
 - `flask_app/importer/pipeline/salesforce_loader.py` - Core loading logic
 - `flask_app/importer/pipeline/dq.py` - Data quality rules
 - `flask_app/importer/pipeline/clean.py` - Clean promotion
-- `docs/data-integration-platform-tech-doc.md` - Technical deep dive
-- `docs/data-integration-platform-overview.md` - High-level architecture
-- `docs/sprint4-retrospective.md` - Implementation history
-- `docs/importer-feature-flag.md` - Feature flag documentation
+- `docs/reference/architecture/data-integration-platform-tech-doc.md` - Technical deep dive
+- `docs/reference/architecture/data-integration-platform-overview.md` - High-level architecture
+- `docs/sprints/sprint4-retrospective.md` - Implementation history
+- `docs/operations/importer-feature-flag.md` - Feature flag documentation

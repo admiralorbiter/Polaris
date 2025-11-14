@@ -110,7 +110,7 @@ Before starting Sprint 2 work, verify Sprint 1 completion:
 5. **Check file permissions**: Ensure `IMPORTER_UPLOAD_DIR` is writable if using file-based uploads.
 
 ## Related Docs
-- `docs/data-integration-platform-overview.md` (§10 Optionality & Packaging) references flags and packaging guidance.
-- `docs/data-integration-platform-tech-doc.md` (IMP-1 story) notes the environment defaults and docs requirement.
-- `docs/commands.md` provides CLI command reference and usage examples.
+- `docs/reference/architecture/data-integration-platform-overview.md` (§10 Optionality & Packaging) references flags and packaging guidance.
+- `docs/reference/architecture/data-integration-platform-tech-doc.md` (IMP-1 story) notes the environment defaults and docs requirement.
+- `docs/operations/commands.md` provides CLI command reference and usage examples.
 

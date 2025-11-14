@@ -246,8 +246,8 @@ Combine this with a custom transform `normalize_signup_status` to map Salesforce
 
 ## 6. References
 
-- `docs/salesforce-mapping-guide.md`
-- `docs/salesforce-transforms-reference.md`
+- `docs/reference/salesforce/salesforce-mapping-guide.md`
+- `docs/reference/salesforce/salesforce-transforms-reference.md`
 - `config/mappings/salesforce_contact_v1.yaml`
 - `flask_app/importer/mapping/__init__.py`
 - `tests/test_salesforce_mapping_transformer.py`

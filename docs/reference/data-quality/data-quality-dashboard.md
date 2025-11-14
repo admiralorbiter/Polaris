@@ -501,9 +501,9 @@ The sampling algorithm uses intelligent stratification:
 
 ## Related Documentation
 
-- **Data Integration Platform Overview**: `docs/data-integration-platform-overview.md`
+- **Data Integration Platform Overview**: `docs/reference/architecture/data-integration-platform-overview.md`
 - **DQ Inbox**: See importer documentation for DQ inbox (import violations)
-- **Admin Dashboard**: `docs/commands.md` for admin CLI commands
+- **Admin Dashboard**: `docs/operations/commands.md` for admin CLI commands
 - **API Documentation**: See API endpoints above for programmatic access
 
 ## Support

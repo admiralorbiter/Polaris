@@ -260,8 +260,8 @@ All fields enabled by default (no fields to disable initially).
 7. User acceptance testing
 
 **Files**:
-- `docs/data-quality-field-configuration.md` - This document
-- `docs/data-quality-dashboard.md` - Update existing documentation
+- `docs/reference/data-quality/data-quality-field-configuration.md` - This document
+- `docs/reference/data-quality/data-quality-dashboard.md` - Update existing documentation
 - `tests/integration/test_data_quality_field_config.py` - Integration tests
 
 **Acceptance Criteria**:
@@ -461,9 +461,9 @@ Disable a field.
 
 ## Related Documentation
 
-- `docs/data-quality-dashboard.md` - Data Quality Dashboard documentation
-- `docs/data-integration-platform-overview.md` - Platform architecture overview
-- `docs/data-integration-platform-tech-doc.md` - Technical documentation
+- `docs/reference/data-quality/data-quality-dashboard.md` - Data Quality Dashboard documentation
+- `docs/reference/architecture/data-integration-platform-overview.md` - Platform architecture overview
+- `docs/reference/architecture/data-integration-platform-tech-doc.md` - Technical documentation
 
 ## Support
 

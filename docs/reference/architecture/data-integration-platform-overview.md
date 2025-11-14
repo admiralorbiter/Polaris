@@ -252,7 +252,7 @@ Each rule has: `rule_code`, `severity` (error/warn/info), remediation hints, and
 - **Caching**: 5-minute cache for performance with manual refresh option
 - **Access**: `/admin/data-quality` (requires `view_users` permission)
 
-> **Note**: The Data Quality Dashboard is separate from the DQ Inbox. The dashboard provides field-level completeness metrics for all entities, while the DQ Inbox focuses on import violations. See `docs/data-quality-dashboard.md` for detailed documentation.
+> **Note**: The Data Quality Dashboard is separate from the DQ Inbox. The dashboard provides field-level completeness metrics for all entities, while the DQ Inbox focuses on import violations. See `docs/reference/data-quality/data-quality-dashboard.md` for detailed documentation.
 
 ### 8.5 Reconciliation & Source Health
 
@@ -415,7 +415,7 @@ Each rule has: `rule_code`, `severity` (error/warn/info), remediation hints, and
 - **Config**
     - ENV vars: `IMPORTER_ENABLED`, `IMPORTER_ADAPTERS`, `IMPORTER_SCHEDULE`, `IMPORTER_RULES_MODE=warn|enforce`, thresholds.
     - Worker flags: `IMPORTER_WORKER_ENABLED` (default false), `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`; leave unset to use the bundled SQLite transport (`celery.sqlite`) so no Redis is required locally.
-    - DoR/DoD checklists live in `docs/importer-dor.md` and `docs/importer-dod.md`; reference them from importer issues.
+    - DoR/DoD checklists live in `docs/operations/importer-dor.md` and `docs/operations/importer-dod.md`; reference them from importer issues.
     - Golden dataset samples live under `ops/testdata/importer_golden_dataset_v0/`; update the README when new scenarios are added.
     - Baseline metrics/logging: record staging rows landed, validation failures (`dq_violations` per rule), dedupe suggestions/decisions, load insert/update/skip counts, and confirm worker heartbeat via CLI/health endpoint.
     - YAML mapping files stored under `/app/importer/mappings/`.

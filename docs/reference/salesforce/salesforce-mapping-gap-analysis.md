@@ -281,6 +281,6 @@ Consider combining `Description` and `Volunteer_Recruitment_Notes__c` into a str
 
 - Current mapping: `config/mappings/salesforce_contact_v1.yaml`
 - Extractor: `flask_app/importer/adapters/salesforce/extractor.py`
-- Mapping guide: `docs/salesforce-mapping-guide.md`
-- Examples: `docs/salesforce-mapping-examples.md`
+- Mapping guide: `docs/reference/salesforce/salesforce-mapping-guide.md`
+- Examples: `docs/reference/salesforce/salesforce-mapping-examples.md`
 

@@ -60,7 +60,7 @@
 2. **Migration testing**: When adding new extraction logic, test against both fresh imports and existing clean records to catch legacy format issues early.
 3. **Validation layering**: Implement validation at multiple stages (mapping transform, DQ rules, core loader) with clear error messages at each layer.
 4. **Debug tooling**: Continue investing in CLI debug commands (`debug-staging`, `stats`) to help operators diagnose issues quickly without database access.
-5. **Documentation**: Maintain the new Salesforce mapping guides (`docs/salesforce-mapping-guide.md`, `docs/salesforce-transforms-reference.md`, `docs/salesforce-mapping-examples.md`) as living documents when schemas evolve.
+5. **Documentation**: Maintain the new Salesforce mapping guides (`docs/reference/salesforce/salesforce-mapping-guide.md`, `docs/reference/salesforce/salesforce-transforms-reference.md`, `docs/reference/salesforce/salesforce-mapping-examples.md`) as living documents when schemas evolve.
 
 ## Metrics & Observability
 

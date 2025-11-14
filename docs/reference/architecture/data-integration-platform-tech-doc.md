@@ -34,25 +34,25 @@
 ## Supporting Documentation
 
 **Architecture & Design**:
-- `docs/data-integration-platform-overview.md` — High-level architecture, data layers, pipeline flow, and design principles
+- `docs/reference/architecture/data-integration-platform-overview.md` — High-level architecture, data layers, pipeline flow, and design principles
 - Architecture diagram (future): End-to-end pipeline flow diagram showing Extract → Land → Transform → Link → Load → Reconcile stages
 
 **Sprint Retrospectives & Learnings**:
-- `docs/sprint1-retrospective.md` — Sprint 1 completion retrospective, lessons learned, and recommendations for Sprint 2
-- `docs/sprint2-retrospective.md` — Sprint 2 completion retrospective, lessons learned, and recommendations for Sprint 3
-- `docs/sprint3-retrospective.md` — Sprint 3 completion retrospective, lessons learned, and recommendations for Sprint 4
-- `docs/sprint4-retrospective.md` — Sprint 4 completion retrospective, lessons learned, and recommendations for Sprint 5
-- `docs/sprint5-retrospective.md` — Sprint 5 completion retrospective, lessons learned, and recommendations for Sprint 6
+- `docs/sprints/sprint1-retrospective.md` — Sprint 1 completion retrospective, lessons learned, and recommendations for Sprint 2
+- `docs/sprints/sprint2-retrospective.md` — Sprint 2 completion retrospective, lessons learned, and recommendations for Sprint 3
+- `docs/sprints/sprint3-retrospective.md` — Sprint 3 completion retrospective, lessons learned, and recommendations for Sprint 4
+- `docs/sprints/sprint4-retrospective.md` — Sprint 4 completion retrospective, lessons learned, and recommendations for Sprint 5
+- `docs/sprints/sprint5-retrospective.md` — Sprint 5 completion retrospective, lessons learned, and recommendations for Sprint 6
 
 **Operational Guides**:
-- `docs/importer-feature-flag.md` — Feature flag configuration, troubleshooting, and verification checklist
-- `docs/commands.md` — CLI command reference with troubleshooting and debugging tips
-- `docs/importer-dor.md` — Definition of Ready checklist for importer tickets
-- `docs/importer-dod.md` — Definition of Done checklist for importer tickets
-- `docs/salesforce-mapping-guide.md` — Salesforce mapping architecture, vertical/horizontal scaling guidance, and troubleshooting
-- `docs/salesforce-transforms-reference.md` — Transform registry reference with patterns for custom mapping transforms
-- `docs/salesforce-mapping-examples.md` — Copy/paste mapping recipes and real-world examples for expanding adapters
-- `docs/data-quality-dashboard.md` — Data Quality Dashboard documentation with API reference, usage examples, and troubleshooting
+- `docs/operations/importer-feature-flag.md` — Feature flag configuration, troubleshooting, and verification checklist
+- `docs/operations/commands.md` — CLI command reference with troubleshooting and debugging tips
+- `docs/operations/importer-dor.md` — Definition of Ready checklist for importer tickets
+- `docs/operations/importer-dod.md` — Definition of Done checklist for importer tickets
+- `docs/reference/salesforce/salesforce-mapping-guide.md` — Salesforce mapping architecture, vertical/horizontal scaling guidance, and troubleshooting
+- `docs/reference/salesforce/salesforce-transforms-reference.md` — Transform registry reference with patterns for custom mapping transforms
+- `docs/reference/salesforce/salesforce-mapping-examples.md` — Copy/paste mapping recipes and real-world examples for expanding adapters
+- `docs/reference/data-quality/data-quality-dashboard.md` — Data Quality Dashboard documentation with API reference, usage examples, and troubleshooting
 
 **Test Data & Scenarios**:
 - `ops/testdata/importer_golden_dataset_v0/README.md` — Golden dataset documentation with expected outcomes
@@ -78,11 +78,11 @@
 
 **Definition of Ready (DoR)**  
 - Story written; AC clear; dependencies listed; flags/config keys named; test data identified.
-- Importer DoR checklist: see `docs/importer-dor.md` (link this document in Jira issues).
+- Importer DoR checklist: see `docs/operations/importer-dor.md` (link this document in Jira issues).
 
 **Definition of Done (DoD)**  
 - Feature behind flag (if applicable) • unit/functional tests • docs updated • counters/metrics visible in Runs • security reviewed • rollback strategy noted.
-- Importer DoD checklist: see `docs/importer-dod.md`; include the checklist when closing importer tickets.
+- Importer DoD checklist: see `docs/operations/importer-dod.md`; include the checklist when closing importer tickets.
 
 ### SQLite Concurrency Tips (development)
 
@@ -142,7 +142,7 @@
 ### IMP-4 — DoR/DoD checklists & Golden Dataset scaffold _(3 pts)_
 **User story**: As QA/PM, I want shared criteria and seed test data.  
 **Acceptance Criteria**
-- DoR/DoD documents added (`docs/importer-dor.md`, `docs/importer-dod.md`) and referenced from backlog.  
+- DoR/DoD documents added (`docs/operations/importer-dor.md`, `docs/operations/importer-dod.md`) and referenced from backlog.  
 - Golden dataset v0 scaffold created under `ops/testdata/importer_golden_dataset_v0/` with starter volunteer samples (happy path, validation failures, duplicates) plus README noting expected outcomes and extension guidance.  
 **Dependencies**: none.
 
@@ -281,7 +281,7 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Expose dry-run toggle in UI
 - Enhance run detail views with violation summaries
 
-**See Also**: `docs/sprint1-retrospective.md` for detailed retrospective, lessons learned, and Sprint 2 recommendations.
+**See Also**: `docs/sprints/sprint1-retrospective.md` for detailed retrospective, lessons learned, and Sprint 2 recommendations.
 
 ---
 
@@ -477,7 +477,7 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - ✅ DQ inbox with rule/severity filters, CSV export, remediation launcher, and stats cards (`IMP-21`)
 - ✅ Remediation workflow with steward edit modal, DQ re-run, audit logging, and remediation metrics endpoint (`IMP-22`)
 - ✅ Dry-run UI toggle, run badges, include-dry-runs filter, and telemetry counters (`IMP-23`)
-- ✅ Data Quality Dashboard with field-level completeness metrics, overall health score, entity cards, and export functionality (see `docs/data-quality-dashboard.md`)
+- ✅ Data Quality Dashboard with field-level completeness metrics, overall health score, entity cards, and export functionality (see `docs/reference/data-quality/data-quality-dashboard.md`)
 
 **Test Coverage**:
 - Unit tests: run filters & serialization, violation queries, remediation service, dry-run propagation
@@ -514,7 +514,7 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - **Operational readiness**: Document retry behavior changes for support, define rollback steps if survivorship overwrites regress, and brief QA on new regression suites.
 - **Risks / assumptions**: Consistent normalization (email/phone), availability of external IDs in staging, and acceptable latency for repeated `external_id_map` lookups.
 - **Clarifications requested**: Confirm external system namespaces, whether survivorship precedence differs by field group, and who owns dashboard updates for new counters.
-- **Retrospective**: See [Sprint 3 Retrospective](./sprint3-retrospective.md) for outcomes and lessons learned.
+- **Retrospective**: See [Sprint 3 Retrospective](../../sprints/sprint3-retrospective.md) for outcomes and lessons learned.
 
 ### IMP-30 — External ID map & idempotent upsert _(8 pts)_
 **User story**: As an operator, retries do not create duplicates.  
@@ -816,7 +816,7 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 - Added `SalesforceMappingTransformer` to apply transforms (phone normalization, date parsing) and populate canonical volunteer dicts directly in `StagingVolunteer.normalized_json`.
 - Admin → Imports card now surfaces mapping metadata, unmapped-field warnings, and provides a download link for the active YAML. CLI exposes `flask importer mappings show` to inspect the spec.
 - Mapping metrics: per-run `metrics_json["salesforce"]` records unmapped fields/errors; Prometheus counter `importer_salesforce_mapping_unmapped_total{field}` tracks hotspots.
-- Detailed guidance for extending mappings (new fields, transforms, or Salesforce objects) now lives in `docs/salesforce-mapping-guide.md`, `docs/salesforce-transforms-reference.md`, and `docs/salesforce-mapping-examples.md`.
+- Detailed guidance for extending mappings (new fields, transforms, or Salesforce objects) now lives in `docs/reference/salesforce/salesforce-mapping-guide.md`, `docs/reference/salesforce/salesforce-transforms-reference.md`, and `docs/reference/salesforce/salesforce-mapping-examples.md`.
 
 **Testing Expectations**
 - **Unit**: YAML loader validation, transformer behavior, mapping CLI command.
@@ -1054,7 +1054,7 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 6. Add automated UI tests for merge workflows
 7. Document threshold configuration for Sprint 7 Config UI
 
-**See Also**: `docs/sprint5-retrospective.md` for detailed retrospective, lessons learned, and Sprint 6 recommendations.
+**See Also**: `docs/sprints/sprint5-retrospective.md` for detailed retrospective, lessons learned, and Sprint 6 recommendations.
 
 ---
 
@@ -1355,7 +1355,7 @@ The command creates an `import_run`, validates the header, stages rows (or perfo
 +- Create `staging_events`, `staging_signups` tables mirroring volunteer staging patterns (status, payload, normalized JSON, checksum).
 +- Define canonical contracts for events (title, start/end, location) and signups (volunteer/event references, attendance, hours).
 +- Update CSV adapter and Salesforce adapter to emit canonical payloads; include mapping YAMLs for new objects.
-+- Document new contracts in `docs/data-integration-platform-overview.md` and mapping guides.
++- Document new contracts in `docs/reference/architecture/data-integration-platform-overview.md` and mapping guides.
 +
 +**Testing Expectations**
 +- Unit: schema migrations, contract validators, adapter payload normalization.

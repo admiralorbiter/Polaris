@@ -30,7 +30,7 @@
 - `flask importer adapters list --auth-ping`  
   Perform the standard readiness check and attempt a live Salesforce authentication. Emits Prometheus counters (`importer_salesforce_auth_attempts_total`) for success/failure.
 - `flask importer mappings show`  
-  Print the active Salesforce mapping YAML (respects `IMPORTER_SALESFORCE_MAPPING_PATH`). Useful for reviewing field coverage or exporting the config. Pipe to disk to diff changes (`flask importer mappings show > /tmp/sf_mapping.yaml`). Pair this with the Salesforce mapping guides in `docs/salesforce-mapping-guide.md` and `docs/salesforce-transforms-reference.md` when planning schema updates.
+  Print the active Salesforce mapping YAML (respects `IMPORTER_SALESFORCE_MAPPING_PATH`). Useful for reviewing field coverage or exporting the config. Pipe to disk to diff changes (`flask importer mappings show > /tmp/sf_mapping.yaml`). Pair this with the Salesforce mapping guides in `docs/reference/salesforce/salesforce-mapping-guide.md` and `docs/reference/salesforce/salesforce-transforms-reference.md` when planning schema updates.
 
 ### Housekeeping
 - `flask importer cleanup-uploads --max-age-hours <hours>`  
@@ -99,7 +99,7 @@ flask importer run --source csv --file <path> --inline --summary-json
 - **Runs dashboard filters**: `/admin/imports/runs/dashboard` now includes an "Include dry runs" checkbox. Disable it to hide simulations from aggregate stats.
 - **Remediation stats**: DQ inbox fetches remediation outcomes from `GET /admin/imports/remediation/stats?days=<N>`; useful for tracking steward effectiveness.
 - **Runs stats API**: `GET /importer/runs/stats?include_dry_runs=0` surfaces aggregate counts for monitoring dashboards.
-- **Data Quality Dashboard**: Access at `/admin/data-quality` to monitor field-level completeness across all entities. Features include overall health score, entity-level metrics, field-level completeness tables, organization filtering, and CSV/JSON export. Metrics are cached for 5 minutes; click "Refresh" to reload. See `docs/data-quality-dashboard.md` for detailed documentation.
+- **Data Quality Dashboard**: Access at `/admin/data-quality` to monitor field-level completeness across all entities. Features include overall health score, entity-level metrics, field-level completeness tables, organization filtering, and CSV/JSON export. Metrics are cached for 5 minutes; click "Refresh" to reload. See `docs/reference/data-quality/data-quality-dashboard.md` for detailed documentation.
 
 ### Performance Considerations
 

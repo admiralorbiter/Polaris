@@ -106,8 +106,8 @@
 ---
 
 **Related Documents**:
-- `docs/data-integration-platform-tech-doc.md` — Full backlog and Sprint 1 completion status
-- `docs/importer-feature-flag.md` — Configuration and troubleshooting
-- `docs/commands.md` — CLI reference
+- `docs/reference/architecture/data-integration-platform-tech-doc.md` — Full backlog and Sprint 1 completion status
+- `docs/operations/importer-feature-flag.md` — Configuration and troubleshooting
+- `docs/operations/commands.md` — CLI reference
 - `ops/testdata/importer_golden_dataset_v0/README.md` — Golden dataset documentation
 

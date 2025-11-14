@@ -115,7 +115,7 @@ Use undo when a merge was incorrect or premature.
 
 ## 10. Reference Materials
 
-- [Sprint 5 Survivorship & Threshold Decisions](./sprint5-survivorship-decisions.md)
+- [Sprint 5 Survivorship & Threshold Decisions](../sprints/sprint5-survivorship-decisions.md)
 - [Golden Dataset Fuzzy Scenarios](../ops/testdata/importer_golden_dataset_v0/README.md)
 - Importer Tech Doc — Sprint 5 section for implementation roadmap.
 
