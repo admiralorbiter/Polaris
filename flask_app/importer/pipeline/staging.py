@@ -138,9 +138,9 @@ def resolve_source_record_id(external_id: object | None, sequence_number: int) -
     return str(external_id)
 
 
-def update_staging_counts(import_run: ImportRun, summary: StagingSummary, *, csv_field_stats: dict[str, dict[str, int]] | None = None) -> None:
+def update_staging_counts(import_run: ImportRun, summary: StagingSummary, *, csv_field_stats: dict[str, dict[str, int]] | None = None, entity_type: str = "volunteers") -> None:
     counts = dict(import_run.counts_json or {})
-    staging_counts = counts.setdefault("staging", {}).setdefault("volunteers", {})
+    staging_counts = counts.setdefault("staging", {}).setdefault(entity_type, {})
     staging_counts.update(
         {
             "rows_processed": summary.rows_processed,

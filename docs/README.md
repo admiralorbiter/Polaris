@@ -103,9 +103,11 @@ docs/
 All Salesforce-related documentation is grouped in `reference/salesforce/`:
 
 - **[Mapping Guide](reference/salesforce/salesforce-mapping-guide.md)** - Architecture and how to extend mappings
+- **[Adding Entity Types Guide](reference/salesforce/adding-entity-types-guide.md)** - How to add new entity types (learnings from organizations)
 - **[Transforms Reference](reference/salesforce/salesforce-transforms-reference.md)** - Available transform functions
 - **[Mapping Examples](reference/salesforce/salesforce-mapping-examples.md)** - Real-world examples and recipes
-- **[Field Mapping Summary](reference/salesforce/salesforce-field-mapping-summary.md)** - Where each field is stored
+- **[Field Mapping Summary](reference/salesforce/salesforce-field-mapping-summary.md)** - Contact/Volunteer field mappings
+- **[Organization Field Mapping Summary](reference/salesforce/salesforce-organization-field-mapping-summary.md)** - Organization/Account field mappings
 - **[Fields Location Guide](reference/salesforce/salesforce-fields-location-guide.md)** - Field location reference
 - **[Gap Analysis](reference/salesforce/salesforce-mapping-gap-analysis.md)** - Missing fields and implementation priorities
 - **[Testing Checklist](reference/salesforce/salesforce-mapping-testing-checklist.md)** - Testing guidance

@@ -432,7 +432,7 @@ def _update_import_run_accounts(import_run: ImportRun, summary: SalesforceIngest
         dry_run=summary.dry_run,
         dry_run_rows=(),
     )
-    update_staging_counts(import_run, staging_summary)
+    update_staging_counts(import_run, staging_summary, entity_type="organizations")
     metrics = dict(import_run.metrics_json or {})
     salesforce_metrics = metrics.setdefault("salesforce", {})
     salesforce_metrics.update(

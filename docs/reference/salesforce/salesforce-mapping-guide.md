@@ -309,7 +309,11 @@ def _build_transform_registry() -> Dict[str, Any]:
 
 ## 4. Horizontal Scaling: Adding Salesforce Objects
 
-While Sprint 4 implemented Contacts, the architecture supports additional objects (Campaign, CampaignMember, Event). To onboard a new object, you must implement the full pipeline.
+While Sprint 4 implemented Contacts (Volunteers), the architecture supports additional objects. As of November 2025, the system supports:
+- **Contacts** (Volunteers) - Fully implemented
+- **Accounts** (Organizations) - Fully implemented
+
+Future objects (Campaign, CampaignMember, Event) can follow the same pattern. To onboard a new object, you must implement the full pipeline. See [Adding New Entity Types to the Importer](adding-entity-types-guide.md) for detailed learnings from the organization implementation.
 
 ### 4.1 Complete Workflow: Adding a New Salesforce Object
 

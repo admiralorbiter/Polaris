@@ -30,11 +30,12 @@ from flask_app.models.importer.schema import (
     ImportSkipType,
     ImporterWatermark,
     StagingOrganization,
+    StagingRecordStatus,
 )
 from flask_app.models.organization import Organization
 from flask_app.models.contact.enums import OrganizationType
 
-ENTITY_TYPE = "salesforce_account"
+ENTITY_TYPE = "salesforce_organization"
 DELETE_REASON = "salesforce_is_deleted"
 
 
@@ -103,11 +104,18 @@ class SalesforceOrganizationLoader:
             return clean_rows
 
         # Fallback for unit tests that invoke the loader without running the clean promotion step.
+        # Only use fallback if there are validated staging rows but no clean rows (clean promotion wasn't run)
         staging_rows = self._snapshot_staging_rows()
+        validated_staging = [r for r in staging_rows if r.status == StagingRecordStatus.VALIDATED]
+        if not validated_staging:
+            # No validated staging rows, return empty list
+            return []
+        
         fallback_rows: list[SimpleNamespace] = []
-        for row in staging_rows:
+        for row in validated_staging:
             payload = dict(row.normalized_json or row.payload_json or {})
-            name = payload.get("name") or payload.get("Name") or payload.get("external_id") or "Salesforce Organization"
+            # Use actual name from payload, don't default (clean promotion would have skipped if name was required)
+            name = payload.get("name") or payload.get("Name") or ""
             fallback_rows.append(
                 SimpleNamespace(
                     payload_json=payload,
@@ -117,6 +125,7 @@ class SalesforceOrganizationLoader:
                     load_action=None,
                     core_organization_id=None,
                     external_system=row.external_system,
+                    staging_organization_id=row.id,
                 )
             )
         return fallback_rows
@@ -170,6 +179,27 @@ class SalesforceOrganizationLoader:
     def _handle_create(self, external_id: str, payload: Mapping[str, object], payload_hash: str, clean_row: CleanOrganization) -> str:
         name = clean_row.name or payload.get("name") or ""
         if not name:
+            # Record skip for missing name
+            staging_organization_id = None
+            clean_organization_id = None
+            if hasattr(clean_row, 'staging_organization_id'):
+                staging_organization_id = clean_row.staging_organization_id
+            elif hasattr(clean_row, 'staging_row') and clean_row.staging_row:
+                staging_organization_id = clean_row.staging_row.id if hasattr(clean_row.staging_row, 'id') else None
+            if hasattr(clean_row, 'id'):
+                clean_organization_id = clean_row.id
+            
+            _record_import_skip(
+                self.session,
+                self.run.id,
+                ImportSkipType.MISSING_REQUIRED_FIELD,
+                "Organization name is required.",
+                staging_organization_id=staging_organization_id,
+                clean_organization_id=clean_organization_id,
+                entity_type="organization",
+                record_key=external_id,
+                details_json={"external_id": external_id, "missing_field": "name"},
+            )
             return "unchanged"
         
         # Check for duplicate name (case-insensitive)
