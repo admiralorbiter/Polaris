@@ -79,47 +79,6 @@
             {% endif %}
         </div>
     </div>
-
-    <!-- Recent Actions -->
-    {% if stats.recent_actions %}
-    <div class="recent-actions">
-        <h2>Recent Admin Actions</h2>
-        <div class="table-responsive">
-            <table class="table table-striped">
-                <thead>
-                    <tr>
-                        <th>Time</th>
-                        <th>Action</th>
-                        <th>Target User</th>
-                        <th>Details</th>
-                        <th>IP Address</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for action in stats.recent_actions %}
-                    <tr>
-                        <td>{{ action.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                        <td>
-                            <span class="badge badge-{{ 'success' if action.action == 'CREATE_USER' else 'warning' if action.action == 'UPDATE_USER' else 'danger' }}">
-                                {{ action.action.replace('_', ' ').title() }}
-                            </span>
-                        </td>
-                        <td>
-                            {% if action.target_user_id %}
-                                User #{{ action.target_user_id }}
-                            {% else %}
-                                N/A
-                            {% endif %}
-                        </td>
-                        <td>{{ action.details or 'N/A' }}</td>
-                        <td>{{ action.ip_address or 'N/A' }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
-    {% endif %}
 </div>
 {% endblock %}
 
