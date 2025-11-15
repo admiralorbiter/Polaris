@@ -20,13 +20,15 @@
 - `flask importer retry --run-id <id>`  
   Retry a failed or pending run using stored parameters. Requires the original upload file to still exist.
 - `flask importer run-salesforce --run-id <id>`  
-  Queue the Salesforce ingest task for an existing import run (CLI-friendly helper while the UI trigger is pending). The entity type (contacts, organizations, or affiliations) is determined from the import run's `ingest_params_json`.
+  Queue the Salesforce ingest task for an existing import run (CLI-friendly helper while the UI trigger is pending). The entity type (contacts, organizations, affiliations, or events) is determined from the import run's `ingest_params_json`.
 - `celery -A app.celery call importer.pipeline.ingest_salesforce_contacts --kwargs '{"run_id": 42}'`  
   Queue a Bulk API Salesforce contact ingest for run 42 (adapter must be enabled and optional requirements installed).
 - `celery -A app.celery call importer.pipeline.ingest_salesforce_accounts --kwargs '{"run_id": 42}'`  
   Queue a Bulk API Salesforce organization (Account) ingest for run 42.
 - `celery -A app.celery call importer.pipeline.ingest_salesforce_affiliations --kwargs '{"run_id": 42}'`  
   Queue a Bulk API Salesforce affiliation (npe5__Affiliation__c) ingest for run 42. Note: Affiliations import requires contacts and organizations to be imported first.
+- `celery -A app.celery call importer.pipeline.ingest_salesforce_sessions --kwargs '{"run_id": 42}'`  
+  Queue a Bulk API Salesforce event (Session__c) ingest for run 42. Events can be imported independently, but linking to organizations requires organizations to be imported first.
 
 ### Adapter Diagnostics
 - `flask importer adapters list`  

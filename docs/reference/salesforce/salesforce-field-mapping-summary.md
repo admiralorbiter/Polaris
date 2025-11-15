@@ -221,3 +221,112 @@ If you find that any Salesforce field is not being mapped correctly, or if you n
 1. Update `config/mappings/salesforce_contact_v1.yaml` to add the field mapping
 2. If needed, add a transform function in `flask_app/importer/mapping/__init__.py`
 3. Update the loader in `flask_app/importer/pipeline/salesforce_loader.py` to store the field in the appropriate location
+
+## Events (Session__c)
+
+**Note**: Events are imported from the Salesforce `Session__c` object as a separate import type.
+
+**Import Prerequisites**: Events import can be run independently, but linking events to organizations requires organizations to be imported first.
+
+**Filtering**: By default, the event import excludes sessions where `Session_Status__c = 'Draft'` and `Session_Type__c = 'Connector Session'`.
+
+### Event Field Mappings
+
+| Salesforce Field | Target Location | Storage | Transform |
+|-----------------|----------------|---------|-----------|
+| `Id` | `external_id` | Used for `ExternalIdMap.external_id` (entity_type="salesforce_event") | |
+| `Name` | `title` | `Event.title` (required) | |
+| `Description__c` | `description` | `Event.description` | |
+| `Session_Type__c` | `event_type` | `Event.event_type` (enum) | `normalize_session_type` |
+| `Session_Status__c` | `event_status` | `Event.event_status` (enum) | `normalize_session_status` |
+| `Format__c` | `event_format` | `Event.event_format` (enum) | `normalize_event_format` |
+| `Start_Date_and_Time__c` | `start_date` | `Event.start_date` (datetime, required) | `parse_datetime` |
+| `End_Date_and_Time__c` | `end_date` | `Event.end_date` (datetime) | `parse_datetime` |
+| `Location_Information__c` | `location_address` | `Event.location_address` | |
+| `Available_Slots__c` | `capacity` | `Event.capacity` (integer) | |
+| `Cancellation_Reason__c` | `cancellation_reason` | `Event.cancellation_reason` (enum) | `normalize_cancellation_reason` |
+| `District__c` | `metadata.district_id` | `ExternalIdMap.metadata_json["district_id"]` | |
+| `School__c` | `metadata.school_id` | `ExternalIdMap.metadata_json["school_id"]` | |
+| `Parent_Account__c` | `metadata.parent_account_id` | `ExternalIdMap.metadata_json["parent_account_id"]` | |
+| `Total_Requested_Volunteer_Jobs__c` | `metadata.total_requested_volunteer_jobs` | `ExternalIdMap.metadata_json["total_requested_volunteer_jobs"]` | |
+| `Non_Scheduled_Students_Count__c` | `metadata.non_scheduled_students_count` | `ExternalIdMap.metadata_json["non_scheduled_students_count"]` | |
+| `Legacy_Skill_Covered_for_the_Session__c` | `metadata.legacy_skill_covered` | `ExternalIdMap.metadata_json["legacy_skill_covered"]` | |
+| `Legacy_Skills_Needed__c` | `metadata.legacy_skills_needed` | `ExternalIdMap.metadata_json["legacy_skills_needed"]` | |
+| `Requested_Skills__c` | `metadata.requested_skills` | `ExternalIdMap.metadata_json["requested_skills"]` | |
+| `Additional_Information__c` | `metadata.additional_information` | `ExternalIdMap.metadata_json["additional_information"]` | |
+| `Session_Host__c` | `metadata.session_host` | `ExternalIdMap.metadata_json["session_host"]` | |
+| `SystemModstamp` | `metadata.source_modstamp` | Used for watermarking | `parse_datetime` |
+| `LastModifiedDate` | `metadata.source_last_modified` | `ExternalIdMap.metadata_json["source_last_modified"]` | `parse_datetime` |
+
+### Event Type Transform
+
+Maps Salesforce `Session_Type__c` values to `EventType` enum:
+- `Campus Visit` → `COMMUNITY_EVENT`
+- `Career Speaker` → `WORKSHOP`
+- `Workplace Visit` → `WORKPLACE_VISIT`
+- `HealthStart` → `HEALTH_START`
+- `Career Fair` → `CAREER_FAIR`
+- `BFI` → `BFI`
+- And other mappings (see `normalize_session_type` function)
+
+### Event Status Transform
+
+Maps Salesforce `Session_Status__c` values to `EventStatus` enum:
+- `Confirmed` → `CONFIRMED`
+- `Cancelled` → `CANCELLED`
+- `Completed` → `COMPLETED`
+- And other mappings (see `normalize_session_status` function)
+
+### Event Format Transform
+
+Maps Salesforce `Format__c` values to `EventFormat` enum:
+- `In-Person` → `IN_PERSON`
+- `Virtual` → `VIRTUAL`
+- `Hybrid` → `HYBRID`
+- And other mappings (see `normalize_event_format` function)
+
+### Event Duration Calculation
+
+Event duration is automatically calculated from `start_date` and `end_date` during ingestion:
+- Duration is stored in minutes in `Event.duration`
+- If `end_date` is missing, duration is set to `None`
+
+### Data Flow for Events
+
+1. **Extract**: Raw Salesforce data → `staging_events.payload_json`
+2. **Transform**: Normalized data → `staging_events.normalized_json` and `clean_events.payload_json`
+3. **Load**: Core database model (`events`)
+
+### Event Storage Locations
+
+1. **`events`** - Core event information
+   - Title, description, dates, location, capacity
+   - Event type, status, format
+   - Cancellation reason
+   - Duration (calculated)
+
+2. **`event_organizations`** - Event-organization relationships
+   - Links events to organizations (if organizations are imported)
+
+3. **`external_id_map`** - External ID tracking
+   - `external_system = "salesforce"`
+   - `external_id = Session__c.Id`
+   - `entity_type = "salesforce_event"`
+   - `entity_id`: Polaris Event ID
+   - `metadata_json`: Additional Salesforce fields
+
+4. **`staging_events`** - Raw imported data
+   - `payload_json`: Original Salesforce payload
+   - `normalized_json`: Canonical payload after transformation
+
+5. **`clean_events`** - Validated data ready for core load
+   - `payload_json`: Canonical payload
+   - `checksum`: For change detection
+   - `load_action`: `created`, `updated`, `unchanged`, `skipped_duplicate`
+
+### Event Deduplication
+
+Events use **title and date-based deduplication**:
+- Exact match on title (case-insensitive)
+- Same start date
+- If duplicate found, event is linked to existing record via `ExternalIdMap`

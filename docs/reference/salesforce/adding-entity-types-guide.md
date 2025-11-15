@@ -1,10 +1,10 @@
 # Adding New Entity Types to the Importer
 
-This guide documents the process and learnings from adding Organization (Account) imports to the Polaris importer. Use this as a reference when adding new entity types (Events, Signups, etc.) to the system.
+This guide documents the process and learnings from adding Organization (Account) and Event (Session) imports to the Polaris importer. Use this as a reference when adding new entity types (Signups, etc.) to the system.
 
 ## Overview
 
-The importer follows an **E-L-T-L** (Extract → Load → Transform → Load) pattern that is consistent across all entity types. This guide walks through the complete implementation process using Organizations as a concrete example.
+The importer follows an **E-L-T-L** (Extract → Load → Transform → Load) pattern that is consistent across all entity types. This guide walks through the complete implementation process using Organizations as a concrete example. Events (Sessions) have also been implemented and follow the same pattern.
 
 ## Table of Contents
 
@@ -133,10 +133,10 @@ def build_accounts_soql(
     field_list = tuple(dict.fromkeys(fields or DEFAULT_ACCOUNT_FIELDS))
     select_clause = ", ".join(field_list)
     where_clauses: List[str] = []
-    
+
     # Add filtering logic (e.g., exclude certain types)
     where_clauses.append("Type NOT IN ('Household', 'School District', 'School')")
-    
+
     if last_modstamp is not None:
         where_clauses.append(f"SystemModstamp > {_format_modstamp(last_modstamp)}")
 
@@ -160,7 +160,7 @@ def build_accounts_soql(
 ```python
 class StagingOrganization(BaseModel):
     __tablename__ = "staging_organizations"
-    
+
     id: Mapped[int] = mapped_column(db.Integer, primary_key=True, autoincrement=True)
     run_id: Mapped[int] = mapped_column(
         ForeignKey("import_runs.id", ondelete="CASCADE"),
@@ -248,15 +248,15 @@ def ingest_salesforce_accounts(
     record_limit: int | None = None,
 ) -> SalesforceIngestSummary:
     """Stream Salesforce Accounts into staging and update watermark metadata."""
-    
+
     last_modstamp = watermark.last_successful_modstamp
     if last_modstamp is not None and last_modstamp.tzinfo is None:
         last_modstamp = last_modstamp.replace(tzinfo=timezone.utc)
-    
+
     soql = build_accounts_soql(last_modstamp=last_modstamp, limit=record_limit)
     mapping_spec = get_active_salesforce_account_mapping()
     transformer = SalesforceMappingTransformer(mapping_spec)
-    
+
     # Process batches, transform, and stage records
     # ... (see full implementation in codebase)
 ```
@@ -280,7 +280,7 @@ def normalize_organization_type(value: Any) -> str | None:
     text = str(value).strip().lower()
     if not text:
         return None
-    
+
     mapping = {
         "business": "business",
         "non-profit": "non_profit",
@@ -288,16 +288,16 @@ def normalize_organization_type(value: Any) -> str | None:
         "government": "government",
         # ... more mappings
     }
-    
+
     normalized = mapping.get(text)
     if normalized:
         return normalized
-    
+
     # Fuzzy matching for partial matches
     for key, enum_value in mapping.items():
         if key in text or text in key:
             return enum_value
-    
+
     return "other"  # Default
 
 def _build_transform_registry() -> Dict[str, Any]:
@@ -321,10 +321,10 @@ def _build_transform_registry() -> Dict[str, Any]:
 ```python
 class OrganizationNameRequiredRule(DQRule):
     """Organization name is required."""
-    
+
     code = "ORG_NAME_REQUIRED"
     severity = DQSeverity.ERROR
-    
+
     def evaluate(self, payload: MutableMapping[str, object | None]) -> DQResult | None:
         name = payload.get("name")
         if not name or not str(name).strip():
@@ -350,7 +350,7 @@ def evaluate_organization_rules(
 
 def run_minimal_dq(import_run, *, dry_run: bool = False, csv_rows=None) -> DQProcessingSummary:
     # ... existing volunteer processing ...
-    
+
     # Process organizations
     org_rows = (
         session.query(StagingOrganization)
@@ -360,7 +360,7 @@ def run_minimal_dq(import_run, *, dry_run: bool = False, csv_rows=None) -> DQPro
         )
         .order_by(StagingOrganization.sequence_number)
     )
-    
+
     for row in org_rows:
         rows_evaluated += 1
         payload = _compose_organization_payload(row)
@@ -444,7 +444,7 @@ class CleanOrganization(BaseModel):
 ```python
 def promote_clean_organizations(import_run, *, dry_run: bool = False) -> CleanPromotionSummary:
     """Promote validated staging organizations into the clean layer."""
-    
+
     session = db.session
     rows = (
         session.query(StagingOrganization)
@@ -454,7 +454,7 @@ def promote_clean_organizations(import_run, *, dry_run: bool = False) -> CleanPr
         )
         .order_by(StagingOrganization.sequence_number)
     )
-    
+
     # ... create CleanOrganization records ...
 ```
 
@@ -471,26 +471,26 @@ def promote_clean_organizations(import_run, *, dry_run: bool = False) -> CleanPr
 ```python
 class SalesforceOrganizationLoader:
     """Two-phase loader that reconciles Salesforce Accounts into core Organization tables."""
-    
+
     def __init__(self, run: ImportRun, session: Session | None = None):
         self.run = run
         self.session = session or db.session
-    
+
     def execute(self) -> LoaderCounters:
         clean_rows = self._snapshot_clean_rows()
         counters = LoaderCounters()
-        
+
         with self._transaction():
             for clean_row in clean_rows:
                 action = self._apply_row(clean_row)
                 # ... update counters ...
-            
+
             self._advance_watermark(all_staging_rows)
             self.run.status = ImportRunStatus.SUCCEEDED
             self._persist_counters(counters)
-        
+
         return counters
-    
+
     def _apply_row(self, clean_row: CleanOrganization) -> str:
         # 1. Get ExternalIdMap entry
         # 2. Check for duplicates (name-based for organizations)
@@ -521,7 +521,7 @@ def ingest_salesforce_accounts(
     record_limit: int | None = None,
 ) -> dict[str, object]:
     """Execute the Salesforce Account (Organization) ingest pipeline."""
-    
+
     run = db.session.get(ImportRun, run_id)
     # ... orchestrate full pipeline ...
     # 1. Extract and stage
@@ -555,7 +555,7 @@ def run_salesforce(entity_type: str | None = None):
 
 ### Step 12: Update UI
 
-**Files**: 
+**Files**:
 - `templates/admin/importer.html`
 - `static/js/importer.js`
 - `flask_app/routes/admin_importer.py`
@@ -718,14 +718,14 @@ def test_loader_creates_organization(app):
     payload = _make_payload("001")
     payload["name"] = "Test Org"
     _add_staging_row(run, 1, payload)
-    
+
     # Promote to clean
     promote_clean_organizations(run, dry_run=False)
-    
+
     # Execute loader
     loader = SalesforceOrganizationLoader(run)
     counters = loader.execute()
-    
+
     assert counters.created == 1
     entry = ExternalIdMap.query.filter_by(
         external_system="salesforce",
@@ -741,5 +741,6 @@ def test_loader_creates_organization(app):
 - [Salesforce Mapping Guide](salesforce-mapping-guide.md) - General mapping documentation
 - [Salesforce Field Mapping Summary](salesforce-field-mapping-summary.md) - Field-level documentation
 - `config/mappings/salesforce_account_v1.yaml` - Organization mapping example
-- `flask_app/importer/pipeline/salesforce_organization_loader.py` - Loader implementation example
-
+- `config/mappings/salesforce_session_v1.yaml` - Event mapping example
+- `flask_app/importer/pipeline/salesforce_organization_loader.py` - Organization loader implementation example
+- `flask_app/importer/pipeline/salesforce_event_loader.py` - Event loader implementation example

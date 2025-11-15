@@ -312,8 +312,9 @@ def _build_transform_registry() -> Dict[str, Any]:
 While Sprint 4 implemented Contacts (Volunteers), the architecture supports additional objects. As of November 2025, the system supports:
 - **Contacts** (Volunteers) - Fully implemented
 - **Accounts** (Organizations) - Fully implemented
+- **Sessions** (Events) - Fully implemented
 
-Future objects (Campaign, CampaignMember, Event) can follow the same pattern. To onboard a new object, you must implement the full pipeline. See [Adding New Entity Types to the Importer](adding-entity-types-guide.md) for detailed learnings from the organization implementation.
+Future objects (Campaign, CampaignMember) can follow the same pattern. To onboard a new object, you must implement the full pipeline. See [Adding New Entity Types to the Importer](adding-entity-types-guide.md) for detailed learnings from the organization and event implementations.
 
 ### 4.1 Complete Workflow: Adding a New Salesforce Object
 
@@ -414,11 +415,11 @@ class CleanEvent(db.Model):
 ```python
 class SalesforceEventLoader:
     """Two-phase loader for Salesforce Events."""
-    
+
     def __init__(self, run: ImportRun, session: Session | None = None):
         self.run = run
         self.session = session or db.session
-    
+
     def execute(self) -> LoaderCounters:
         # 1. Snapshot clean rows
         # 2. Apply create/update/delete logic
@@ -708,7 +709,7 @@ def _build_transform_registry() -> Dict[str, Any]:
         if not value:
             return []
         return [v.strip() for v in str(value).split(';') if v.strip()]
-    
+
     return {
         # ... existing transforms ...
         "split_semicolon": split_semicolon,
@@ -728,7 +729,7 @@ class Volunteer(Contact):
 # flask_app/importer/pipeline/salesforce_loader.py
 def _handle_update(self, entry, payload, payload_hash, clean_row):
     # ... existing code ...
-    
+
     # Apply skills
     if "skills" in payload:
         skills = payload.get("skills", {})

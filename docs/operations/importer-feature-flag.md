@@ -13,7 +13,7 @@ This note summarizes the IMP-1 work that makes the importer package optional and
   ```
 - Optional dependencies: install adapter extras with `pip install ".[importer-salesforce]"` (or consume `requirements-optional.txt`) when enabling adapters that require third-party libraries. The extras keep the base image slim while allowing opt-in installs.
 - `IMPORTER_SALESFORCE_DOC_URL` / `IMPORTER_CSV_DOC_URL`: optional URLs surfaced in the admin Adapter Availability card so operators can jump to setup guides. Defaults point to Polaris internal docs.
-- `IMPORTER_SALESFORCE_OBJECTS`: comma-separated Salesforce object list we expose (currently only `contacts` is supported; defaults accordingly).
+- `IMPORTER_SALESFORCE_OBJECTS`: comma-separated Salesforce object list we expose (currently supports `contacts`, `organizations`, `affiliations`, and `events`; defaults accordingly).
 - `IMPORTER_SALESFORCE_BATCH_SIZE`: Bulk API 2.0 query batch size; defaults to `5000` (minimum enforced at `1000`).
 - `IMPORTER_SALESFORCE_MAPPING_PATH`: path to the active Salesforce→Volunteer mapping YAML (defaults to `config/mappings/salesforce_contact_v1.yaml`).
 - `IMPORTER_UPLOAD_DIR`: optional path where uploaded files are staged for the worker (defaults to `instance/import_uploads`); accepts absolute or instance-relative values.
@@ -113,4 +113,3 @@ Before starting Sprint 2 work, verify Sprint 1 completion:
 - `docs/reference/architecture/data-integration-platform-overview.md` (§10 Optionality & Packaging) references flags and packaging guidance.
 - `docs/reference/architecture/data-integration-platform-tech-doc.md` (IMP-1 story) notes the environment defaults and docs requirement.
 - `docs/operations/commands.md` provides CLI command reference and usage examples.
-
