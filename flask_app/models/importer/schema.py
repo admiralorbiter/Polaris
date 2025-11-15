@@ -86,6 +86,12 @@ class ImportRun(BaseModel):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+    staging_events = relationship(
+        "StagingEvent",
+        back_populates="import_run",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
     dq_violations = relationship(
         "DataQualityViolation",
         back_populates="import_run",
@@ -106,6 +112,12 @@ class ImportRun(BaseModel):
     )
     clean_affiliations = relationship(
         "CleanAffiliation",
+        back_populates="import_run",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    clean_events = relationship(
+        "CleanEvent",
         back_populates="import_run",
         cascade="all, delete-orphan",
         passive_deletes=True,
@@ -377,6 +389,79 @@ class StagingAffiliation(BaseModel):
     )
 
 
+class StagingEvent(BaseModel):
+    """
+    Raw event payloads staged during an import run.
+
+    Rows contain both the original payload and optional normalized data. DQ
+    processing moves rows from `LANDED` to `VALIDATED`/`QUARANTINED`.
+    """
+
+    __tablename__ = "staging_events"
+
+    id: Mapped[int] = mapped_column(db.Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("import_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    sequence_number: Mapped[int | None] = mapped_column(db.Integer, nullable=True)
+    source_record_id: Mapped[str | None] = mapped_column(db.String(255), nullable=True)
+    external_system: Mapped[str] = mapped_column(db.String(100), nullable=False)
+    external_id: Mapped[str | None] = mapped_column(db.String(255), nullable=True)
+    payload_json: Mapped[dict] = mapped_column(db.JSON, nullable=False)
+    normalized_json: Mapped[dict | None] = mapped_column(db.JSON, nullable=True)
+    checksum: Mapped[str | None] = mapped_column(db.String(64), nullable=True, index=True)
+    status: Mapped[StagingRecordStatus] = mapped_column(
+        Enum(StagingRecordStatus, name="staging_event_status_enum"),
+        default=StagingRecordStatus.LANDED,
+        nullable=False,
+        index=True,
+    )
+    last_error: Mapped[str | None] = mapped_column(db.Text, nullable=True)
+    landed_at: Mapped[datetime] = mapped_column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    processed_at: Mapped[datetime | None] = mapped_column(db.DateTime(timezone=True))
+
+    import_run = relationship("ImportRun", back_populates="staging_events")
+    dq_violations = relationship(
+        "DataQualityViolation",
+        back_populates="staging_event",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    clean_record = relationship(
+        "CleanEvent",
+        back_populates="staging_row",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        uselist=False,
+    )
+    import_skips = relationship(
+        "ImportSkip",
+        back_populates="staging_event",
+        primaryjoin="StagingEvent.id == ImportSkip.staging_event_id",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    __table_args__ = (
+        Index(
+            "idx_staging_events_external_key",
+            "external_system",
+            "external_id",
+        ),
+        UniqueConstraint(
+            "run_id",
+            "sequence_number",
+            name="uq_staging_events_run_sequence",
+        ),
+    )
+
+
 class DataQualitySeverity(str, enum.Enum):
     """Severity tier for data quality rules."""
 
@@ -419,6 +504,11 @@ class DataQualityViolation(BaseModel):
         nullable=True,
         index=True,
     )
+    staging_event_id: Mapped[int | None] = mapped_column(
+        ForeignKey("staging_events.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     entity_type: Mapped[str] = mapped_column(db.String(50), nullable=False, default="volunteer")
     record_key: Mapped[str | None] = mapped_column(db.String(255), nullable=True)
     rule_code: Mapped[str] = mapped_column(db.String(50), nullable=False)
@@ -452,6 +542,7 @@ class DataQualityViolation(BaseModel):
     staging_affiliation = relationship(
         "StagingAffiliation", back_populates="dq_violations", foreign_keys=[staging_affiliation_id]
     )
+    staging_event = relationship("StagingEvent", back_populates="dq_violations", foreign_keys=[staging_event_id])
     remediated_by_user = relationship("User", foreign_keys=[remediated_by_user_id])
 
     __table_args__ = (Index("idx_dq_violations_run_rule", "run_id", "rule_code"),)
@@ -495,6 +586,11 @@ class ImportSkip(BaseModel):
         nullable=True,
         index=True,
     )
+    staging_event_id: Mapped[int | None] = mapped_column(
+        ForeignKey("staging_events.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     clean_volunteer_id: Mapped[int | None] = mapped_column(
         ForeignKey("clean_volunteers.id", ondelete="CASCADE"),
         nullable=True,
@@ -507,6 +603,11 @@ class ImportSkip(BaseModel):
     )
     clean_affiliation_id: Mapped[int | None] = mapped_column(
         ForeignKey("clean_affiliations.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    clean_event_id: Mapped[int | None] = mapped_column(
+        ForeignKey("clean_events.id", ondelete="CASCADE"),
         nullable=True,
         index=True,
     )
@@ -534,6 +635,7 @@ class ImportSkip(BaseModel):
     staging_affiliation = relationship(
         "StagingAffiliation", back_populates="import_skips", foreign_keys=[staging_affiliation_id]
     )
+    staging_event = relationship("StagingEvent", back_populates="import_skips", foreign_keys=[staging_event_id])
     clean_row = relationship("CleanVolunteer", back_populates="import_skips", foreign_keys=[clean_volunteer_id])
     clean_organization = relationship(
         "CleanOrganization", back_populates="import_skips", foreign_keys=[clean_organization_id]
@@ -541,6 +643,7 @@ class ImportSkip(BaseModel):
     clean_affiliation = relationship(
         "CleanAffiliation", back_populates="import_skips", foreign_keys=[clean_affiliation_id]
     )
+    clean_event = relationship("CleanEvent", back_populates="import_skips", foreign_keys=[clean_event_id])
 
     __table_args__ = (
         Index("idx_import_skips_run_type", "run_id", "skip_type"),
@@ -690,6 +793,53 @@ class CleanAffiliation(BaseModel):
             "run_id",
             "staging_affiliation_id",
             name="uq_clean_affiliations_run_staging",
+        ),
+    )
+
+
+class CleanEvent(BaseModel):
+    """Normalized event rows promoted from staging prior to core load."""
+
+    __tablename__ = "clean_events"
+
+    id: Mapped[int] = mapped_column(db.Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("import_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    staging_event_id: Mapped[int | None] = mapped_column(
+        ForeignKey("staging_events.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    external_system: Mapped[str] = mapped_column(db.String(100), nullable=False, index=True)
+    external_id: Mapped[str | None] = mapped_column(db.String(255), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(db.String(255), nullable=False)
+    checksum: Mapped[str | None] = mapped_column(db.String(64), nullable=True, index=True)
+    payload_json: Mapped[dict] = mapped_column(db.JSON, nullable=False)
+    promoted_at: Mapped[datetime] = mapped_column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    load_action: Mapped[str | None] = mapped_column(db.String(50), nullable=True)
+    core_event_id: Mapped[int | None] = mapped_column(db.Integer, nullable=True, index=True)
+
+    import_run = relationship("ImportRun", back_populates="clean_events")
+    staging_row = relationship("StagingEvent", back_populates="clean_record")
+    import_skips = relationship(
+        "ImportSkip",
+        back_populates="clean_event",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "staging_event_id",
+            name="uq_clean_events_run_staging",
         ),
     )
 

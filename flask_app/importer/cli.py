@@ -467,8 +467,14 @@ def mappings_show(ctx, adapter: str):
 @click.option("--dry-run", is_flag=True, help="Execute pipeline without writing to core database.")
 @click.option("--queue", is_flag=True, help="Immediately queue the ingest task after creating the run.")
 @click.option("--limit", type=int, help="Limit the number of records to ingest for testing.")
+@click.option(
+    "--entity-type",
+    type=click.Choice(["contacts", "organizations", "affiliations", "events"], case_sensitive=False),
+    default="contacts",
+    help="Entity type to import (default: contacts).",
+)
 @click.pass_context
-def create_salesforce_run(ctx, dry_run: bool, queue: bool, limit: Optional[int]):
+def create_salesforce_run(ctx, dry_run: bool, queue: bool, limit: Optional[int], entity_type: str):
     """Create a new Salesforce import run and optionally queue it immediately."""
 
     info = ctx.ensure_object(ScriptInfo)
@@ -483,7 +489,7 @@ def create_salesforce_run(ctx, dry_run: bool, queue: bool, limit: Optional[int])
         adapter="salesforce",
         status=ImportRunStatus.PENDING,
         dry_run=dry_run,
-        notes=f"CLI-created Salesforce import run (dry_run={dry_run})",
+        notes=f"CLI-created Salesforce import run (dry_run={dry_run}, entity_type={entity_type})",
         counts_json={},
         metrics_json={},
         adapter_health_json=get_adapter_readiness(app),
@@ -491,13 +497,14 @@ def create_salesforce_run(ctx, dry_run: bool, queue: bool, limit: Optional[int])
             "source_system": "salesforce",
             "dry_run": dry_run,
             "record_limit": limit,
+            "entity_type": entity_type,
         },
     )
     db.session.add(run)
     db.session.commit()
     run_id = run.id
 
-    click.echo(f"Created Salesforce import run {run_id} (dry_run={dry_run})")
+    click.echo(f"Created Salesforce import run {run_id} (dry_run={dry_run}, entity_type={entity_type})")
 
     if queue:
         state = app.extensions.get("importer")
@@ -508,12 +515,25 @@ def create_salesforce_run(ctx, dry_run: bool, queue: bool, limit: Optional[int])
         kwargs = {"run_id": run_id}
         if limit is not None:
             kwargs["record_limit"] = limit
+
+        # Determine task based on entity_type
+        if entity_type == "contacts":
+            task_name = "importer.pipeline.ingest_salesforce_contacts"
+        elif entity_type == "organizations":
+            task_name = "importer.pipeline.ingest_salesforce_accounts"
+        elif entity_type == "affiliations":
+            task_name = "importer.pipeline.ingest_salesforce_affiliations"
+        elif entity_type == "events":
+            task_name = "importer.pipeline.ingest_salesforce_sessions"
+        else:
+            task_name = "importer.pipeline.ingest_salesforce_contacts"  # Default fallback
+
         async_result = celery_app.send_task(
-            "importer.pipeline.ingest_salesforce_contacts",
+            task_name,
             kwargs=kwargs,
         )
         task_id = getattr(async_result, "id", async_result)
-        click.echo(f"Queued Salesforce ingest for run {run_id} (task_id={task_id})")
+        click.echo(f"Queued Salesforce {entity_type} ingest for run {run_id} (task_id={task_id})")
     else:
         click.echo(f"To queue this run, use: flask importer run-salesforce --run-id {run_id}")
 
@@ -556,6 +576,8 @@ def run_salesforce(ctx, run_id: int, limit: Optional[int]):
         task_name = "importer.pipeline.ingest_salesforce_accounts"
     elif entity_type == "affiliations":
         task_name = "importer.pipeline.ingest_salesforce_affiliations"
+    elif entity_type == "events":
+        task_name = "importer.pipeline.ingest_salesforce_sessions"
     else:
         task_name = "importer.pipeline.ingest_salesforce_contacts"  # Default fallback
 
@@ -921,8 +943,9 @@ def undo_merge(ctx, merge_log_id: int, force: bool):
 @click.option("--run-id", required=True, type=int, help="ID of the import run to load clean volunteers from.")
 @click.pass_context
 def load_clean_volunteers(ctx, run_id: int):
-    """Load clean volunteers/organizations from a completed import run into core database."""
+    """Load clean volunteers/organizations/events from a completed import run into core database."""
     from flask_app.importer.pipeline.salesforce_affiliation_loader import SalesforceAffiliationLoader
+    from flask_app.importer.pipeline.salesforce_event_loader import SalesforceEventLoader
     from flask_app.importer.pipeline.salesforce_loader import SalesforceContactLoader
     from flask_app.importer.pipeline.salesforce_organization_loader import SalesforceOrganizationLoader
     from flask_app.models.importer.schema import ImportRun
@@ -955,6 +978,9 @@ def load_clean_volunteers(ctx, run_id: int):
     elif entity_type == "affiliations":
         click.echo(f"Loading clean affiliations from run {run_id}...")
         loader = SalesforceAffiliationLoader(run)
+    elif entity_type == "events":
+        click.echo(f"Loading clean events from run {run_id}...")
+        loader = SalesforceEventLoader(run)
     else:
         click.echo(f"Loading clean volunteers from run {run_id}...")
         loader = SalesforceContactLoader(run)

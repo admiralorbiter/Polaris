@@ -98,13 +98,15 @@ def _record_import_skip(
     clean_organization_id: int | None = None,
     staging_affiliation_id: int | None = None,
     clean_affiliation_id: int | None = None,
+    staging_event_id: int | None = None,
+    clean_event_id: int | None = None,
     entity_type: str = "volunteer",
     record_key: str | None = None,
     details_json: dict | None = None,
 ) -> ImportSkip:
     """
     Record a skip event for a record that passed DQ but was not created in core.
-    
+
     Args:
         session: Database session
         run_id: Import run ID
@@ -116,10 +118,12 @@ def _record_import_skip(
         clean_organization_id: Optional clean organization ID
         staging_affiliation_id: Optional staging affiliation ID
         clean_affiliation_id: Optional clean affiliation ID
+        staging_event_id: Optional staging event ID
+        clean_event_id: Optional clean event ID
         entity_type: Entity type (default: "volunteer")
         record_key: Optional record key for lookup
         details_json: Optional additional details (matched email, volunteer IDs, etc.)
-    
+
     Returns:
         Created ImportSkip record
     """
@@ -131,6 +135,8 @@ def _record_import_skip(
         clean_organization_id=clean_organization_id,
         staging_affiliation_id=staging_affiliation_id,
         clean_affiliation_id=clean_affiliation_id,
+        staging_event_id=staging_event_id,
+        clean_event_id=clean_event_id,
         entity_type=entity_type,
         skip_type=skip_type,
         skip_reason=skip_reason,
@@ -186,7 +192,7 @@ def load_core_volunteers(
             name_match = None
             if name_dedupe_enabled and candidate.first_name and candidate.last_name:
                 name_match = _name_exists_exact(candidate.first_name, candidate.last_name)
-            
+
             if email_exists:
                 rows_skipped_duplicates += 1
                 if candidate.email:
@@ -217,7 +223,7 @@ def load_core_volunteers(
 
     # Reset name lookup cache at start of import run
     _reset_name_cache()
-    
+
     clean_rows: Iterable[CleanVolunteer] = (
         session.query(CleanVolunteer).filter(CleanVolunteer.run_id == import_run.id).order_by(CleanVolunteer.id)
     )
@@ -281,7 +287,7 @@ def load_core_volunteers(
         if current_action == "create":
             # Check for email duplicate first
             email_exists = candidate.email and _email_exists(candidate.email)
-            
+
             # Check for name duplicate if enabled
             name_match_volunteer = None
             fuzzy_match_volunteers = []
@@ -289,25 +295,26 @@ def load_core_volunteers(
                 name_match_volunteer = _name_exists_exact(candidate.first_name, candidate.last_name)
                 if not name_match_volunteer:
                     # Check for fuzzy matches (threshold 0.95)
-                    fuzzy_match_volunteers = _name_exists_fuzzy(candidate.first_name, candidate.last_name, threshold=0.95)
-            
+                    fuzzy_match_volunteers = _name_exists_fuzzy(
+                        candidate.first_name, candidate.last_name, threshold=0.95
+                    )
+
             # Apply OR logic: skip if email OR name matches
             should_skip = False
             skip_reason = None
-            duplicate_type = "email"
-            
+
             if email_exists:
                 should_skip = True
                 skip_reason = "email"
-                duplicate_type = "email"
             elif name_match_volunteer and (name_dedupe_or_logic or not email_exists):
                 should_skip = True
                 skip_reason = "name"
-                duplicate_type = "name"
             elif fuzzy_match_volunteers and name_dedupe_enabled:
                 # Create DedupeSuggestion for review queue
                 for fuzzy_volunteer in fuzzy_match_volunteers[:1]:  # Only first match for now
-                    if not _suggestion_exists_for_staging(session, import_run.id, staging_row.id if staging_row else None, fuzzy_volunteer.id):
+                    if not _suggestion_exists_for_staging(
+                        session, import_run.id, staging_row.id if staging_row else None, fuzzy_volunteer.id
+                    ):
                         suggestion = DedupeSuggestion(
                             run_id=import_run.id,
                             staging_volunteer_id=staging_row.id if staging_row else None,
@@ -328,8 +335,7 @@ def load_core_volunteers(
                         session.add(suggestion)
                 should_skip = True
                 skip_reason = "fuzzy"
-                duplicate_type = "fuzzy"
-            
+
             if should_skip:
                 if skip_reason == "email":
                     rows_skipped_duplicates += 1
@@ -348,7 +354,9 @@ def load_core_volunteers(
                         staging_volunteer_id=staging_row.id if staging_row else None,
                         clean_volunteer_id=clean_row.id if clean_row else None,
                         entity_type="volunteer",
-                        record_key=f"{candidate.first_name} {candidate.last_name} ({candidate.email})" if candidate.email else f"{candidate.first_name} {candidate.last_name}",
+                        record_key=f"{candidate.first_name} {candidate.last_name} ({candidate.email})"
+                        if candidate.email
+                        else f"{candidate.first_name} {candidate.last_name}",
                         details_json={
                             "email": candidate.email,
                             "first_name": candidate.first_name,
@@ -394,7 +402,10 @@ def load_core_volunteers(
                         session,
                         import_run.id,
                         ImportSkipType.DUPLICATE_NAME,
-                        f"Duplicate name: {candidate.first_name} {candidate.last_name} (matched volunteer ID: {name_match_volunteer.id})",
+                        (
+                            f"Duplicate name: {candidate.first_name} {candidate.last_name} "
+                            f"(matched volunteer ID: {name_match_volunteer.id})"
+                        ),
                         staging_volunteer_id=staging_row.id if staging_row else None,
                         clean_volunteer_id=clean_row.id if clean_row else None,
                         entity_type="volunteer",
@@ -422,7 +433,10 @@ def load_core_volunteers(
                         session,
                         import_run.id,
                         ImportSkipType.DUPLICATE_FUZZY,
-                        f"Fuzzy name match: {candidate.first_name} {candidate.last_name} (similar to volunteer ID: {fuzzy_match_id})",
+                        (
+                            f"Fuzzy name match: {candidate.first_name} {candidate.last_name} "
+                            f"(similar to volunteer ID: {fuzzy_match_id})"
+                        ),
                         staging_volunteer_id=staging_row.id if staging_row else None,
                         clean_volunteer_id=clean_row.id if clean_row else None,
                         entity_type="volunteer",
@@ -663,26 +677,28 @@ def _normalize_name(first_name: str | None, last_name: str | None) -> tuple[str 
 _name_cache: dict[tuple[str, str], Volunteer | None] = {}
 _name_cache_session_id: int | None = None
 
+
 def _reset_name_cache():
     """Reset the name lookup cache. Call at start of each import run."""
     global _name_cache, _name_cache_session_id
     _name_cache.clear()
     _name_cache_session_id = id(db.session)
 
+
 def _name_exists_exact(first_name: str | None, last_name: str | None, use_cache: bool = True) -> Volunteer | None:
     """Check for exact name matches in Volunteer table. Returns first matching volunteer or None.
-    
+
     Uses a per-session cache to avoid repeated database queries for the same name during an import run.
     """
     global _name_cache, _name_cache_session_id
-    
+
     if not first_name or not last_name:
         return None
-    
+
     first_norm, last_norm = _normalize_name(first_name, last_name)
     if not first_norm or not last_norm:
         return None
-    
+
     # Check cache first
     cache_key = (first_norm, last_norm)
     if use_cache:
@@ -691,10 +707,10 @@ def _name_exists_exact(first_name: str | None, last_name: str | None, use_cache:
         if _name_cache_session_id != current_session_id:
             _name_cache.clear()
             _name_cache_session_id = current_session_id
-        
+
         if cache_key in _name_cache:
             return _name_cache[cache_key]
-    
+
     # Query database
     volunteer = (
         db.session.query(Volunteer)
@@ -704,11 +720,11 @@ def _name_exists_exact(first_name: str | None, last_name: str | None, use_cache:
         )
         .first()
     )
-    
+
     # Cache result
     if use_cache:
         _name_cache[cache_key] = volunteer
-    
+
     return volunteer
 
 
@@ -716,17 +732,17 @@ def _name_exists_fuzzy(first_name: str | None, last_name: str | None, threshold:
     """Check for fuzzy name matches using Jaro-Winkler similarity. Returns list of matching volunteers."""
     if not first_name or not last_name:
         return []
-    
+
     first_norm, last_norm = _normalize_name(first_name, last_name)
     if not first_norm or not last_norm:
         return []
-    
+
     # Use a more efficient approach: get volunteers with same last name and first initial
     # This narrows down candidates before computing expensive similarity scores
     first_initial = first_norm[0] if first_norm else None
     if not first_initial:
         return []
-    
+
     # Query volunteers with matching last name and first initial
     candidates = (
         db.session.query(Volunteer)
@@ -737,18 +753,15 @@ def _name_exists_fuzzy(first_name: str | None, last_name: str | None, threshold:
         .limit(50)  # Limit to avoid checking too many
         .all()
     )
-    
+
     matches = []
     for volunteer in candidates:
         if not volunteer.first_name or not volunteer.last_name:
             continue
-        similarity = compute_name_similarity(
-            first_norm, last_norm,
-            volunteer.first_name, volunteer.last_name
-        )
+        similarity = compute_name_similarity(first_norm, last_norm, volunteer.first_name, volunteer.last_name)
         if similarity >= threshold:
             matches.append(volunteer)
-    
+
     return matches
 
 
@@ -762,39 +775,40 @@ def _find_volunteer_by_name(first_name: str | None, last_name: str | None, exact
 
 
 def _merge_email_to_volunteer(volunteer_id: int, email: str | None, import_run_id: int | None = None) -> bool:
-    """Merge email into existing volunteer. Returns True if email was added, False if it already existed or was invalid."""
+    """
+    Merge email into existing volunteer.
+    Returns True if email was added, False if it already existed or was invalid.
+    """
     if not email:
         return False
-    
+
     # Normalize email
     email = email.strip().lower() if email else None
     if not email:
         return False
-    
+
     # Validate email format
     try:
-        from email_validator import validate_email, EmailNotValidError
+        from email_validator import EmailNotValidError, validate_email
+
         validate_email(email, check_deliverability=False)
     except EmailNotValidError:
         if has_app_context():
             current_app.logger.warning(f"Skipping invalid email for volunteer {volunteer_id}: {email}")
         return False
-    
+
     volunteer = db.session.get(Volunteer, volunteer_id)
     if not volunteer:
         return False
-    
+
     # Check if email already exists for this volunteer
-    existing_email = next(
-        (e for e in volunteer.emails if e.email.lower() == email.lower()),
-        None
-    )
+    existing_email = next((e for e in volunteer.emails if e.email.lower() == email.lower()), None)
     if existing_email:
         return False  # Email already exists
-    
+
     # Check if there's already a primary email
     has_primary = any(e.is_primary for e in volunteer.emails)
-    
+
     # Create new email record
     new_email = ContactEmail(
         contact_id=volunteer_id,
@@ -805,14 +819,16 @@ def _merge_email_to_volunteer(volunteer_id: int, email: str | None, import_run_i
     )
     volunteer.emails.append(new_email)
     db.session.add(new_email)
-    
+
     # Log the merge action
     if has_app_context() and import_run_id:
         current_app.logger.info(
             "Importer run %s merged email %s into volunteer %s (name-based duplicate)",
-            import_run_id, email, volunteer_id
+            import_run_id,
+            email,
+            volunteer_id,
         )
-    
+
     return True
 
 
@@ -860,11 +876,12 @@ def _update_core_counts(
     reactivated_count = summary.rows_reactivated if not summary.dry_run else 0
     changed_count = summary.rows_changed if not summary.dry_run else 0
     deduped_count = summary.rows_deduped_auto if not summary.dry_run else 0
-    
+
     # Calculate skip counts from ImportSkip records
     skip_counts = {"total_skipped": 0, "by_type": {}, "by_reason": {}}
     try:
         from flask_app.importer.pipeline.skip_service import ImportSkipService
+
         skip_service = ImportSkipService(db.session)
         skip_summary = skip_service.get_skip_summary(import_run.id)
         skip_counts = {
@@ -883,7 +900,7 @@ def _update_core_counts(
             },
             "by_reason": {},
         }
-    
+
     core_counts.update(
         {
             "rows_processed": summary.rows_processed,
@@ -904,6 +921,7 @@ def _update_core_counts(
     import_run.counts_json = counts
     # Flag the column as modified so SQLAlchemy persists it
     from sqlalchemy.orm import attributes
+
     attributes.flag_modified(import_run, "counts_json")
 
     metrics = dict(import_run.metrics_json or {})
@@ -1302,6 +1320,7 @@ def _record_survivorship_metrics(import_run, survivorship: SurvivorshipResult) -
     import_run.counts_json = counts
     # Flag the column as modified so SQLAlchemy persists it
     from sqlalchemy.orm import attributes
+
     attributes.flag_modified(import_run, "counts_json")
 
     metrics = dict(import_run.metrics_json or {})

@@ -1,0 +1,77 @@
+# Salesforce Session__c → Polaris Event mapping (v1.0)
+version: 1
+adapter: salesforce
+object: Session__c
+fields:
+  - source: Id
+    target: external_id
+    required: true
+  - source: Name
+    target: title
+    required: true
+  - source: Description__c
+    target: description
+  - source: Session_Type__c
+    target: event_type
+    transform: normalize_session_type
+  - source: Session_Status__c
+    target: event_status
+    transform: normalize_session_status
+  - source: Format__c
+    target: event_format
+    transform: normalize_event_format
+  - source: Start_Date_and_Time__c
+    target: start_date
+    transform: parse_datetime
+    required: true
+  - source: End_Date_and_Time__c
+    target: end_date
+    transform: parse_datetime
+  - source: Location_Information__c
+    target: location_address
+  - source: Available_Slots__c
+    target: capacity
+  - source: Cancellation_Reason__c
+    target: cancellation_reason
+    transform: normalize_cancellation_reason
+  - source: District__c
+    target: metadata.district_id
+  - source: School__c
+    target: metadata.school_id
+  - source: Parent_Account__c
+    target: metadata.parent_account_id
+  - source: Total_Requested_Volunteer_Jobs__c
+    target: metadata.total_requested_volunteer_jobs
+  - source: Non_Scheduled_Students_Count__c
+    target: metadata.non_scheduled_students_count
+  - source: Legacy_Skill_Covered_for_the_Session__c
+    target: metadata.legacy_skill_covered
+  - source: Legacy_Skills_Needed__c
+    target: metadata.legacy_skills_needed
+  - source: Requested_Skills__c
+    target: metadata.requested_skills
+  - source: Additional_Information__c
+    target: metadata.additional_information
+  - source: Session_Host__c
+    target: metadata.session_host
+  - source: SystemModstamp
+    target: metadata.source_modstamp
+    transform: parse_datetime
+  - source: LastModifiedDate
+    target: metadata.source_last_modified
+    transform: parse_datetime
+  - target: metadata.source_system
+    default: salesforce
+  - target: metadata.source_object
+    default: Session__c
+transforms:
+  normalize_session_type:
+    description: Normalize Salesforce Session_Type__c values to EventType enum values.
+  normalize_session_status:
+    description: Normalize Salesforce Session_Status__c values to EventStatus enum values.
+  normalize_event_format:
+    description: Normalize Salesforce Format__c values to EventFormat enum values.
+  normalize_cancellation_reason:
+    description: Normalize Salesforce Cancellation_Reason__c values to CancellationReason enum values.
+  parse_datetime:
+    description: Parse Salesforce datetime strings into ISO-8601 (UTC).

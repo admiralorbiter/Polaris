@@ -21,6 +21,7 @@ from flask_app.models.importer.schema import (
     DataQualityViolation,
     ExternalIdMap,
     StagingAffiliation,
+    StagingEvent,
     StagingOrganization,
     StagingRecordStatus,
     StagingVolunteer,
@@ -396,6 +397,52 @@ def run_minimal_dq(
                 )
             )
 
+    # Process events
+    event_rows = (
+        session.query(StagingEvent)
+        .filter(
+            StagingEvent.run_id == import_run.id,
+            StagingEvent.status == StagingRecordStatus.LANDED,
+        )
+        .order_by(StagingEvent.sequence_number)
+    )
+
+    for row in event_rows:
+        rows_evaluated += 1
+        payload = evaluate_event_payload(row)
+        violations = list(evaluate_event_rules(payload))
+        # Separate errors (blocking) from warnings (non-blocking)
+        error_violations = [v for v in violations if v.severity == DataQualitySeverity.ERROR]
+
+        # Only quarantine on ERROR severity violations
+        if not error_violations:
+            rows_validated += 1
+            row.status = StagingRecordStatus.VALIDATED
+            row.processed_at = now
+            row.last_error = None
+        else:
+            rows_quarantined += 1
+            all_violations.extend(error_violations)
+            row.status = StagingRecordStatus.QUARANTINED
+            row.last_error = error_violations[0].message
+            row.processed_at = now
+
+        # Log all violations (both errors and warnings) for tracking
+        for violation in violations:
+            session.add(
+                DataQualityViolation(
+                    run_id=import_run.id,
+                    staging_event_id=row.id,
+                    entity_type="event",
+                    record_key=_compose_event_record_key(row),
+                    rule_code=violation.rule_code,
+                    severity=violation.severity,
+                    status=DataQualityStatus.OPEN,
+                    message=violation.message,
+                    details_json=dict(violation.details),
+                )
+            )
+
     summary = DQProcessingSummary(
         rows_evaluated=rows_evaluated,
         rows_validated=rows_validated,
@@ -566,6 +613,135 @@ def evaluate_organization_rules(payload: Mapping[str, object | None]) -> Iterabl
     """
     applicable_rules: list[DQRule] = [
         OrganizationNameRequiredRule(),
+    ]
+    violations: list[DQResult] = []
+    for rule in applicable_rules:
+        violations.extend(rule.evaluate(payload))
+    return violations
+
+
+class EventTitleRequiredRule(DQRule):
+    """Ensure event title is present."""
+
+    def __init__(self, severity: DataQualitySeverity = DataQualitySeverity.ERROR) -> None:
+        super().__init__(
+            code="EVENT_TITLE_REQUIRED",
+            description="Event must include a title.",
+            severity=severity,
+        )
+
+    def evaluate(self, payload: Mapping[str, object | None]) -> Iterable[DQResult]:
+        title = _coerce_str(payload.get("title") or payload.get("Name"))
+        if title:
+            return []
+        return [
+            DQResult(
+                rule_code=self.code,
+                severity=self.severity,
+                message="Event missing required title field.",
+                details={"fields": ["title"]},
+            )
+        ]
+
+
+class EventStartDateRequiredRule(DQRule):
+    """Ensure event start date is present."""
+
+    def __init__(self, severity: DataQualitySeverity = DataQualitySeverity.ERROR) -> None:
+        super().__init__(
+            code="EVENT_START_DATE_REQUIRED",
+            description="Event must include a start date.",
+            severity=severity,
+        )
+
+    def evaluate(self, payload: Mapping[str, object | None]) -> Iterable[DQResult]:
+        start_date = payload.get("start_date") or payload.get("Start_Date_and_Time__c")
+        if start_date:
+            return []
+        return [
+            DQResult(
+                rule_code=self.code,
+                severity=self.severity,
+                message="Event missing required start_date field.",
+                details={"fields": ["start_date"]},
+            )
+        ]
+
+
+class EventDateValidationRule(DQRule):
+    """Ensure end date is after start date if both are present."""
+
+    def __init__(self, severity: DataQualitySeverity = DataQualitySeverity.ERROR) -> None:
+        super().__init__(
+            code="EVENT_DATE_VALIDATION",
+            description="Event end date must be after start date.",
+            severity=severity,
+        )
+
+    def evaluate(self, payload: Mapping[str, object | None]) -> Iterable[DQResult]:
+        start_date_str = payload.get("start_date") or payload.get("Start_Date_and_Time__c")
+        end_date_str = payload.get("end_date") or payload.get("End_Date_and_Time__c")
+
+        if not start_date_str or not end_date_str:
+            return []  # Skip validation if either date is missing
+
+        try:
+            start_dt = datetime.fromisoformat(str(start_date_str).replace("Z", "+00:00"))
+            end_dt = datetime.fromisoformat(str(end_date_str).replace("Z", "+00:00"))
+            if end_dt > start_dt:
+                return []
+            return [
+                DQResult(
+                    rule_code=self.code,
+                    severity=self.severity,
+                    message="Event end date must be after start date.",
+                    details={
+                        "fields": ["start_date", "end_date"],
+                        "start_date": str(start_date_str),
+                        "end_date": str(end_date_str),
+                    },
+                )
+            ]
+        except Exception:
+            # If date parsing fails, skip validation (format errors handled elsewhere)
+            return []
+
+
+def evaluate_event_payload(row: StagingEvent) -> MutableMapping[str, object | None]:
+    """Compose a payload for event DQ evaluation from a staging row."""
+    payload: MutableMapping[str, object | None] = {}
+    normalized = row.normalized_json or {}
+    raw = row.payload_json or {}
+
+    # Start with raw payload
+    payload.update(raw)
+
+    # Update with normalized
+    payload.update(normalized)
+
+    return payload
+
+
+def _compose_event_record_key(row: StagingEvent) -> str:
+    if row.external_id:
+        return str(row.external_id)
+    if row.source_record_id:
+        return str(row.source_record_id)
+    if row.sequence_number is not None:
+        return f"seq-{row.sequence_number}"
+    return f"row-{row.id}"
+
+
+def evaluate_event_rules(payload: Mapping[str, object | None]) -> Iterable[DQResult]:
+    """
+    Evaluate all applicable event DQ rules against a payload.
+
+    Returns violations found (empty if payload passes all rules).
+    """
+    applicable_rules: list[DQRule] = [
+        EventTitleRequiredRule(),
+        EventStartDateRequiredRule(),
+        EventDateValidationRule(),
     ]
     violations: list[DQResult] = []
     for rule in applicable_rules:
@@ -791,6 +967,7 @@ def _run_minimal_dq_dry_run(
 
 def _run_minimal_dq_from_staging(import_run) -> DQProcessingSummary:
     session = db.session
+    now = datetime.now(timezone.utc)
     rows_evaluated = 0
     rows_validated = 0
     rows_quarantined = 0
@@ -835,6 +1012,52 @@ def _run_minimal_dq_from_staging(import_run) -> DQProcessingSummary:
             all_violations.extend(violations)
         else:
             rows_validated += 1
+
+    # Process events
+    event_rows = (
+        session.query(StagingEvent)
+        .filter(
+            StagingEvent.run_id == import_run.id,
+            StagingEvent.status == StagingRecordStatus.LANDED,
+        )
+        .order_by(StagingEvent.sequence_number)
+    )
+
+    for row in event_rows:
+        rows_evaluated += 1
+        payload = evaluate_event_payload(row)
+        violations = list(evaluate_event_rules(payload))
+        # Separate errors (blocking) from warnings (non-blocking)
+        error_violations = [v for v in violations if v.severity == DataQualitySeverity.ERROR]
+
+        # Only quarantine on ERROR severity violations
+        if not error_violations:
+            rows_validated += 1
+            row.status = StagingRecordStatus.VALIDATED
+            row.processed_at = now
+            row.last_error = None
+        else:
+            rows_quarantined += 1
+            all_violations.extend(error_violations)
+            row.status = StagingRecordStatus.QUARANTINED
+            row.last_error = error_violations[0].message
+            row.processed_at = now
+
+        # Log all violations (both errors and warnings) for tracking
+        for violation in violations:
+            session.add(
+                DataQualityViolation(
+                    run_id=import_run.id,
+                    staging_event_id=row.id,
+                    entity_type="event",
+                    record_key=_compose_event_record_key(row),
+                    rule_code=violation.rule_code,
+                    severity=violation.severity,
+                    status=DataQualityStatus.OPEN,
+                    message=violation.message,
+                    details_json=dict(violation.details),
+                )
+            )
 
     summary = DQProcessingSummary(
         rows_evaluated=rows_evaluated,

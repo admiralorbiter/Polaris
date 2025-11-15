@@ -13,9 +13,11 @@ from flask import current_app, has_app_context
 from flask_app.models.base import db
 from flask_app.models.importer.schema import (
     CleanAffiliation,
+    CleanEvent,
     CleanOrganization,
     CleanVolunteer,
     StagingAffiliation,
+    StagingEvent,
     StagingOrganization,
     StagingRecordStatus,
     StagingVolunteer,
@@ -58,6 +60,18 @@ class CleanAffiliationPayload:
     external_id: str | None
     contact_external_id: str | None
     organization_external_id: str | None
+    checksum: str | None
+    normalized_payload: MutableMapping[str, object | None]
+
+
+@dataclass(frozen=True)
+class CleanEventPayload:
+    """Normalized payload used for core event inserts."""
+
+    staging_event_id: int | None
+    external_system: str
+    external_id: str | None
+    title: str
     checksum: str | None
     normalized_payload: MutableMapping[str, object | None]
 
@@ -483,6 +497,130 @@ def _update_clean_affiliation_counts(import_run, summary: CleanPromotionSummary)
 
     metrics = dict(import_run.metrics_json or {})
     clean_metrics = metrics.setdefault("clean", {}).setdefault("affiliations", {})
+    clean_metrics.update(
+        {
+            "rows_considered": summary.rows_considered,
+            "rows_promoted": summary.rows_promoted,
+            "rows_skipped": summary.rows_skipped,
+            "dry_run": summary.dry_run,
+        }
+    )
+    import_run.metrics_json = metrics
+
+
+def promote_clean_events(import_run, *, dry_run: bool = False) -> CleanPromotionSummary:
+    """
+    Promote validated staging events into the clean layer for further processing.
+    """
+
+    session = db.session
+    rows = (
+        session.query(StagingEvent)
+        .filter(
+            StagingEvent.run_id == import_run.id,
+            StagingEvent.status == StagingRecordStatus.VALIDATED,
+        )
+        .order_by(StagingEvent.sequence_number)
+    )
+
+    rows_considered = 0
+    rows_promoted = 0
+    rows_skipped = 0
+    candidates: list[CleanEventPayload] = []
+
+    for row in rows:
+        rows_considered += 1
+        payload = _build_event_payload(row)
+        if payload is None:
+            rows_skipped += 1
+            continue
+
+        if dry_run:
+            candidates.append(payload)
+            continue
+
+        if row.clean_record is not None:
+            rows_skipped += 1
+            continue
+
+        clean_row = CleanEvent(
+            run_id=import_run.id,
+            staging_event_id=row.id,
+            external_system=payload.external_system,
+            external_id=payload.external_id,
+            title=payload.title,
+            checksum=payload.checksum,
+            payload_json=dict(payload.normalized_payload),
+            promoted_at=datetime.now(timezone.utc),
+            load_action=None,
+        )
+        clean_row.staging_row = row
+        session.add(clean_row)
+        rows_promoted += 1
+
+    summary = CleanPromotionSummary(
+        rows_considered=rows_considered,
+        rows_promoted=rows_promoted,
+        rows_skipped=rows_skipped,
+        dry_run=dry_run,
+        candidates=tuple(candidates),
+    )
+    _update_clean_event_counts(import_run, summary)
+    if has_app_context():
+        current_app.logger.info(
+            "Importer run %s promoted %s clean events (skipped=%s, dry_run=%s)",
+            import_run.id,
+            summary.rows_promoted,
+            summary.rows_skipped,
+            summary.dry_run,
+        )
+    return summary
+
+
+def _build_event_payload(row: StagingEvent) -> CleanEventPayload | None:
+    normalized = dict(row.normalized_json or {})
+    raw = dict(row.payload_json or {})
+
+    title = _coerce_string(normalized.get("title") or raw.get("Name"))
+    if not title:
+        return None
+
+    external_system = (
+        _coerce_string(normalized.get("external_system") or raw.get("external_system")) or row.external_system
+    )
+    external_id = _coerce_string(normalized.get("external_id") or raw.get("external_id") or row.external_id)
+
+    normalized.update(
+        {
+            "title": title,
+        }
+    )
+
+    return CleanEventPayload(
+        staging_event_id=row.id,
+        external_system=external_system,
+        external_id=external_id,
+        title=title,
+        checksum=row.checksum,
+        normalized_payload=normalized,
+    )
+
+
+def _update_clean_event_counts(import_run, summary: CleanPromotionSummary) -> None:
+    counts = dict(import_run.counts_json or {})
+    clean_counts = counts.setdefault("clean", {}).setdefault("events", {})
+    clean_counts.update(
+        {
+            "rows_considered": summary.rows_considered,
+            "rows_promoted": summary.rows_promoted if not summary.dry_run else 0,
+            "rows_skipped": summary.rows_skipped,
+            "dry_run": summary.dry_run,
+        }
+    )
+    import_run.counts_json = counts
+
+    metrics = dict(import_run.metrics_json or {})
+    clean_metrics = metrics.setdefault("clean", {}).setdefault("events", {})
     clean_metrics.update(
         {
             "rows_considered": summary.rows_considered,

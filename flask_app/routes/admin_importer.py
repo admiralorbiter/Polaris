@@ -12,7 +12,18 @@ from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from pathlib import Path
 
-from flask import Blueprint, current_app, flash, jsonify, make_response, redirect, render_template, request, send_file, url_for
+from flask import (
+    Blueprint,
+    current_app,
+    flash,
+    jsonify,
+    make_response,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    url_for,
+)
 from flask_login import current_user, login_required
 
 from config.monitoring import ImporterMonitoring
@@ -380,9 +391,9 @@ def importer_salesforce_trigger():
     run_notes = _CONTROL_CHAR_PATTERN.sub(" ", run_notes)
 
     # Validate entity_type
-    if entity_type not in ("contacts", "organizations", "affiliations"):
+    if entity_type not in ("contacts", "organizations", "affiliations", "events"):
         return (
-            jsonify({"error": "entity_type must be 'contacts', 'organizations', or 'affiliations'."}),
+            jsonify({"error": "entity_type must be 'contacts', 'organizations', 'affiliations', or 'events'."}),
             HTTPStatus.BAD_REQUEST,
         )
 
@@ -434,6 +445,8 @@ def importer_salesforce_trigger():
         task_name = "importer.pipeline.ingest_salesforce_accounts"
     elif entity_type == "affiliations":
         task_name = "importer.pipeline.ingest_salesforce_affiliations"
+    elif entity_type == "events":
+        task_name = "importer.pipeline.ingest_salesforce_sessions"
     else:
         task_name = "importer.pipeline.ingest_salesforce_contacts"  # Default fallback
 
@@ -1623,16 +1636,14 @@ def importer_affiliation_quality():
         return jsonify({"error": "Importer is disabled."}), HTTPStatus.NOT_FOUND
 
     try:
-        from sqlalchemy import func, and_, or_
-        from sqlalchemy.orm import joinedload
-
         # Get all affiliation import runs (runs that have staging_affiliations or clean_affiliations)
         # We identify affiliation runs by checking staging_affiliations and clean_affiliations tables directly
-        from flask_app.models.importer.schema import StagingAffiliation, CleanAffiliation
+        from flask_app.models.importer.schema import CleanAffiliation, StagingAffiliation
+
         staging_run_ids = db.session.query(StagingAffiliation.run_id).distinct().all()
         clean_run_ids = db.session.query(CleanAffiliation.run_id).distinct().all()
         all_affiliation_run_ids = set([r[0] for r in staging_run_ids] + [r[0] for r in clean_run_ids])
-        
+
         affiliation_runs = []
         if all_affiliation_run_ids:
             affiliation_runs = (
@@ -1674,32 +1685,42 @@ def importer_affiliation_quality():
             # Count staging records
             staging_count = len(run.staging_affiliations) if run.staging_affiliations else 0
             clean_count = len(run.clean_affiliations) if run.clean_affiliations else 0
-            
+
             # Count skips for this run
             run_skips = [s for s in skip_records if s.run_id == run.id]
-            run_unmatched_contact = sum(1 for s in run_skips if (s.details_json or {}).get("missing_reference") == "contact")
-            run_unmatched_org = sum(1 for s in run_skips if (s.details_json or {}).get("missing_reference") == "organization")
+            run_unmatched_contact = sum(
+                1 for s in run_skips if (s.details_json or {}).get("missing_reference") == "contact"
+            )
+            run_unmatched_org = sum(
+                1 for s in run_skips if (s.details_json or {}).get("missing_reference") == "organization"
+            )
             run_unmatched_total = len(run_skips)
-            
+
             # Count successfully matched (clean records that were loaded)
-            run_matched = sum(1 for ca in run.clean_affiliations if ca.core_contact_organization_id is not None) if run.clean_affiliations else 0
-            
+            run_matched = (
+                sum(1 for ca in run.clean_affiliations if ca.core_contact_organization_id is not None)
+                if run.clean_affiliations
+                else 0
+            )
+
             run_attempted = max(staging_count, clean_count)
             total_attempted += run_attempted
             total_matched += run_matched
 
-            run_stats.append({
-                "run_id": run.id,
-                "started_at": run.started_at.isoformat() if run.started_at else None,
-                "finished_at": run.finished_at.isoformat() if run.finished_at else None,
-                "status": run.status.value,
-                "attempted": run_attempted,
-                "matched": run_matched,
-                "unmatched_contact": run_unmatched_contact,
-                "unmatched_org": run_unmatched_org,
-                "unmatched_total": run_unmatched_total,
-                "match_rate": (run_matched / run_attempted * 100) if run_attempted > 0 else 0,
-            })
+            run_stats.append(
+                {
+                    "run_id": run.id,
+                    "started_at": run.started_at.isoformat() if run.started_at else None,
+                    "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+                    "status": run.status.value,
+                    "attempted": run_attempted,
+                    "matched": run_matched,
+                    "unmatched_contact": run_unmatched_contact,
+                    "unmatched_org": run_unmatched_org,
+                    "unmatched_total": run_unmatched_total,
+                    "match_rate": (run_matched / run_attempted * 100) if run_attempted > 0 else 0,
+                }
+            )
 
         total_unmatched = total_unmatched_contact + total_unmatched_org
         overall_match_rate = (total_matched / total_attempted * 100) if total_attempted > 0 else 0

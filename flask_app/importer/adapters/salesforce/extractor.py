@@ -97,6 +97,32 @@ DEFAULT_AFFILIATION_FIELDS: Sequence[str] = (
     "IsDeleted",
 )
 
+DEFAULT_SESSION_FIELDS: Sequence[str] = (
+    "Id",
+    "Name",
+    "Session_Type__c",
+    "Format__c",
+    "Start_Date_and_Time__c",
+    "End_Date_and_Time__c",
+    "Session_Status__c",
+    "Location_Information__c",
+    "Description__c",
+    "Cancellation_Reason__c",
+    "Non_Scheduled_Students_Count__c",
+    "District__c",
+    "School__c",
+    "Legacy_Skill_Covered_for_the_Session__c",
+    "Legacy_Skills_Needed__c",
+    "Requested_Skills__c",
+    "Additional_Information__c",
+    "Total_Requested_Volunteer_Jobs__c",
+    "Available_Slots__c",
+    "Parent_Account__c",
+    "Session_Host__c",
+    "SystemModstamp",
+    "LastModifiedDate",
+)
+
 SALESFORCE_API_VERSION = os.environ.get("SALESFORCE_API_VERSION", "v57.0")
 
 
@@ -219,6 +245,31 @@ def build_affiliations_soql(
     limit_sql = f" LIMIT {int(limit)}" if limit is not None else ""
     order_sql = " ORDER BY SystemModstamp ASC"
     return f"SELECT {select_clause} FROM npe5__Affiliation__c{where_sql}{order_sql}{limit_sql}"
+
+
+def build_sessions_soql(
+    *,
+    fields: Sequence[str] | None = None,
+    last_modstamp: datetime | None = None,
+    limit: int | None = None,
+) -> str:
+    """Construct the SOQL used for incremental Session__c exports."""
+
+    field_list = tuple(dict.fromkeys(fields or DEFAULT_SESSION_FIELDS))
+    select_clause = ", ".join(field_list)
+    where_clauses: List[str] = []
+
+    # Filter out Draft status and Connector Session type as specified
+    where_clauses.append("Session_Status__c != 'Draft'")
+    where_clauses.append("Session_Type__c != 'Connector Session'")
+
+    if last_modstamp is not None:
+        where_clauses.append(f"SystemModstamp > {_format_modstamp(last_modstamp)}")
+
+    where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+    limit_sql = f" LIMIT {int(limit)}" if limit is not None else ""
+    order_sql = " ORDER BY Start_Date_and_Time__c DESC"
+    return f"SELECT {select_clause} FROM Session__c{where_sql}{order_sql}{limit_sql}"
 
 
 @dataclass(frozen=True)

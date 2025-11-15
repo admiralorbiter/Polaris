@@ -16,6 +16,7 @@ from flask_app.importer.adapters.salesforce.extractor import (
     build_accounts_soql,
     build_affiliations_soql,
     build_contacts_soql,
+    build_sessions_soql,
 )
 from flask_app.importer.mapping import (
     FieldImportStats,
@@ -23,6 +24,7 @@ from flask_app.importer.mapping import (
     get_active_salesforce_account_mapping,
     get_active_salesforce_affiliation_mapping,
     get_active_salesforce_mapping,
+    get_active_salesforce_session_mapping,
 )
 from flask_app.importer.metrics import record_salesforce_batch, record_salesforce_unmapped
 from flask_app.importer.pipeline.staging import (
@@ -37,6 +39,7 @@ from flask_app.models.importer.schema import (
     ImporterWatermark,
     ImportRun,
     StagingAffiliation,
+    StagingEvent,
     StagingOrganization,
     StagingVolunteer,
 )
@@ -494,6 +497,246 @@ def _update_import_run_accounts(
     # Store field-level statistics
     if field_stats:
         field_stats_data = metrics.setdefault("field_stats", {}).setdefault("organizations", {})
+        source_fields_data = field_stats_data.setdefault("source_fields", {})
+        target_fields_data = field_stats_data.setdefault("target_fields", {})
+        unmapped_fields_data = field_stats_data.setdefault("unmapped_source_fields", {})
+
+        # Store source field statistics
+        for source_field, stats in field_stats.items():
+            source_fields_data[source_field] = {
+                "target": stats.target_field,
+                "records_with_value": stats.records_with_value,
+                "records_mapped": stats.records_mapped,
+                "records_transformed": stats.records_transformed,
+                "records_failed_transform": stats.records_failed_transform,
+                "records_used_default": stats.records_used_default,
+                "total_records_processed": stats.total_records_processed,
+                "population_rate": stats.population_rate,
+            }
+
+        # Store target field statistics
+        if target_contributors:
+            total_records = summary.records_received
+            for target_field, source_fields in target_contributors.items():
+                # Calculate completeness for target field
+                total_populated = 0
+                for source_field in source_fields:
+                    if source_field in field_stats:
+                        total_populated += field_stats[source_field].records_mapped
+
+                target_fields_data[target_field] = {
+                    "source_fields": sorted(list(source_fields)),
+                    "total_records_populated": total_populated,
+                    "total_records_processed": total_records,
+                    "completeness_rate": total_populated / total_records if total_records > 0 else 0.0,
+                }
+
+        # Store unmapped fields
+        for unmapped_field, count in summary.unmapped_counts.items():
+            unmapped_fields_data[unmapped_field] = {
+                "records_with_value": count,
+                "total_records_processed": summary.records_received,
+            }
+
+    import_run.metrics_json = metrics
+
+
+def ingest_salesforce_sessions(
+    *,
+    import_run: ImportRun,
+    extractor: SalesforceExtractor,
+    watermark: ImporterWatermark,
+    staging_batch_size: int,
+    dry_run: bool,
+    logger: logging.Logger,
+    record_limit: int | None = None,
+) -> SalesforceIngestSummary:
+    """
+    Stream Salesforce Sessions into staging and update watermark metadata.
+    """
+
+    last_modstamp = watermark.last_successful_modstamp
+    # Ensure last_modstamp is timezone-aware for comparison
+    if last_modstamp is not None and last_modstamp.tzinfo is None:
+        last_modstamp = last_modstamp.replace(tzinfo=timezone.utc)
+    soql = build_sessions_soql(last_modstamp=last_modstamp, limit=record_limit)
+    batches_processed = 0
+    records_received = 0
+    records_staged = 0
+    header: tuple[str, ...] = ()
+    max_modstamp: datetime | None = last_modstamp
+    sequence_number = 0
+    staging_buffer: list[StagingEvent] = []
+    unmapped_counter: Counter[str] = Counter()
+    transform_errors: list[str] = []
+
+    mapping_spec = get_active_salesforce_session_mapping()
+    transformer = SalesforceMappingTransformer(mapping_spec)
+
+    # Aggregate field statistics across all records
+    aggregated_field_stats: dict[str, FieldImportStats] = {}
+    target_field_contributors: dict[str, set[str]] = defaultdict(set)
+
+    def flush_buffer():
+        nonlocal records_staged
+        if dry_run or not staging_buffer:
+            staging_buffer.clear()
+            return
+        db.session.add_all(staging_buffer)
+        _commit_staging_batch()
+        records_staged += len(staging_buffer)
+        staging_buffer.clear()
+
+    for batch in extractor.extract_batches(soql):
+        batches_processed += 1
+        if not header and batch.records:
+            header = tuple(batch.records[0].keys())
+        batch_start = time.perf_counter()
+        for record in batch.records:
+            records_received += 1
+            modstamp = _parse_salesforce_datetime(record.get("SystemModstamp"))
+            if modstamp:
+                # Ensure both datetimes are timezone-aware before comparison
+                if max_modstamp is not None and max_modstamp.tzinfo is None:
+                    max_modstamp = max_modstamp.replace(tzinfo=timezone.utc)
+                if modstamp.tzinfo is None:
+                    modstamp = modstamp.replace(tzinfo=timezone.utc)
+                if max_modstamp is None or modstamp > max_modstamp:
+                    max_modstamp = modstamp
+            transform_result = transformer.transform(record)
+
+            # Calculate duration from start_date and end_date if both are present
+            canonical = transform_result.canonical or {}
+            start_date_str = canonical.get("start_date")
+            end_date_str = canonical.get("end_date")
+            if start_date_str and end_date_str:
+                try:
+                    start_dt = datetime.fromisoformat(start_date_str.replace("Z", "+00:00"))
+                    end_dt = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
+                    delta = end_dt - start_dt
+                    canonical["duration"] = int(delta.total_seconds() / 60)
+                except Exception:
+                    pass  # Duration calculation failed, leave it unset
+
+            # Aggregate field statistics
+            for source_field, stats in transform_result.field_stats.items():
+                if source_field not in aggregated_field_stats:
+                    aggregated_field_stats[source_field] = FieldImportStats(
+                        source_field=stats.source_field,
+                        target_field=stats.target_field,
+                    )
+                agg_stats = aggregated_field_stats[source_field]
+                agg_stats.records_with_value += stats.records_with_value
+                agg_stats.records_mapped += stats.records_mapped
+                agg_stats.records_transformed += stats.records_transformed
+                agg_stats.records_failed_transform += stats.records_failed_transform
+                agg_stats.records_used_default += stats.records_used_default
+                agg_stats.total_records_processed += stats.total_records_processed
+
+                # Track target field contributors
+                if stats.target_field:
+                    target_field_contributors[stats.target_field].add(source_field)
+
+            for field_name in transform_result.unmapped_fields:
+                unmapped_counter[field_name] += 1
+            if transform_result.errors:
+                transform_errors.extend(transform_result.errors)
+            if dry_run:
+                continue
+            sequence_number += 1
+            normalized = canonical
+            staging_buffer.append(
+                StagingEvent(
+                    run_id=import_run.id,
+                    sequence_number=sequence_number,
+                    source_record_id=resolve_source_record_id(record.get("Id"), sequence_number),
+                    external_system="salesforce",
+                    external_id=record.get("Id") or None,
+                    payload_json=dict(record),
+                    normalized_json=normalized,
+                    checksum=compute_checksum(normalized),
+                )
+            )
+            if len(staging_buffer) >= staging_batch_size:
+                flush_buffer()
+        flush_buffer()
+        duration = time.perf_counter() - batch_start
+        record_salesforce_batch(status="success", duration_seconds=duration, record_count=len(batch.records))
+        logger.info(
+            "Salesforce batch ingested",
+            extra={
+                "importer_run_id": import_run.id,
+                "salesforce_job_id": batch.job_id,
+                "salesforce_batch_sequence": batch.sequence,
+                "salesforce_batch_records": len(batch.records),
+                "salesforce_batch_locator": batch.locator,
+                "salesforce_batch_duration_seconds": round(duration, 3),
+            },
+        )
+
+    summary = SalesforceIngestSummary(
+        job_id=batch.job_id if batches_processed else "n/a",
+        batches_processed=batches_processed,
+        records_received=records_received,
+        records_staged=records_staged if not dry_run else 0,
+        dry_run=dry_run,
+        header=header,
+        max_modstamp=max_modstamp,
+        unmapped_counts=dict(unmapped_counter),
+        errors=transform_errors,
+    )
+    if unmapped_counter:
+        for field_name, count in unmapped_counter.items():
+            record_salesforce_unmapped(field_name, count)
+    _update_import_run_events(
+        import_run, summary, field_stats=aggregated_field_stats, target_contributors=target_field_contributors
+    )
+    if not dry_run and max_modstamp:
+        watermark.last_successful_modstamp = max_modstamp.astimezone(timezone.utc)
+        watermark.last_run_id = import_run.id
+        watermark.metadata_json = {
+            "job_id": summary.job_id,
+            "batches_processed": summary.batches_processed,
+            "records_received": summary.records_received,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+    return summary
+
+
+def _update_import_run_events(
+    import_run: ImportRun,
+    summary: SalesforceIngestSummary,
+    *,
+    field_stats: dict[str, FieldImportStats] | None = None,
+    target_contributors: dict[str, set[str]] | None = None,
+) -> None:
+    staging_summary = StagingSummary(
+        rows_processed=summary.records_received,
+        rows_staged=summary.records_staged,
+        rows_skipped_blank=0,
+        header=summary.header,
+        dry_run=summary.dry_run,
+        dry_run_rows=(),
+    )
+    update_staging_counts(import_run, staging_summary, entity_type="events")
+    metrics = dict(import_run.metrics_json or {})
+    salesforce_metrics = metrics.setdefault("salesforce", {})
+    salesforce_metrics.update(
+        {
+            "job_id": summary.job_id,
+            "batches_processed": summary.batches_processed,
+            "records_received": summary.records_received,
+            "records_staged": summary.records_staged,
+            "dry_run": summary.dry_run,
+            "max_system_modstamp": summary.max_modstamp.isoformat() if summary.max_modstamp else None,
+            "unmapped_fields": dict(summary.unmapped_counts),
+            "transform_errors": list(summary.errors),
+        }
+    )
+
+    # Store field-level statistics
+    if field_stats:
+        field_stats_data = metrics.setdefault("field_stats", {}).setdefault("events", {})
         source_fields_data = field_stats_data.setdefault("source_fields", {})
         target_fields_data = field_stats_data.setdefault("target_fields", {})
         unmapped_fields_data = field_stats_data.setdefault("unmapped_source_fields", {})

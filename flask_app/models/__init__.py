@@ -51,11 +51,10 @@ from .event import (
     RegistrationStatus,
 )
 from .feature_flag import OrganizationFeatureFlag, SystemFeatureFlag
-from .organization import Organization, OrganizationAddress
-from .role import Permission, Role, RolePermission, UserOrganization
-from .user import User
 from .importer import (
     ChangeLogEntry,
+    CleanEvent,
+    CleanOrganization,
     CleanVolunteer,
     DataQualitySeverity,
     DataQualityStatus,
@@ -63,15 +62,20 @@ from .importer import (
     DedupeDecision,
     DedupeSuggestion,
     ExternalIdMap,
+    ImporterWatermark,
     ImportRun,
     ImportRunStatus,
     ImportSkip,
     ImportSkipType,
-    ImporterWatermark,
     MergeLog,
+    StagingEvent,
+    StagingOrganization,
     StagingRecordStatus,
     StagingVolunteer,
 )
+from .organization import Organization, OrganizationAddress
+from .role import Permission, Role, RolePermission, UserOrganization
+from .user import User
 
 __all__ = [
     "db",
@@ -137,6 +141,8 @@ __all__ = [
     "ImportRun",
     "ImportRunStatus",
     "StagingVolunteer",
+    "StagingOrganization",
+    "StagingEvent",
     "StagingRecordStatus",
     "DataQualityViolation",
     "DataQualitySeverity",
@@ -147,6 +153,8 @@ __all__ = [
     "MergeLog",
     "ChangeLogEntry",
     "CleanVolunteer",
+    "CleanOrganization",
+    "CleanEvent",
     "ImportSkip",
     "ImportSkipType",
     "ImporterWatermark",

@@ -319,6 +319,71 @@ def test_salesforce_trigger_enqueues_run(logged_in_admin, app, tmp_path):
     assert log_details["reset_watermark"] is True
 
 
+def test_salesforce_trigger_enqueues_events_run(logged_in_admin, app, tmp_path):
+    """Test that Salesforce trigger creates and enqueues events import run."""
+    client, admin_user = logged_in_admin
+    _enable_importer(app, tmp_path / "uploads", adapters=("csv", "salesforce"))
+
+    async_result = Mock()
+    async_result.id = "celery-task-salesforce-events"
+    celery_app = Mock()
+    celery_app.send_task.return_value = async_result
+
+    readiness_snapshot = {"salesforce": {"status": "ready"}}
+
+    with patch(
+        "flask_app.routes.admin_importer._get_salesforce_adapter_state",
+        return_value=(True, True, []),
+    ), patch(
+        "flask_app.routes.admin_importer.get_adapter_readiness",
+        return_value=readiness_snapshot,
+    ), patch(
+        "flask_app.routes.admin_importer.get_celery_app",
+        return_value=celery_app,
+    ), patch(
+        "flask_app.routes.admin_importer.ImporterMonitoring.record_run_enqueued"
+    ) as record_metric, patch(
+        "flask_app.routes.admin_importer._reset_salesforce_watermark"
+    ) as reset_watermark, patch(
+        "flask_app.routes.admin_importer._record_salesforce_trigger"
+    ) as record_trigger:
+        response = client.post(
+            "/admin/imports/salesforce/trigger",
+            json={
+                "dry_run": False,
+                "entity_type": "events",
+                "record_limit": 1000,
+                "reset_watermark": False,
+            },
+        )
+
+    assert response.status_code == 202
+    payload = response.get_json()
+    assert payload["status"] == "queued"
+    assert payload["task_id"] == async_result.id
+    celery_app.send_task.assert_called_once()
+    # Check task name (first positional arg or 'task' keyword)
+    task_name = (
+        celery_app.send_task.call_args[0][0]
+        if celery_app.send_task.call_args[0]
+        else celery_app.send_task.call_args.kwargs.get("task")
+    )
+    assert task_name == "importer.pipeline.ingest_salesforce_sessions"
+    sent_kwargs = celery_app.send_task.call_args.kwargs.get("kwargs", {})
+    assert sent_kwargs == {"run_id": payload["run_id"], "dry_run": False, "record_limit": 1000}
+
+    record_metric.assert_called_once_with(user_id=admin_user.id, dry_run=False)
+    record_trigger.assert_called_once_with(admin_user.id)
+
+    run = db.session.get(ImportRun, payload["run_id"])
+    assert run is not None
+    assert run.adapter == "salesforce"
+    assert run.dry_run is False
+    assert run.ingest_params_json["entity_type"] == "events"
+    assert run.ingest_params_json["record_limit"] == 1000
+    assert run.triggered_by_user_id == admin_user.id
+
+
 def test_salesforce_trigger_rate_limit(logged_in_admin, app, tmp_path):
     client, _ = logged_in_admin
     _enable_importer(app, tmp_path / "uploads", adapters=("csv", "salesforce"))

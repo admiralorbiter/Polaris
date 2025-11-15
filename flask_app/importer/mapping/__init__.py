@@ -244,6 +244,51 @@ def get_active_salesforce_account_mapping() -> MappingSpec:
     return spec
 
 
+def get_active_salesforce_session_mapping() -> MappingSpec:
+    """
+    Load the configured Salesforce Session mapping spec (cached per app context).
+    Cache is invalidated if the file modification time or checksum changes.
+    """
+
+    config_path = current_app.config.get("IMPORTER_SALESFORCE_SESSION_MAPPING_PATH")
+    if not config_path:
+        # Default to salesforce_session_v1.yaml in config/mappings
+        # Use instance_path to find project root (go up from instance/ to project root)
+        instance_path = Path(current_app.instance_path)
+        # instance_path is typically <project_root>/instance, so parent is project root
+        config_path = (instance_path.parent / "config" / "mappings" / "salesforce_session_v1.yaml").resolve()
+    else:
+        config_path = Path(config_path)
+
+    if not config_path.exists():
+        raise MappingLoadError(f"Salesforce Session mapping file not found at {config_path}")
+
+    cache_key = "_importer_sf_session_mapping_cache"
+    cache: dict[str, tuple[MappingSpec, float, str]] = current_app.extensions.setdefault(cache_key, {})
+    cache_key_lookup = str(config_path)
+
+    # Check if we have a cached spec and if the file has changed
+    cached_entry = cache.get(cache_key_lookup)
+    if cached_entry:
+        cached_spec, cached_mtime, cached_checksum = cached_entry
+        current_mtime = config_path.stat().st_mtime
+        # Reload if file modification time changed
+        if current_mtime != cached_mtime:
+            # File changed, reload
+            current_app.logger.debug(f"Mapping file changed, reloading: {config_path}")
+            spec = load_mapping(config_path)
+            cache[cache_key_lookup] = (spec, current_mtime, spec.checksum)
+            return spec
+        # File hasn't changed, use cached spec
+        return cached_spec
+
+    # No cache entry, load and cache
+    spec = load_mapping(config_path)
+    mtime = config_path.stat().st_mtime
+    cache[cache_key_lookup] = (spec, mtime, spec.checksum)
+    return spec
+
+
 def _compute_checksum(payload: Mapping[str, Any]) -> str:
     serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
@@ -768,6 +813,166 @@ def _build_transform_registry() -> Dict[str, Any]:
         # Default to OTHER for unmapped types
         return "other"
 
+    def normalize_session_type(value: Any) -> str | None:
+        """Normalize Salesforce Session_Type__c values to EventType enum values."""
+        if not value:
+            return None
+        text = str(value).strip().lower()
+        if not text:
+            return None
+
+        # Mapping of Salesforce Session_Type__c values to EventType enum values
+        # EventType enum: WORKSHOP, MEETING, TRAINING, FUNDRAISER, COMMUNITY_EVENT, OTHER
+        mapping = {
+            # Campus Visit -> COMMUNITY_EVENT
+            "campus visit": "community_event",
+            "campus": "community_event",
+            # Career Speaker -> COMMUNITY_EVENT
+            "career speaker": "community_event",
+            "career speakers": "community_event",
+            "speaker": "community_event",
+            # Workplace Visit -> COMMUNITY_EVENT
+            "workplace visit": "community_event",
+            "workplace": "community_event",
+            # HealthStart -> COMMUNITY_EVENT
+            "healthstart": "community_event",
+            "health start": "community_event",
+            # BFI -> COMMUNITY_EVENT
+            "bfi": "community_event",
+            # Career Fair -> COMMUNITY_EVENT
+            "career fair": "community_event",
+            "careerfair": "community_event",
+            # Workshop variants
+            "workshop": "workshop",
+            "workshops": "workshop",
+            # Meeting variants
+            "meeting": "meeting",
+            "meetings": "meeting",
+            # Training variants
+            "training": "training",
+            "trainings": "training",
+            # Fundraiser variants
+            "fundraiser": "fundraiser",
+            "fundraisers": "fundraiser",
+            "fund raising": "fundraiser",
+            # Other (default)
+            "other": "other",
+        }
+
+        # Direct lookup
+        normalized = mapping.get(text)
+        if normalized:
+            return normalized
+
+        # Fuzzy matching for partial matches
+        for key, enum_value in mapping.items():
+            if key in text or text in key:
+                return enum_value
+
+        # Default to OTHER for unmapped types
+        return "other"
+
+    def normalize_session_status(value: Any) -> str | None:
+        """Normalize Salesforce Session_Status__c values to EventStatus enum values."""
+        if not value:
+            return None
+        text = str(value).strip().lower()
+        if not text:
+            return None
+
+        # Mapping of Salesforce Session_Status__c values to EventStatus enum values
+        # EventStatus enum: DRAFT, REQUESTED, CONFIRMED, COMPLETED, CANCELLED
+        mapping = {
+            "draft": "draft",
+            "requested": "requested",
+            "confirmed": "confirmed",
+            "completed": "completed",
+            "complete": "completed",
+            "cancelled": "cancelled",
+            "canceled": "cancelled",
+            "cancellation": "cancelled",
+        }
+
+        # Direct lookup
+        normalized = mapping.get(text)
+        if normalized:
+            return normalized
+
+        # Fuzzy matching for partial matches
+        for key, enum_value in mapping.items():
+            if key in text or text in key:
+                return enum_value
+
+        # Default to REQUESTED for unmapped statuses
+        return "requested"
+
+    def normalize_event_format(value: Any) -> str | None:
+        """Normalize Salesforce Format__c values to EventFormat enum values."""
+        if not value:
+            return None
+        text = str(value).strip().lower()
+        if not text:
+            return None
+
+        # Mapping of Salesforce Format__c values to EventFormat enum values
+        # EventFormat enum: IN_PERSON, VIRTUAL, HYBRID
+        mapping = {
+            "in-person": "in_person",
+            "in person": "in_person",
+            "in_person": "in_person",
+            "virtual": "virtual",
+            "online": "virtual",
+            "remote": "virtual",
+            "hybrid": "hybrid",
+        }
+
+        # Direct lookup
+        normalized = mapping.get(text)
+        if normalized:
+            return normalized
+
+        # Fuzzy matching for partial matches
+        for key, enum_value in mapping.items():
+            if key in text or text in key:
+                return enum_value
+
+        # Default to IN_PERSON for unmapped formats
+        return "in_person"
+
+    def normalize_cancellation_reason(value: Any) -> str | None:
+        """Normalize Salesforce Cancellation_Reason__c values to CancellationReason enum values."""
+        if not value:
+            return None
+        text = str(value).strip().lower()
+        if not text:
+            return None
+
+        # Mapping of Salesforce Cancellation_Reason__c values to CancellationReason enum values
+        # CancellationReason enum: WEATHER, LOW_ATTENDANCE, EMERGENCY, SCHEDULING_CONFLICT, OTHER
+        mapping = {
+            "weather": "weather",
+            "low attendance": "low_attendance",
+            "low_attendance": "low_attendance",
+            "emergency": "emergency",
+            "scheduling conflict": "scheduling_conflict",
+            "scheduling_conflict": "scheduling_conflict",
+            "conflict": "scheduling_conflict",
+            "other": "other",
+        }
+
+        # Direct lookup
+        normalized = mapping.get(text)
+        if normalized:
+            return normalized
+
+        # Fuzzy matching for partial matches
+        for key, enum_value in mapping.items():
+            if key in text or text in key:
+                return enum_value
+
+        # Default to OTHER for unmapped reasons
+        return "other"
+
     return {
         "normalize_phone": normalize_phone,
         "parse_date": parse_date,
@@ -777,6 +982,10 @@ def _build_transform_registry() -> Dict[str, Any]:
         "normalize_education_level": normalize_education_level,
         "normalize_age_group": normalize_age_group,
         "normalize_organization_type": normalize_organization_type,
+        "normalize_session_type": normalize_session_type,
+        "normalize_session_status": normalize_session_status,
+        "normalize_event_format": normalize_event_format,
+        "normalize_cancellation_reason": normalize_cancellation_reason,
     }
 
 

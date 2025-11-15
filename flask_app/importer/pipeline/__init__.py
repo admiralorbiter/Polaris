@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from .clean import (
     CleanAffiliationPayload,
+    CleanEventPayload,
     CleanOrganizationPayload,
     CleanPromotionSummary,
     CleanVolunteerPayload,
     promote_clean_affiliations,
+    promote_clean_events,
     promote_clean_organizations,
     promote_clean_volunteers,
 )
@@ -25,6 +27,7 @@ from .staging import (
 
 __all__ = [
     "CleanAffiliationPayload",
+    "CleanEventPayload",
     "CleanOrganizationPayload",
     "CleanPromotionSummary",
     "CleanVolunteerPayload",
@@ -38,6 +41,7 @@ __all__ = [
     "evaluate_rules",
     "load_core_volunteers",
     "promote_clean_affiliations",
+    "promote_clean_events",
     "promote_clean_organizations",
     "promote_clean_volunteers",
     "run_minimal_dq",

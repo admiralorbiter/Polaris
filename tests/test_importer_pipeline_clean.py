@@ -1,5 +1,14 @@
-from flask_app.importer.pipeline.clean import promote_clean_volunteers
-from flask_app.models import CleanVolunteer, ImportRun, ImportRunStatus, StagingRecordStatus, StagingVolunteer, db
+from flask_app.importer.pipeline.clean import promote_clean_events, promote_clean_volunteers
+from flask_app.models import (
+    CleanEvent,
+    CleanVolunteer,
+    ImportRun,
+    ImportRunStatus,
+    StagingEvent,
+    StagingRecordStatus,
+    StagingVolunteer,
+    db,
+)
 
 
 def _make_import_run() -> ImportRun:
@@ -86,3 +95,93 @@ def test_promote_clean_volunteers_dry_run(app):
     metrics = run.metrics_json["clean"]["volunteers"]
     assert metrics["rows_promoted"] == 0
 
+
+def _make_event_import_run() -> ImportRun:
+    run = ImportRun(
+        source="salesforce",
+        adapter="salesforce",
+        status=ImportRunStatus.PENDING,
+        dry_run=False,
+        ingest_params_json={"entity_type": "events"},
+    )
+    db.session.add(run)
+    db.session.commit()
+    return db.session.get(ImportRun, run.id)
+
+
+def _make_event_staging_row(
+    run: ImportRun,
+    *,
+    status: StagingRecordStatus,
+    title: str,
+    sequence_number: int = 1,
+) -> StagingEvent:
+    row = StagingEvent(
+        run_id=run.id,
+        sequence_number=sequence_number,
+        source_record_id=f"SF-{sequence_number}",
+        external_system="salesforce",
+        external_id=f"a1hUV00000{sequence_number}",
+        payload_json={
+            "Id": f"a1hUV00000{sequence_number}",
+            "Name": title,
+            "Start_Date_and_Time__c": "2026-03-20T15:30:00.000Z",
+        },
+        normalized_json={
+            "title": title,
+            "start_date": "2026-03-20T15:30:00.000Z",
+            "end_date": "2026-03-20T17:30:00.000Z",
+        },
+        checksum=f"hash-{sequence_number}",
+        status=status,
+    )
+    db.session.add(row)
+    db.session.commit()
+    return db.session.get(StagingEvent, row.id)
+
+
+def test_promote_clean_events_creates_records(app):
+    """Test that promote_clean_events creates clean event records."""
+    run = _make_event_import_run()
+    _make_event_staging_row(run, status=StagingRecordStatus.VALIDATED, title="Test Event 1", sequence_number=1)
+    _make_event_staging_row(
+        run,
+        status=StagingRecordStatus.QUARANTINED,
+        title="Test Event 2",
+        sequence_number=2,
+    )
+
+    summary = promote_clean_events(run, dry_run=False)
+    db.session.commit()
+
+    clean_rows = CleanEvent.query.filter_by(run_id=run.id).all()
+    assert summary.rows_considered == 1
+    assert summary.rows_promoted == 1
+    assert summary.rows_skipped == 0
+    assert len(clean_rows) == 1
+    assert clean_rows[0].title == "Test Event 1"
+
+    counts = run.counts_json["clean"]["events"]
+    assert counts["rows_promoted"] == 1
+    metrics = run.metrics_json["clean"]["events"]
+    assert metrics["rows_promoted"] == 1
+
+
+def test_promote_clean_events_dry_run(app):
+    """Test that promote_clean_events respects dry_run flag."""
+    run = _make_event_import_run()
+    _make_event_staging_row(run, status=StagingRecordStatus.VALIDATED, title="Test Event")
+
+    summary = promote_clean_events(run, dry_run=True)
+    db.session.commit()
+
+    assert CleanEvent.query.count() == 0
+    assert summary.rows_promoted == 0
+    assert summary.rows_considered == 1
+    assert summary.dry_run is True
+    assert len(summary.candidates) == 1
+    counts = run.counts_json["clean"]["events"]
+    assert counts["rows_promoted"] == 0
+    assert counts["dry_run"] is True
+    metrics = run.metrics_json["clean"]["events"]
+    assert metrics["rows_promoted"] == 0
